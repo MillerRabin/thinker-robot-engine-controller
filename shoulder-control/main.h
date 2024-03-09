@@ -1,11 +1,3 @@
-/**
- * RP2040 FreeRTOS Template - App #4
- *
- * @copyright 2023, Tony Smith (@smittytone)
- * @version   1.4.2
- * @licence   MIT
- *
- */
 #ifndef MAIN_H
 #define MAIN_H
 

@@ -1,4 +1,3 @@
-// initialize I2C
 #include <stdio.h>
 
 #include "hardware/i2c.h"

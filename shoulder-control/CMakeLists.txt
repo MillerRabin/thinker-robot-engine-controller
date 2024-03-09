@@ -7,16 +7,9 @@ add_compile_definitions(BUILD_NUM=${BUILD_NUMBER})
 
 # Include app source code file(s)
 add_executable(${APP_SHOULDER_NAME}
-    ${APP_SHOULDER_SRC_DIRECTORY}/main.cpp    
-    ${APP_SHOULDER_SRC_DIRECTORY}/wit_c_sdk.c
-    ${APP_SHOULDER_SRC_DIRECTORY}/VL53L0X/Pico_VL53L0X.cpp
-    ${APP_SHOULDER_SRC_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_calibration.cpp
-    ${APP_SHOULDER_SRC_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_core.cpp
-    ${APP_SHOULDER_SRC_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_ranging.cpp
-    ${APP_SHOULDER_SRC_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_strings.cpp
-    ${APP_SHOULDER_SRC_DIRECTORY}/VL53L0X/core/src/vl53l0x_api.cpp
-    ${APP_SHOULDER_SRC_DIRECTORY}/VL53L0X/platform/src/vl53l0x_i2c_comms.cpp
-    ${APP_SHOULDER_SRC_DIRECTORY}/VL53L0X/platform/src/vl53l0x_platform.cpp    
+    ${APP_SHOULDER_SRC_DIRECTORY}/main.cpp        
+    ${APP_COMMON_DIRECTORY}/canBus/src/can2040.c
+    ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp
 )
 
 # Link to built libraries

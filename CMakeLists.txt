@@ -11,6 +11,8 @@ set(APP_SHOULDER_VERSION_NUMBER "0.0.1")
 # Specify the app(s) source code
 set(APP_SHOULDER_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/shoulder-control")
 
+set(APP_COMMON_DIRECTORY "${CMAKE_SOURCE_DIR}/common")
+
 # FROM 1.4.2 -- Set app-side debugging on debug builds
 # Now uses CMake generator expression to extract config type
 add_compile_definitions($<$<CONFIG:Debug>:DEBUG=1>)
@@ -54,6 +56,14 @@ target_include_directories(FreeRTOS PUBLIC
     ${FREERTOS_SRC_DIRECTORY}/include
     ${FREERTOS_SRC_DIRECTORY}/portable/GCC/ARM_CM0
 )
+
+include_directories(RP2040
+    ${CMAKE_SOURCE_DIR}/pico-sdk/src/rp2_common/cmsis/stub/CMSIS/Device/RaspberryPi/RP2040/Include
+    ${CMAKE_SOURCE_DIR}/pico-sdk/src/rp2_common/cmsis/stub/CMSIS/Core/Include
+    
+)
+
+
 
 # Include the apps' source code
 add_subdirectory(${APP_SHOULDER_SRC_DIRECTORY})
