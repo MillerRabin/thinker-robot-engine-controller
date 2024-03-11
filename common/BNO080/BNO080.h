@@ -2,26 +2,15 @@
 
 #include <cstdint>
 #include <hardware/i2c.h>
-#include <pico/stdlib.h>
-#include <pico/binary_info.h>
 #include <iostream>
-#include <string>
-#include <vector>
-#include <cstdlib>
-#include <cstdint>
 #include <cstring>
-#include <sstream>
-#include <iomanip>
 #include <math.h>
 
 #include "pico/stdlib.h"
-#include "pico/binary_info.h"
 #include <FreeRTOS.h>
 #include <task.h>
 
 #define BNO080_DEFAULT_ADDRESS 0x4B
-
-#define I2C_BUFFER_LENGTH 32
 
 //Registers
 const uint8_t CHANNEL_COMMAND = 0;
@@ -107,7 +96,7 @@ const uint8_t CHANNEL_GYRO = 5;
 #define TARE_AR_VR_STABILIZED_ROTATION_VECTOR 4
 #define TARE_AR_VR_STABILIZED_GAME_ROTATION_VECTOR 5
 
-#define MAX_PACKET_SIZE 128 //Packets can be up to 32k but we don't have that much RAM.
+#define MAX_PACKET_SIZE 1024 //Packets can be up to 32k but we don't have that much RAM.
 #define MAX_METADATA_SIZE 9 //This is in words. There can be many but we mostly only care about the first 9 (Qs, range, etc)
 
 class BNO080
@@ -121,8 +110,7 @@ public:
 	void modeSleep();	  //Use the executable channel to put the BNO to sleep
 
 	float qToFloat(int16_t fixedPointValue, uint8_t qPoint); //Given a Q value, converts fixed point floating to regular floating point number
-
-	bool waitForI2C();
+	
 	bool receivePacket(void);
 	bool getData(uint16_t uint8_tsRemaining); //Given a number of uint8_ts, send the requests in I2C_BUFFER_LENGTH chunks
 	bool sendPacket(uint8_t channelNumber, uint8_t dataLength);

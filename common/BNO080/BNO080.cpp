@@ -6,12 +6,6 @@ bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin)
   _deviceAddress = deviceAddress; // If provided, store the I2C address from user
   _i2cPort = i2c;                 // Grab which port the user wants us to use
   _int = intPin;                  // Get the pin that the user wants to use for interrupts. By default, it's 255 and we'll not use it in dataAvailable() function.
-  if (_int != 255)
-  {    
-    gpio_init(_int);
-    gpio_set_dir(_int, GPIO_IN);
-    gpio_pull_up(_int);
-  }
   
   softReset();
 
@@ -29,8 +23,7 @@ bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin)
     {
       if (_printDebug == true)
       {
-        printf("SW Version Major: 0x%x\n", shtpData[2]);
-        printf(" SW Version Minor: 0x%x\n", shtpData[3]);
+        printf("SW Version %d.%d\n", shtpData[2], shtpData[3]);        
         uint32_t SW_Part_Number = ((uint32_t)shtpData[7] << 24) | ((uint32_t)shtpData[6] << 16) | ((uint32_t)shtpData[5] << 8) | ((uint32_t)shtpData[4]);
         printf(" SW Part Number: 0x%x\n", SW_Part_Number);        
         uint32_t SW_Build_Number = ((uint32_t)shtpData[11] << 24) | ((uint32_t)shtpData[10] << 16) | ((uint32_t)shtpData[9] << 8) | ((uint32_t)shtpData[8]);
@@ -38,10 +31,10 @@ bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin)
         uint16_t SW_Version_Patch = ((uint16_t)shtpData[13] << 8) | ((uint16_t)shtpData[12]);
         printf(" SW Version Patch: 0x%x\n", SW_Version_Patch);
       }
-      return (true);
+      return true;
     }
   }
-  return (false); // Something went wrong
+  return false;
 }
 
 // Calling this function with nothing sets the debug port to Serial
@@ -970,55 +963,47 @@ bool BNO080::readFRSdata(uint16_t recordID, uint8_t startLocation, uint8_t words
 // The sensor has been seen to reset twice if we attempt too much too quickly.
 // This seems to work reliably.
 void BNO080::softReset(void)
-{
+{  
   shtpData[0] = 1; // Reset
 
   // Attempt to start communication with sensor
   sendPacket(CHANNEL_EXECUTABLE, 1); // Transmit packet on channel 1, 1 byte
-
-  // Read all incoming data and flush it
-  vTaskDelay(50 / portTICK_PERIOD_MS);
-  while (receivePacket() == true)
-    ; // delay(1);
-  vTaskDelay(50 / portTICK_PERIOD_MS);  
-  while (receivePacket() == true)
-    ; // delay(1);
+ 
+  while (!receivePacket()) {
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+  }
+  
+  while (!receivePacket()) {
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+  }
 }
 
 // Set the operating mode to "On"
-//(This one is for @jerabaul29)
 void BNO080::modeOn(void)
 {
   shtpData[0] = 2; // On
 
   // Attempt to start communication with sensor
   sendPacket(CHANNEL_EXECUTABLE, 1); // Transmit packet on channel 1, 1 byte
-
-  // Read all incoming data and flush it
-  vTaskDelay(50 / portTICK_PERIOD_MS);
-  while (receivePacket() == true)
-    ; // delay(1);
-  vTaskDelay(50 / portTICK_PERIOD_MS);
-  while (receivePacket() == true)
-    ; // delay(1);
+  while (!receivePacket()) {
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+  }
+  
+  while (!receivePacket()) {
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+  }
 }
 
 // Set the operating mode to "Sleep"
-//(This one is for @jerabaul29)
 void BNO080::modeSleep(void)
 {
   shtpData[0] = 3; // Sleep
-
   // Attempt to start communication with sensor
   sendPacket(CHANNEL_EXECUTABLE, 1); // Transmit packet on channel 1, 1 byte
-
-  // Read all incoming data and flush it
-  vTaskDelay(50 / portTICK_PERIOD_MS);
-  while (receivePacket() == true)
-    ; // delay(1);
-  vTaskDelay(50 / portTICK_PERIOD_MS);
-  while (receivePacket() == true)
-    ; // delay(1);
+  sleep_ms(50);
+  receivePacket();
+  sleep_ms(50);
+  receivePacket();
 }
 
 // Indicates if we've received a Reset Complete packet. Once it's been read,
@@ -1040,19 +1025,16 @@ uint8_t BNO080::resetReason()
   shtpData[0] = SHTP_REPORT_PRODUCT_ID_REQUEST; // Request the product ID and reset info
   shtpData[1] = 0;                              // Reserved
 
-  // Transmit packet on channel 2, 2 bytes
+  // Transmit packet on channel 2, 2 bytes  
   sendPacket(CHANNEL_CONTROL, 2);
 
   // Now we wait for response
-  if (receivePacket() == true)
-  {
-    if (shtpData[0] == SHTP_REPORT_PRODUCT_ID_RESPONSE)
-    {
-      return (shtpData[1]);
+  if (receivePacket() == true) {
+    if (shtpData[0] == SHTP_REPORT_PRODUCT_ID_RESPONSE) {      
+      return shtpData[1];
     }
   }
-
-  return (0);
+  return 0;
 }
 
 // Given a register value and a Q point, convert to float
@@ -1246,7 +1228,7 @@ void BNO080::setFeatureCommand(uint8_t reportID, uint16_t timeBetweenReports)
 // Given a sensor's report ID, this tells the BNO080 to begin reporting the values
 // Also sets the specific config word. Useful for personal activity classifier
 void BNO080::setFeatureCommand(uint8_t reportID, uint16_t timeBetweenReports, uint32_t specificConfig)
-{
+{  
   long microsBetweenReports = (long)timeBetweenReports * 1000L;
 
   shtpData[0] = SHTP_REPORT_SET_FEATURE_COMMAND;     // Set feature command. Reference page 55
@@ -1399,30 +1381,13 @@ void BNO080::saveCalibration()
   sendCommand(COMMAND_DCD); // Save DCD command
 }
 
-// Wait a certain time for incoming I2C bytes before giving up
-// Returns false if failed
-bool BNO080::waitForI2C()
-{
-  /*for (uint8_t counter = 0; counter < 100; counter++) // Don't got more than 255
-  {
-    if (_i2cPort->hw. > 0)
-      return (true);
-    vTaskDelay(1 / portTICK_PERIOD_MS);
-  }
-
-  if (_printDebug == true)
-    _debugPort->println(F("I2C timeout"));
-  return (false);*/
-  return true;
-}
-
 // Check to see if there is any new data available
 // Read the contents of the incoming packet into the shtpData array
 bool BNO080::receivePacket(void)
-{  
+{    
   uint8_t pdata[4];
   int i2c_ret = i2c_read_blocking(_i2cPort, _deviceAddress, pdata, 4, false);
-  if (i2c_ret == PICO_ERROR_GENERIC) {      
+  if (i2c_ret == PICO_ERROR_GENERIC) {          
     return false;
   }
 
@@ -1440,7 +1405,7 @@ bool BNO080::receivePacket(void)
 
   // Calculate the number of data bytes in this packet
   uint16_t dataLength = (((uint16_t)packetMSB) << 8) | ((uint16_t)packetLSB);
-  dataLength &= ~(1 << 15); // Clear the MSbit.
+  dataLength &= ~(1 << 15); // Clear the MSbit.  
   // This bit indicates if this package is a continuation of the last. Ignore it for now.
   // TODO catch this as an error and exit
 
@@ -1450,67 +1415,39 @@ bool BNO080::receivePacket(void)
   // 	_debugPort->println(dataLength);
   // }
 
-  if (dataLength == 0) {
-    // Packet is empty
-    return (false); // All done
+  if (dataLength == 0) {    
+    return false;
   }
   dataLength -= 4; // Remove the header bytes from the data count
-
+    
   getData(dataLength);
   
   // Quickly check for reset complete packet. No need for a seperate parser.
   // This function is also called after soft reset, so we need to catch this
   // packet here otherwise we need to check for the reset packet in multiple
   // places.
-  if (shtpHeader[2] == CHANNEL_EXECUTABLE && shtpData[0] == EXECUTABLE_RESET_COMPLETE)
-  {
+  if (shtpHeader[2] == CHANNEL_EXECUTABLE && shtpData[0] == EXECUTABLE_RESET_COMPLETE) {  
     _hasReset = true;
   }
 
-  return (true); // We're done!
+  return true;
 }
 
-// Sends multiple requests to sensor until all data bytes are received from sensor
-// The shtpData buffer has max capacity of MAX_PACKET_SIZE. Any bytes over this amount will be lost.
-// Arduino I2C read limit is 32 bytes. Header is 4 bytes, so max data we can read per interation is 28 bytes
 bool BNO080::getData(uint16_t bytesRemaining)
 {
-  uint16_t dataSpot = 0; // Start at the beginning of shtpData array
-
-  // Setup a series of chunked 32 byte reads
-  while (bytesRemaining > 0)
-  {
-    uint16_t numberOfBytesToRead = bytesRemaining;
-    if (numberOfBytesToRead > (I2C_BUFFER_LENGTH - 4))
-      numberOfBytesToRead = (I2C_BUFFER_LENGTH - 4);
-
-    size_t count = numberOfBytesToRead + 4; 
-    uint8_t pdata[count];
-    int i2c_ret = i2c_read_blocking(_i2cPort, _deviceAddress, pdata, count, false);
-    if (i2c_ret == PICO_ERROR_GENERIC) {      
-      return 0;
-    }
-            
-    for (uint8_t x = 4; x < count; x++)
-    {
-      uint8_t incoming = pdata[x];
-      if (dataSpot < MAX_PACKET_SIZE)
-      {
-        shtpData[dataSpot++] = incoming; // Store data into the shtpData array
-      }
-      else
-      {
-        // Do nothing with the data
-      }
-    }
-
-    bytesRemaining -= numberOfBytesToRead;
+  uint16_t bytesToRead = (bytesRemaining < MAX_PACKET_SIZE + 4) ? bytesRemaining + 4 : MAX_PACKET_SIZE + 4;  
+  uint8_t pdata[bytesToRead];
+  int i2c_ret = i2c_read_blocking(_i2cPort, _deviceAddress, pdata, bytesToRead, false);
+  if (i2c_ret == PICO_ERROR_GENERIC) {    
+    return 0;
   }
-  return (true); // Done!
+  
+  memcpy(shtpData, &pdata[4], bytesToRead - 4);
+  return true;
 }
 
 bool BNO080::sendPacket(uint8_t channelNumber, uint8_t dataLength)
-{
+{  
   uint8_t packetLength = dataLength + 4; // Add four bytes for the header
 
   
@@ -1524,9 +1461,9 @@ bool BNO080::sendPacket(uint8_t channelNumber, uint8_t dataLength)
   memcpy(&pdata[4], shtpData, dataLength);
 
   int i2c_ret = i2c_write_blocking(_i2cPort, _deviceAddress, pdata, count, false);
-  if (i2c_ret == PICO_ERROR_GENERIC) {      
+  if (i2c_ret == PICO_ERROR_GENERIC) {          
     return false;
-  }
+  }  
   return true;
 }
 
