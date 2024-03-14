@@ -7,18 +7,19 @@ add_compile_definitions(BUILD_NUM=${BUILD_NUMBER})
 
 # Include app source code file(s)
 add_executable(${APP_SHOULDER_NAME}
-    ${APP_SHOULDER_SRC_DIRECTORY}/main.cpp        
-    ${APP_COMMON_DIRECTORY}/canBus/src/can2040.c
-    ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp
-    ${APP_COMMON_DIRECTORY}/i2cScan/i2cScan.cpp
+  ${APP_SHOULDER_SRC_DIRECTORY}/main.cpp        
+  ${APP_COMMON_DIRECTORY}/canBus/src/can2040.c
+  ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp    
+  ${APP_COMMON_DIRECTORY}/servo/servo.cpp
+  ${APP_COMMON_DIRECTORY}/position/position.cpp
 )
 
 # Link to built libraries
 target_link_libraries(${APP_SHOULDER_NAME} LINK_PUBLIC
-    pico_stdlib
-    hardware_i2c
-    hardware_pwm
-    FreeRTOS
+  pico_stdlib
+  hardware_i2c
+  hardware_pwm
+  FreeRTOS
 )
 
 # Enable/disable STDIO via USB and UART
