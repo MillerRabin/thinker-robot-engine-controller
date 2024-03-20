@@ -24,14 +24,14 @@
 using std::string;
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-    void log_debug(const char* msg);
+  
 
 #ifdef __cplusplus
-}           // extern "C"
+} // extern "C"
 #endif
 
-
-#endif      // MAIN_H
+#endif // MAIN_H

@@ -17,23 +17,24 @@ bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin)
   sendPacket(CHANNEL_CONTROL, 2);
 
   // Now we wait for response
-  if (receivePacket() == true)
-  {
-    if (shtpData[0] == SHTP_REPORT_PRODUCT_ID_RESPONSE)
-    {
-      if (_printDebug == true)
+  for (int i = 0; i < 10; i++) {
+    if (receivePacket() == true) {
+      if (shtpData[0] == SHTP_REPORT_PRODUCT_ID_RESPONSE)
       {
-        printf("SW Version %d.%d\n", shtpData[2], shtpData[3]);        
-        uint32_t SW_Part_Number = ((uint32_t)shtpData[7] << 24) | ((uint32_t)shtpData[6] << 16) | ((uint32_t)shtpData[5] << 8) | ((uint32_t)shtpData[4]);
-        printf(" SW Part Number: 0x%x\n", SW_Part_Number);        
-        uint32_t SW_Build_Number = ((uint32_t)shtpData[11] << 24) | ((uint32_t)shtpData[10] << 16) | ((uint32_t)shtpData[9] << 8) | ((uint32_t)shtpData[8]);
-        printf(" SW Build Number: 0x%x\n", SW_Build_Number);        
-        uint16_t SW_Version_Patch = ((uint16_t)shtpData[13] << 8) | ((uint16_t)shtpData[12]);
-        printf(" SW Version Patch: 0x%x\n", SW_Version_Patch);
+        if (_printDebug == true)
+        {
+          printf("SW Version %d.%d\n", shtpData[2], shtpData[3]);        
+          uint32_t SW_Part_Number = ((uint32_t)shtpData[7] << 24) | ((uint32_t)shtpData[6] << 16) | ((uint32_t)shtpData[5] << 8) | ((uint32_t)shtpData[4]);
+          printf(" SW Part Number: 0x%x\n", SW_Part_Number);        
+          uint32_t SW_Build_Number = ((uint32_t)shtpData[11] << 24) | ((uint32_t)shtpData[10] << 16) | ((uint32_t)shtpData[9] << 8) | ((uint32_t)shtpData[8]);
+          printf(" SW Build Number: 0x%x\n", SW_Build_Number);        
+          uint16_t SW_Version_Patch = ((uint16_t)shtpData[13] << 8) | ((uint16_t)shtpData[12]);
+          printf(" SW Version Patch: 0x%x\n", SW_Version_Patch);
+        }
+        return true;
       }
-      return true;
     }
-  }
+  }  
   return false;
 }
 

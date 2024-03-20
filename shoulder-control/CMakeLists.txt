@@ -7,11 +7,14 @@ add_compile_definitions(BUILD_NUM=${BUILD_NUMBER})
 
 # Include app source code file(s)
 add_executable(${APP_SHOULDER_NAME}
-  ${APP_SHOULDER_SRC_DIRECTORY}/main.cpp        
+  ${APP_SHOULDER_SRC_DIRECTORY}/main.cpp
+  ${APP_SHOULDER_SRC_DIRECTORY}/armShoulder/armShoulder.cpp
   ${APP_COMMON_DIRECTORY}/canBus/src/can2040.c
   ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp    
   ${APP_COMMON_DIRECTORY}/servo/servo.cpp
   ${APP_COMMON_DIRECTORY}/position/position.cpp
+  ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
+  ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp  
 )
 
 # Link to built libraries

@@ -176,7 +176,6 @@ public:
 	float getUncalibratedGyroBiasZ();
 	uint8_t getUncalibratedGyroAccuracy();
 
-
 	void getFastGyro(float &x, float &y, float &z);
 	float getFastGyroX();
 	float getFastGyroY();
@@ -225,7 +224,9 @@ public:
 	int16_t getRawMagX();
 	int16_t getRawMagY();
 	int16_t getRawMagZ();
-
+	
+	uint16_t rawQuatI, rawQuatJ, rawQuatK, rawQuatReal, rawQuatRadianAccuracy;
+	
 	float getRoll();
 	float getPitch();
 	float getYaw();
@@ -253,6 +254,18 @@ public:
 	uint8_t commandSequenceNumber = 0;				//Commands have a seqNum as well. These are inside command packet, the header uses its own seqNum per channel
 	uint32_t metaData[MAX_METADATA_SIZE];			//There is more than 10 words in a metadata record but we'll stop at Q point 3
 
+	//These Q values are defined in the datasheet but can also be obtained by querying the meta data records
+	//See the read metadata example for more info
+	int16_t rotationVector_Q1 = 14;
+	int16_t rotationVectorAccuracy_Q1 = 12; //Heading accuracy estimate in radians. The Q point is 12.
+	int16_t accelerometer_Q1 = 8;
+	int16_t linear_accelerometer_Q1 = 8;
+	int16_t gyro_Q1 = 9;
+	int16_t magnetometer_Q1 = 4;
+	int16_t angular_velocity_Q1 = 10;
+	int16_t gravity_Q1 = 8;
+	uint16_t quatAccuracy;
+
 private:
 	//Variables
 	i2c_inst_t *_i2cPort;		//The generic connection to user's chosen I2C hardware
@@ -272,9 +285,8 @@ private:
 	uint16_t rawLinAccelX, rawLinAccelY, rawLinAccelZ, accelLinAccuracy;
 	uint16_t rawGyroX, rawGyroY, rawGyroZ, gyroAccuracy;
 	uint16_t rawUncalibGyroX, rawUncalibGyroY, rawUncalibGyroZ, rawBiasX, rawBiasY, rawBiasZ, UncalibGyroAccuracy;
-	uint16_t rawMagX, rawMagY, rawMagZ, magAccuracy;
-	uint16_t rawQuatI, rawQuatJ, rawQuatK, rawQuatReal, rawQuatRadianAccuracy, quatAccuracy;
-	uint16_t rawFastGyroX, rawFastGyroY, rawFastGyroZ;
+	uint16_t rawMagX, rawMagY, rawMagZ, magAccuracy;	
+	uint16_t rawFastGyroX, rawFastGyroY, rawFastGyroZ;	
 	uint16_t gravityX, gravityY, gravityZ, gravityAccuracy;
 	uint8_t tapDetector;
 	uint16_t stepCount;
@@ -286,15 +298,4 @@ private:
 	uint16_t memsRawAccelX, memsRawAccelY, memsRawAccelZ; //Raw readings from MEMS sensor
 	uint16_t memsRawGyroX, memsRawGyroY, memsRawGyroZ;	//Raw readings from MEMS sensor
 	uint16_t memsRawMagX, memsRawMagY, memsRawMagZ;		  //Raw readings from MEMS sensor
-
-	//These Q values are defined in the datasheet but can also be obtained by querying the meta data records
-	//See the read metadata example for more info
-	int16_t rotationVector_Q1 = 14;
-	int16_t rotationVectorAccuracy_Q1 = 12; //Heading accuracy estimate in radians. The Q point is 12.
-	int16_t accelerometer_Q1 = 8;
-	int16_t linear_accelerometer_Q1 = 8;
-	int16_t gyro_Q1 = 9;
-	int16_t magnetometer_Q1 = 4;
-	int16_t angular_velocity_Q1 = 10;
-	int16_t gravity_Q1 = 8;
 };
