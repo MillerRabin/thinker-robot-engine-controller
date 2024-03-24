@@ -28,6 +28,18 @@ ArmShoulder::ArmShoulder(
     BaseType_t engineTaskStatus = xTaskCreate(ArmShoulder::engineTask, "engineTask", 1024, this, 5, NULL);
 }
 
-int ArmShoulder::sendQuaternon(Quaternon quat) {
-  return sendQuaternonInternal(CAN_SHOULDER_MEMS_QUATERNON, quat);
+int ArmShoulder::sendQuaternion(Quaternion quat) {
+  return sendQuaternionInternal(CAN_SHOULDER_QUATERNION, quat);
+}
+
+int ArmShoulder::sendGyroscope(Gyroscope gyro) {
+  return sendGyroscopeInternal(CAN_SHOULDER_GYROSCOPE, gyro);
+}
+
+int ArmShoulder::sendAccelerometer(Accelerometer acc) {
+  return sendAccelerometerInternal(CAN_SHOULDER_ACCELEROMETER, acc);
+}
+
+int ArmShoulder::sendAccuracy(Accuracy acc) {
+  return sendAccuracyInternal(CAN_SHOULDER_ACCURACY, acc);
 }

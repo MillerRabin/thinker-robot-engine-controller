@@ -40,5 +40,5 @@ private:
   static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);
 public:    
   Bus(const uint rxPin = 4, const uint txPin = 5);
-  int send(uint32_t id, uint8_t* data, uint8_t length);
+  int send(uint32_t id, uint64_t data);
 };

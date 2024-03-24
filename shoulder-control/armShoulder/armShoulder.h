@@ -24,5 +24,8 @@ class ArmShoulder : private ArmPart {
       uint canRxPin,
       uint canTxPin
     );
-    int sendQuaternon(Quaternon quat);
+    int sendQuaternion(Quaternion quat);
+    int sendAccelerometer(Accelerometer acc);
+    int sendGyroscope(Gyroscope gyro);
+    int sendAccuracy(Accuracy acc);
 };

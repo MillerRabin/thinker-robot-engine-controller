@@ -6,10 +6,7 @@ volatile QueueHandle_t Bus::queue;
 void Bus::busTask(void *pvParameters) {
   while (true) { 
     can2040_msg busMsg;
-    xQueueReceive(Bus::queue, &busMsg, portMAX_DELAY);
-        
-    //printf("data received id: 0x%x\n", busMsg.id);
-    //printf("busMsg 0x%x:%x\n", busMsg.data32[0], busMsg.data32[1]);
+    xQueueReceive(Bus::queue, &busMsg, portMAX_DELAY);            
   }  
 }
 
@@ -36,18 +33,10 @@ Bus::Bus(const uint rxPin, const uint txPin) : gpio_rx(rxPin),
   can2040_start(&cbus, sys_clock, bitrate, gpio_rx, gpio_tx);  
 }
 
-int Bus::send(uint32_t id, uint8_t* data, uint8_t length) {
+int Bus::send(uint32_t id, uint64_t data) {
   can2040_msg msg;
-  msg.id = id;  
-  for (int i = 0; i < length; i = i + 8) {
-    const uint diff = length - i;
-    const uint eLength = (diff > 8) ? 8 : diff;
-    msg.data32[0] = 0;
-    msg.data32[1] = 0;
-    msg.dlc = i + 1;
-    memcpy(&msg.data, &data[i], eLength);
-    uint res = can2040_transmit(&cbus, &msg);
-    if (res == -1) return res;
-  };
-  return 0;  
+  msg.id = id;             
+  msg.dlc = 8;
+  memcpy(msg.data, &data, 8);  
+  return can2040_transmit(&cbus, &msg);  
 }

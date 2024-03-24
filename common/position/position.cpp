@@ -51,12 +51,23 @@ static void compassTask(void* instance) {
     }
     
     if (datatype == SENSOR_REPORTID_ROTATION_VECTOR) {
-      if (position->updateQuat(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal, imu.rawQuatRadianAccuracy, imu.quatAccuracy)) {
-        printf("qx: %d, qy: %d, qz: %d, qw: %d, quatRadianAccuracy: %d, quatAccuracy: %d\n", 
-          imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal, imu.rawQuatRadianAccuracy, imu.quatAccuracy);
-        int res = position->armPart->sendQuaternon(position->rawQuat);
-        printf("Position sending result %d\n", res);
-      }      
+      if (position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal)) {        
+        /*printf("qx: %d, qy: %d, qz: %d, qw: %d\n", 
+          position->quaternion.i, position->quaternion.j, position->quaternion.k, position->quaternion.real);*/
+        position->armPart->sendQuaternion(position->quaternion);
+      }
+
+      if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
+        printf("Quaternion: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
+          position->accuracy.quaternionRadAccuracy, 
+          position->accuracy.quaternionAccuracy, 
+          position->accuracy.gyroscopeAccuracy, 
+          position->accuracy.accelerometerAccuracy
+        );
+        position->armPart->sendAccuracy(position->accuracy);
+      }
+    
+      //, imu.rawQuatRadianAccuracy, imu.quatAccuracy
       //imu->getQuat(qx, qy, qz, qw, quatRadianAccuracy, quatAccuracy);    
 
       /*float roll = (imu.getRoll()) * 180.0 / PI; // Convert roll to degrees
@@ -65,30 +76,86 @@ static void compassTask(void* instance) {
       printf("roll: %f, pitch: %f, yaw: %f\n", roll, pitch, yaw);*/
     }
 
-    /*if (datatype == SENSOR_REPORTID_GYROSCOPE) {
-      imu.getGyro(gx, gy, gz, gyroAccuracy);      
-      //printf("gx: %f, gy: %f, gz: %f, gyroAccuracy: %d\n", gx, gy, gz, gyroAccuracy);
-    }*/
+    if (datatype == SENSOR_REPORTID_GYROSCOPE) {
+      if (position->updateGyroscopeData(imu.rawGyroX, imu.rawGyroY, imu.rawGyroZ)) {
+       /*printf("gyroX: %d, gyroY: %d, gyroZ: %d\n", 
+          position->gyroscope.x, position->gyroscope.y, position->gyroscope.z);*/
+        position->armPart->sendGyroscope(position->gyroscope);
+      }
 
-    /*if (datatype == SENSOR_REPORTID_LINEAR_ACCELERATION) {
-      imu.getLinAccel(ax, ay, az, linAccuracy);
-      //printf("ax: %f, ay: %f, az: %f, linAccuracy: %d\n", ax, ay, az, linAccuracy);
-    } */ 
+      if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
+        printf("Gyroscope: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
+          position->accuracy.quaternionRadAccuracy, 
+          position->accuracy.quaternionAccuracy, 
+          position->accuracy.gyroscopeAccuracy, 
+          position->accuracy.accelerometerAccuracy
+        );
+        position->armPart->sendAccuracy(position->accuracy);
+      }
+    }
+
+    if (datatype == SENSOR_REPORTID_LINEAR_ACCELERATION) {
+      if (position->updateAccelerometerData(imu.rawLinAccelX, imu.rawLinAccelY, imu.rawLinAccelZ)) {
+        /*printf("accX: %d, accY: %d, accZ: %d\n", 
+          position->accelerometer.x, position->accelerometer.y, position->accelerometer.z);*/
+        position->armPart->sendAccelerometer(position->accelerometer);
+      }
+
+      if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
+        printf("Acceleration: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
+          position->accuracy.quaternionRadAccuracy, 
+          position->accuracy.quaternionAccuracy, 
+          position->accuracy.gyroscopeAccuracy, 
+          position->accuracy.accelerometerAccuracy
+        );
+        position->armPart->sendAccuracy(position->accuracy);
+      }      
+    }
   }  
 }
 
-bool Position::updateQuat(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal, uint16_t rawQuatRadianAccuracy, uint8_t quatAccuracy) {
-  uint16_t id = (rawQuatI > rawQuat.i) ? rawQuatI - rawQuat.i : rawQuat.i - rawQuatI;
-  uint16_t jd = (rawQuatJ > rawQuat.j) ? rawQuatJ - rawQuat.j : rawQuat.j - rawQuatJ;
-  uint16_t kd = (rawQuatK > rawQuat.k) ? rawQuatK - rawQuat.k : rawQuat.k - rawQuatK;
-  uint16_t rd = (rawQuatReal > rawQuat.real) ? rawQuatReal - rawQuat.real : rawQuat.real - rawQuatReal;
-  rawQuat.i = rawQuatI;
-  rawQuat.j = rawQuatJ;
-  rawQuat.k = rawQuatK;
-  rawQuat.real = rawQuatReal;
-  rawQuat.quatRadAcc = rawQuatRadianAccuracy;
-  rawQuat.quatAcc = quatAccuracy;  
+bool Position::updateQuaternionData(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal) {
+  uint16_t id = (rawQuatI > quaternion.i) ? rawQuatI - quaternion.i : quaternion.i - rawQuatI;
+  uint16_t jd = (rawQuatJ > quaternion.j) ? rawQuatJ - quaternion.j : quaternion.j - rawQuatJ;
+  uint16_t kd = (rawQuatK > quaternion.k) ? rawQuatK - quaternion.k : quaternion.k - rawQuatK;
+  uint16_t rd = (rawQuatReal > quaternion.real) ? rawQuatReal - quaternion.real : quaternion.real - rawQuatReal;
+  quaternion.i = rawQuatI;
+  quaternion.j = rawQuatJ;
+  quaternion.k = rawQuatK;
+  quaternion.real = rawQuatReal;
   return ((id > 1) || (jd > 1) || (kd > 1) || (rd > 1));
+}
+
+bool Position::updateAccelerometerData(uint16_t rawAccX, uint16_t rawAccY, uint16_t rawAccZ) {
+  uint16_t xd = (rawAccX > accelerometer.x) ? rawAccX - accelerometer.x : accelerometer.x - rawAccX;
+  uint16_t yd = (rawAccY > accelerometer.y) ? rawAccY - accelerometer.y : accelerometer.y - rawAccY;
+  uint16_t zd = (rawAccZ > accelerometer.z) ? rawAccZ - accelerometer.z : accelerometer.z - rawAccZ;  
+  accelerometer.x = rawAccX;
+  accelerometer.y = rawAccY;
+  accelerometer.z = rawAccZ;  
+  return ((xd > 1) || (yd > 1) || (zd > 1));
+}
+
+bool Position::updateGyroscopeData(uint16_t rawGyroX, uint16_t rawGyroY, uint16_t rawGyroZ) {
+  uint16_t xd = (rawGyroX > gyroscope.x) ? rawGyroX - gyroscope.x : gyroscope.x - rawGyroX;
+  uint16_t yd = (rawGyroY > gyroscope.y) ? rawGyroY - gyroscope.y : gyroscope.y - rawGyroY;
+  uint16_t zd = (rawGyroZ > gyroscope.z) ? rawGyroZ - gyroscope.z : gyroscope.z - rawGyroZ;  
+  gyroscope.x = rawGyroX;
+  gyroscope.y = rawGyroY;
+  gyroscope.z = rawGyroZ;  
+  return ((xd > 1) || (yd > 1) || (zd > 1));
+}
+
+bool Position::updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quaternionAccuracy, uint8_t gyroscopeAccuracy, uint8_t accelerometerAccuracy) {
+  bool rd = (accuracy.quaternionRadAccuracy != quaternionRadianAccuracy);
+  bool qd = (accuracy.quaternionAccuracy != quaternionAccuracy);
+  bool gd = (accuracy.gyroscopeAccuracy != gyroscopeAccuracy);
+  bool ad = (accuracy.accelerometerAccuracy != accelerometerAccuracy);
+  accuracy.accelerometerAccuracy = accelerometerAccuracy;
+  accuracy.quaternionAccuracy = quaternionAccuracy;
+  accuracy.quaternionRadAccuracy = quaternionRadianAccuracy;  
+  accuracy.gyroscopeAccuracy = gyroscopeAccuracy;
+  return ad || rd || qd || gd;
 }
 
 Position::Position(ArmPart* armPart, const uint sdaPin, const uint sclPin, const uint intPin, const uint rstPin) :
