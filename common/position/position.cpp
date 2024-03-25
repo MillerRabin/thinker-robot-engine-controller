@@ -54,17 +54,21 @@ static void compassTask(void* instance) {
       if (position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal)) {        
         /*printf("qx: %d, qy: %d, qz: %d, qw: %d\n", 
           position->quaternion.i, position->quaternion.j, position->quaternion.k, position->quaternion.real);*/
-        position->armPart->sendQuaternion(position->quaternion);
+        if (position->armPart->sendQuaternion(position->quaternion) != 0) {
+          printf("quat sendind error\n");
+        }
       }
 
       if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
-        printf("Quaternion: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
+        /*printf("Quaternion: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
           position->accuracy.quaternionRadAccuracy, 
           position->accuracy.quaternionAccuracy, 
           position->accuracy.gyroscopeAccuracy, 
           position->accuracy.accelerometerAccuracy
-        );
-        position->armPart->sendAccuracy(position->accuracy);
+        );*/
+        if (position->armPart->sendAccuracy(position->accuracy) != 0) {
+          printf("Quaternion accuracy sendind error\n");
+        };
       }
     
       //, imu.rawQuatRadianAccuracy, imu.quatAccuracy
@@ -79,18 +83,22 @@ static void compassTask(void* instance) {
     if (datatype == SENSOR_REPORTID_GYROSCOPE) {
       if (position->updateGyroscopeData(imu.rawGyroX, imu.rawGyroY, imu.rawGyroZ)) {
        /*printf("gyroX: %d, gyroY: %d, gyroZ: %d\n", 
-          position->gyroscope.x, position->gyroscope.y, position->gyroscope.z);*/
-        position->armPart->sendGyroscope(position->gyroscope);
+          position->gyroscope.x, position->gyroscope.y, position->gyroscope.z);*/          
+        if (position->armPart->sendGyroscope(position->gyroscope) != 0) {
+          printf("Gyro sending error\n");
+        }
       }
 
       if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
-        printf("Gyroscope: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
+        /*printf("Gyroscope: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
           position->accuracy.quaternionRadAccuracy, 
           position->accuracy.quaternionAccuracy, 
           position->accuracy.gyroscopeAccuracy, 
           position->accuracy.accelerometerAccuracy
-        );
-        position->armPart->sendAccuracy(position->accuracy);
+        );*/
+        if (position->armPart->sendAccuracy(position->accuracy) != 0) {
+          printf("Gyro Accuracy senging error\n");
+        }
       }
     }
 
@@ -98,17 +106,22 @@ static void compassTask(void* instance) {
       if (position->updateAccelerometerData(imu.rawLinAccelX, imu.rawLinAccelY, imu.rawLinAccelZ)) {
         /*printf("accX: %d, accY: %d, accZ: %d\n", 
           position->accelerometer.x, position->accelerometer.y, position->accelerometer.z);*/
-        position->armPart->sendAccelerometer(position->accelerometer);
+        
+        if (position->armPart->sendAccelerometer(position->accelerometer) != 0) {
+          printf("Accelerometer sending error\n");
+        }
       }
 
       if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
-        printf("Acceleration: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
+        /*printf("Acceleration: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
           position->accuracy.quaternionRadAccuracy, 
           position->accuracy.quaternionAccuracy, 
           position->accuracy.gyroscopeAccuracy, 
           position->accuracy.accelerometerAccuracy
-        );
-        position->armPart->sendAccuracy(position->accuracy);
+        );*/
+        if (position->armPart->sendAccuracy(position->accuracy) != 0) {
+          printf("Accelerometer Accuracy sending error");
+        }
       }      
     }
   }  

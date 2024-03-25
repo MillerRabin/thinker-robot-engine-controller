@@ -15,6 +15,7 @@ add_executable(${APP_SHOULDER_NAME}
   ${APP_COMMON_DIRECTORY}/position/position.cpp
   ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
   ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp  
+  ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp  
 )
 
 # Link to built libraries

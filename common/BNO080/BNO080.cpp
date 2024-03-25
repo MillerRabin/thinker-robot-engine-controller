@@ -919,7 +919,7 @@ bool BNO080::readFRSdata(uint16_t recordID, uint8_t startLocation, uint8_t words
       {
         if (counter++ > 100)
           return (false); // Give up
-        vTaskDelay(1 / portTICK_PERIOD_MS);  
+        vTaskDelay(1 / portTICK_PERIOD_MS);
       }
 
       // We have the packet, inspect it for the right contents
