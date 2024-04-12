@@ -3,37 +3,11 @@
 uint8_t action = 0;
 volatile QueueHandle_t queue = NULL;
 
-void compass_callback(uint gpio, uint32_t events) {  
+void Position::compassCallback(uint gpio, uint32_t events) {    
   xQueueSend(queue, &action, 0);
 }
 
-/*void Position::readMetadata() {
-  rotationVector_Q1 = imu.getQ1(FRS_RECORDID_ROTATION_VECTOR);
-  accelerometer_Q1 = imu.getQ1(FRS_RECORDID_ACCELEROMETER);
-  printf("rotationVector_Q1: %d, accelerometer_Q1: %d\n", rotationVector_Q1, accelerometer_Q1);
-  printf("For rotation vector\n");
-  float range = imu.getRange(FRS_RECORDID_ROTATION_VECTOR);
-  float resolution = imu.getResolution(FRS_RECORDID_ROTATION_VECTOR);
-  printf("Range: %f, Resolution: %f\n", range, resolution);
-  printf("Q1: %d, Q2: %d, Q3: %d\n", imu.getQ1(FRS_RECORDID_ROTATION_VECTOR), imu.getQ2(FRS_RECORDID_ROTATION_VECTOR), imu.getQ3(FRS_RECORDID_ROTATION_VECTOR));
-      
-  printf("\nFor accelerometer\n");
-  float aRange = imu.getRange(FRS_RECORDID_ACCELEROMETER);
-  float aResolution = imu.getResolution(FRS_RECORDID_ACCELEROMETER);
-  printf("Range: %f, Resolution: %f\n", aRange, aResolution);
-  
-  int16_t aQ1 = imu.getQ1(FRS_RECORDID_ACCELEROMETER);
-  int16_t aQ2 = imu.getQ2(FRS_RECORDID_ACCELEROMETER);
-  int16_t aQ3 = imu.getQ3(FRS_RECORDID_ACCELEROMETER);
-  printf("Q1: %d, Q2: %d, Q3: %d\n", aQ1, aQ2, aQ3);
-    
-  uint16_t accelerometer_power = imu.readFRSword(FRS_RECORDID_ACCELEROMETER, 3) & 0xFFFF; //Get word 3, lower 16 bits
-  float accel_power = imu.qToFloat(accelerometer_power, 10); //Q point is 10 for power
-  printf("\nAccelerometer power: %f (mA)\n", accel_power);
-}*/
-
-
-static void compassTask(void* instance) {  
+void Position::compassTask(void* instance) {
   Position* position = (Position*)instance;  
   BNO080 imu = position->imu;
   
@@ -191,16 +165,14 @@ Position::Position(ArmPart* armPart, const uint sdaPin, const uint sclPin, const
   gpio_init(intPin);
   gpio_set_dir(intPin, GPIO_IN);
   gpio_pull_up(intPin);
-  gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &compass_callback);
+  gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &Position::compassCallback);
 
   queue = xQueueCreate(1, sizeof(uint8_t));
-  xTaskCreate(compassTask, "compassTask", 1024, this, 5, NULL);
+  xTaskCreate(Position::compassTask, "Position::compassTask", 1024, this, 5, NULL);
   
   bi_decl(bi_2pins_with_func(sdaPin, sclPin, GPIO_FUNC_I2C));
-  
-  imu.enableDebugging();
-  imu.begin(BNO080_DEFAULT_ADDRESS, i2c_default, intPin);
-  //readMetadata();
+    
+  imu.begin(BNO080_DEFAULT_ADDRESS, i2c_default, intPin);  
   imu.calibrateAll();
   imu.enableRotationVector(50);  
   imu.enableLinearAccelerometer(50);

@@ -19,7 +19,9 @@ class Position
     const uint sdaPin;
     const uint sclPin;
     const uint intPin;
-    const uint rstPin;    
+    const uint rstPin;
+    static void compassTask(void* instance);
+    static void compassCallback(uint gpio, uint32_t events);
   public:
     ArmPart* armPart;
     BNO080 imu;
