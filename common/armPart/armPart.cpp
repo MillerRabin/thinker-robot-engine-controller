@@ -1,8 +1,8 @@
 #include "armPart.h"
 
-ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) {
-  Bus bus = Bus(canRxPin, canTxPin);  
-}
+ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) :
+  bus(canRxPin, canTxPin, (void*)this, canCallback)
+{}
 
 int ArmPart::sendQuaternionInternal(uint32_t id, Quaternion quat) {  
   uint64_t data = quat.serialize();  
@@ -22,4 +22,10 @@ int ArmPart::sendAccelerometerInternal(uint32_t id, Accelerometer acc) {
 int ArmPart::sendAccuracyInternal(uint32_t id, Accuracy acc) {
   uint64_t data = acc.serialize();  
   return bus.send(id, data);
+}
+
+void ArmPart::canCallback(void* pArmPart, can2040_msg frame) {
+  uint32_t ident = frame.id;
+  ArmPart* armPart = (ArmPart*)pArmPart;
+  armPart->busReceiveCallback(frame);  
 }
