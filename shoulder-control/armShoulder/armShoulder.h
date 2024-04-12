@@ -7,10 +7,18 @@
 #include "../../common/config/config.h"
 #include "../../common/armPart/armPart.h"
 
+class ArmShoulderQueueParams {
+  public:    
+    float shoulderY = NAN;
+    float shoulderZ = NAN;
+};
+
 class ArmShoulder : private ArmPart {
   private:
     Position position;
     static void engineTask(void *instance);
+    void busReceiveCallback(can2040_msg frame);
+    static volatile QueueHandle_t queue;
   public:
     Servo shoulderZ;
     Servo shoulderY;

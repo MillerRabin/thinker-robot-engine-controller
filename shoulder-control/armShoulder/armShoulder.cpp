@@ -1,15 +1,16 @@
 #include "armShoulder.h"
 
+volatile QueueHandle_t ArmShoulder::queue;
+
 void ArmShoulder::engineTask(void *instance) {	      
   ArmShoulder* shoulder = (ArmShoulder*)instance;
   while(true) {
-    printf("Set move\n");
-    shoulder->shoulderZ.setDegree(135);    
-    shoulder->shoulderY.setDegree(90);
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    ArmShoulderQueueParams params;
+    xQueueReceive(ArmShoulder::queue, &params, portMAX_DELAY);
+    shoulder->shoulderZ.setDegree(params.shoulderZ);    
+    shoulder->shoulderY.setDegree(params.shoulderY);    
   }
 }
-
 
 ArmShoulder::ArmShoulder(
   const uint memsSdaPin, 
@@ -25,7 +26,8 @@ ArmShoulder::ArmShoulder(
     shoulderY(engineYPin, 180, 100),
     position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
   {        
-    BaseType_t engineTaskStatus = xTaskCreate(ArmShoulder::engineTask, "engineTask", 1024, this, 5, NULL);
+    ArmShoulder::queue = xQueueCreate(10, sizeof(ArmShoulderQueueParams));
+    xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL);
 }
 
 int ArmShoulder::sendQuaternion(Quaternion quat) {
@@ -42,4 +44,13 @@ int ArmShoulder::sendAccelerometer(Accelerometer acc) {
 
 int ArmShoulder::sendAccuracy(Accuracy acc) {
   return sendAccuracyInternal(CAN_SHOULDER_ACCURACY, acc);
+}
+
+void ArmShoulder::busReceiveCallback(can2040_msg frame) {
+  if (frame.id == CAN_SHOULDER_SET_YZ_DEGREE) {    
+    ArmShoulderQueueParams params;    
+    memcpy(&params.shoulderY, &frame.data32[0], 4);
+    memcpy(&params.shoulderZ, &frame.data32[1], 4);              
+    xQueueSend(ArmShoulder::queue, &params, 0);
+  }
 }
