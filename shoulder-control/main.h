@@ -1,5 +1,5 @@
-#ifndef MAIN_H
-#define MAIN_H
+
+#pragma once
 
 // FreeRTOS
 #include <FreeRTOS.h>
@@ -21,6 +21,11 @@
 #include "pico/stdlib.h"
 #include "pico/binary_info.h"
 
+#include "armShoulder/armShoulder.h"
+#include <math.h>
+#include <hardware/pwm.h>
+#include "../common/config/config.h" 
+
 using std::string;
 
 #ifdef __cplusplus
@@ -33,5 +38,3 @@ extern "C"
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-#endif // MAIN_H

@@ -48,10 +48,10 @@ void Position::compassTask(void* instance) {
       //, imu.rawQuatRadianAccuracy, imu.quatAccuracy
       //imu->getQuat(qx, qy, qz, qw, quatRadianAccuracy, quatAccuracy);    
 
-      /*float roll = (imu.getRoll()) * 180.0 / PI; // Convert roll to degrees
+      float roll = (imu.getRoll()) * 180.0 / PI; // Convert roll to degrees
       float pitch = (imu.getPitch()) * 180.0 / PI; // Convert pitch to degrees
       float yaw = (imu.getYaw()) * 180.0 / PI; // Convert yaw / heading to degrees
-      printf("roll: %f, pitch: %f, yaw: %f\n", roll, pitch, yaw);*/
+      printf("roll: %f, pitch: %f, yaw: %f\n", roll, pitch, yaw);
     }
 
     if (datatype == SENSOR_REPORTID_GYROSCOPE) {
