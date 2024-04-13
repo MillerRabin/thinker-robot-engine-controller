@@ -31,7 +31,7 @@ Bus::Bus(const uint rxPin, const uint txPin, void* instance, CanCallback callbac
   irq_set_exclusive_handler(PIO0_IRQ_0_IRQn, Bus::PIOx_IRQHandler);
   NVIC_SetPriority(PIO0_IRQ_0_IRQn, 1);
   NVIC_EnableIRQ(PIO0_IRQ_0_IRQn);  
-  xTaskCreate(Bus::busTask, "busTask", 1024, this, 5, NULL);
+  xTaskCreate(Bus::busTask, "busTask", 1024, this, tskIDLE_PRIORITY, NULL);
   can2040_start(&cbus, sys_clock, bitrate, rxPin, txPin);  
 }
 

@@ -4,11 +4,11 @@ volatile QueueHandle_t ArmShoulder::queue;
 
 void ArmShoulder::engineTask(void *instance) {	      
   ArmShoulder* shoulder = (ArmShoulder*)instance;
-  while(true) {
-    ArmShoulderQueueParams params;
-    xQueueReceive(ArmShoulder::queue, &params, portMAX_DELAY);
+  while(true) {    
+    ArmShoulderQueueParams params;    
+    xQueueReceive(ArmShoulder::queue, &params, portMAX_DELAY);    
     shoulder->shoulderZ.setDegree(params.shoulderZ);    
-    shoulder->shoulderY.setDegree(params.shoulderY);    
+    shoulder->shoulderY.setDegree(params.shoulderY); 
   }
 }
 
@@ -25,9 +25,9 @@ ArmShoulder::ArmShoulder(
     shoulderZ(engineZPin, 270, 100),
     shoulderY(engineYPin, 180, 100),
     position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
-  {        
+  {            
     ArmShoulder::queue = xQueueCreate(10, sizeof(ArmShoulderQueueParams));
-    xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL);
+    xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, tskIDLE_PRIORITY, NULL);    
 }
 
 int ArmShoulder::sendQuaternion(Quaternion quat) {
