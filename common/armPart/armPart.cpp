@@ -4,23 +4,31 @@ ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) :
   bus(canRxPin, canTxPin, (void*)this, canCallback)
 {}
 
-int ArmPart::sendQuaternionInternal(uint32_t id, Quaternion quat) {  
+int ArmPart::updateQuaternion(Quaternion quat) {  
   uint64_t data = quat.serialize();  
+  uint8_t id = getQuaternionMessageId();
+  if (id == 0) return 0;
   return bus.send(id, data);
 }
 
-int ArmPart::sendGyroscopeInternal(uint32_t id, Gyroscope gyro) {  
-  uint64_t data = gyro.serialize();  
+int ArmPart::updateGyroscope(Gyroscope gyro) {  
+  uint64_t data = gyro.serialize();
+  uint8_t id = getGyroscopeMessageId();
+  if (id == 0) return 0;
   return bus.send(id, data);
 }
 
-int ArmPart::sendAccelerometerInternal(uint32_t id, Accelerometer acc) {  
-  uint64_t data = acc.serialize();  
+int ArmPart::updateAccelerometer(Accelerometer acc) {  
+  uint64_t data = acc.serialize();
+  uint8_t id = getAccelerometerMessageId();
+  if (id == 0) return 0;
   return bus.send(id, data);
 }
 
-int ArmPart::sendAccuracyInternal(uint32_t id, Accuracy acc) {
-  uint64_t data = acc.serialize();  
+int ArmPart::updateAccuracy(Accuracy acc) {
+  uint64_t data = acc.serialize();
+  uint8_t id = getAccuracyMessageId();
+  if (id == 0) return 0;
   return bus.send(id, data);
 }
 

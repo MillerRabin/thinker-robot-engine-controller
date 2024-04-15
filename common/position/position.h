@@ -5,15 +5,12 @@
 #include <hardware/i2c.h>
 #include "../armPart/armPart.h"
 #include <RP2040.h>
-#ifndef PI
-  #define PI					3.14159265358979f
-#endif
 #include <FreeRTOS.h>
 #include <task.h>
 #include <queue.h>
 #include "pico/binary_info.h"
 
-class Position
+class Position : public BasePosition
 {
   private:    
     const uint sdaPin;
@@ -22,13 +19,10 @@ class Position
     const uint rstPin;
     static void compassTask(void* instance);
     static void compassCallback(uint gpio, uint32_t events);
+    static volatile QueueHandle_t queue;
   public:
     ArmPart* armPart;
-    BNO080 imu;
-    Quaternion quaternion;
-    Accuracy accuracy;
-    Gyroscope gyroscope;
-    Accelerometer accelerometer;
+    BNO080 imu;    
     int16_t accelerometer_Q1;
     bool updateQuaternionData(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal);
     bool updateAccelerometerData(uint16_t rawAccX, uint16_t rawAccY, uint16_t rawAccZ);

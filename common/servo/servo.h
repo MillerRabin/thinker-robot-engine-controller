@@ -4,7 +4,9 @@
 #include "hardware/clocks.h"
 #include "pico/stdlib.h"
 #include "pico/divider.h"
+#include <math.h>
 #include <iostream>
+#include "../detectors/detectors.h"
 
 class Servo {
   private:
@@ -23,7 +25,12 @@ class Servo {
     float step;
     uint16_t getSlices(float targetPeriod);
     uint setFrequency(const uint freq);    
+    ImuUseAngle useAngle;    
+    RangeMap imuMap;
+    uint setDegreeDirect(const float degree);
   public:
-    Servo(const uint pin, const uint maxDegree = 270, const float freq = 50, const float lowPeriod = 0.0005, const float highPeriod = 0.0025);    
-    uint setDegree(const float degree);    
+    Servo(const uint pin, Range degreeRange, Range imuRange, ImuUseAngle useAngle, const float freq = 50, const float lowPeriod = 0.0005, const float highPeriod = 0.0025);
+    uint setDegree(const float degree);
+    Euler euler;
+    
 };

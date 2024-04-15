@@ -32,8 +32,12 @@ class ArmShoulder : private ArmPart {
       uint canRxPin,
       uint canTxPin
     );
-    int sendQuaternion(Quaternion quat);
-    int sendAccelerometer(Accelerometer acc);
-    int sendGyroscope(Gyroscope gyro);
-    int sendAccuracy(Accuracy acc);
+    uint32_t getQuaternionMessageId() { return CAN_SHOULDER_QUATERNION; };
+    uint32_t getAccelerometerMessageId() { return CAN_SHOULDER_ACCELEROMETER; };
+    uint32_t getGyroscopeMessageId() { return CAN_SHOULDER_GYROSCOPE; };
+    uint32_t getAccuracyMessageId() { return CAN_SHOULDER_ACCURACY; };
+    int updateQuaternion(BasePosition* position);
+    int updateAccelerometer(BasePosition* position);
+    int updateGyroscope(BasePosition* position);
+    int updateAccuracy(BasePosition* position);
 };

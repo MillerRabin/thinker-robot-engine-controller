@@ -1,13 +1,13 @@
 #include "position.h"
 
 uint8_t action = 0;
-volatile QueueHandle_t queue = NULL;
+volatile QueueHandle_t Position::queue;
 
 void Position::compassCallback(uint gpio, uint32_t events) {    
   xQueueSend(queue, &action, 0);
 }
 
-void Position::compassTask(void* instance) {
+void Position::compassTask(void* instance) {  
   Position* position = (Position*)instance;  
   BNO080 imu = position->imu;
   
@@ -17,7 +17,7 @@ void Position::compassTask(void* instance) {
   uint8_t gyroAccuracy = 0;
       
   while (true) {
-    BaseType_t res = xQueueReceive(queue, &action, 2000 / portTICK_PERIOD_MS);
+    BaseType_t res = xQueueReceive(Position::queue, &action, 2000 / portTICK_PERIOD_MS);
     uint16_t datatype = imu.getReadings();
     if (res != pdPASS) {      
       printf("Position sending result %d\n", res);
@@ -28,8 +28,8 @@ void Position::compassTask(void* instance) {
       if (position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal)) {        
         /*printf("qx: %d, qy: %d, qz: %d, qw: %d\n", 
           position->quaternion.i, position->quaternion.j, position->quaternion.k, position->quaternion.real);*/
-        if (position->armPart->sendQuaternion(position->quaternion) != 0) {
-          printf("quat sendind error\n");
+        if (position->armPart->updateQuaternion(position) != 0) {
+          printf("quat sending error\n");
         }
       }
 
@@ -40,7 +40,7 @@ void Position::compassTask(void* instance) {
           position->accuracy.gyroscopeAccuracy, 
           position->accuracy.accelerometerAccuracy
         );*/
-        if (position->armPart->sendAccuracy(position->accuracy) != 0) {
+        if (position->armPart->updateAccuracy(position) != 0) {
           printf("Quaternion accuracy sendind error\n");
         };
       }
@@ -48,17 +48,17 @@ void Position::compassTask(void* instance) {
       //, imu.rawQuatRadianAccuracy, imu.quatAccuracy
       //imu->getQuat(qx, qy, qz, qw, quatRadianAccuracy, quatAccuracy);    
 
-      float roll = (imu.getRoll()) * 180.0 / PI; // Convert roll to degrees
+      /*float roll = (imu.getRoll()) * 180.0 / PI; // Convert roll to degrees
       float pitch = (imu.getPitch()) * 180.0 / PI; // Convert pitch to degrees
       float yaw = (imu.getYaw()) * 180.0 / PI; // Convert yaw / heading to degrees
-      printf("roll: %f, pitch: %f, yaw: %f\n", roll, pitch, yaw);
+      printf("roll: %f, pitch: %f, yaw: %f\n", roll, pitch, yaw);*/
     }
 
     if (datatype == SENSOR_REPORTID_GYROSCOPE) {
       if (position->updateGyroscopeData(imu.rawGyroX, imu.rawGyroY, imu.rawGyroZ)) {
        /*printf("gyroX: %d, gyroY: %d, gyroZ: %d\n", 
           position->gyroscope.x, position->gyroscope.y, position->gyroscope.z);*/          
-        if (position->armPart->sendGyroscope(position->gyroscope) != 0) {
+        if (position->armPart->updateGyroscope(position) != 0) {
           printf("Gyro sending error\n");
         }
       }
@@ -70,7 +70,7 @@ void Position::compassTask(void* instance) {
           position->accuracy.gyroscopeAccuracy, 
           position->accuracy.accelerometerAccuracy
         );*/
-        if (position->armPart->sendAccuracy(position->accuracy) != 0) {
+        if (position->armPart->updateAccuracy(position) != 0) {
           printf("Gyro Accuracy senging error\n");
         }
       }
@@ -81,7 +81,7 @@ void Position::compassTask(void* instance) {
         /*printf("accX: %d, accY: %d, accZ: %d\n", 
           position->accelerometer.x, position->accelerometer.y, position->accelerometer.z);*/
         
-        if (position->armPart->sendAccelerometer(position->accelerometer) != 0) {
+        if (position->armPart->updateAccelerometer(position) != 0) {
           printf("Accelerometer sending error\n");
         }
       }
@@ -93,7 +93,7 @@ void Position::compassTask(void* instance) {
           position->accuracy.gyroscopeAccuracy, 
           position->accuracy.accelerometerAccuracy
         );*/
-        if (position->armPart->sendAccuracy(position->accuracy) != 0) {
+        if (position->armPart->updateAccuracy(position) != 0) {
           printf("Accelerometer Accuracy sending error");
         }
       }      
@@ -151,8 +151,7 @@ Position::Position(ArmPart* armPart, const uint sdaPin, const uint sclPin, const
   intPin(intPin),
   rstPin(rstPin),
   armPart(armPart)
-{   
-  printf("Initialize position\n");
+{     
   i2c_init(i2c_default, 400 * 1000);
   gpio_set_function(sdaPin, GPIO_FUNC_I2C);
   gpio_set_function(sclPin, GPIO_FUNC_I2C);
@@ -167,9 +166,8 @@ Position::Position(ArmPart* armPart, const uint sdaPin, const uint sclPin, const
   gpio_pull_up(intPin);
   gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &Position::compassCallback);
 
-  queue = xQueueCreate(1, sizeof(uint8_t));
-  xTaskCreate(Position::compassTask, "Position::compassTask", 1024, this, 5, NULL);
-  
+  Position::queue = xQueueCreate(1, sizeof(uint8_t));
+  xTaskCreate(Position::compassTask, "Position::compassTask", 1024, this, tskIDLE_PRIORITY, NULL);  
   bi_decl(bi_2pins_with_func(sdaPin, sclPin, GPIO_FUNC_I2C));
     
   imu.begin(BNO080_DEFAULT_ADDRESS, i2c_default, intPin);  

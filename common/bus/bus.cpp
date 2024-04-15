@@ -5,9 +5,9 @@ volatile QueueHandle_t Bus::queue;
 
 void Bus::busTask(void* pInstance) {
   Bus* instance = (Bus*)pInstance;
-  while (true) { 
+  while (true) {         
     can2040_msg busMsg;    
-    xQueueReceive(Bus::queue, &busMsg, portMAX_DELAY);
+    xQueueReceive(Bus::queue, &busMsg, portMAX_DELAY);    
     instance->busCallback(instance->armPart, busMsg);
   }  
 }

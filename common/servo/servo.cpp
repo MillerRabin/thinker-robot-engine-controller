@@ -1,9 +1,12 @@
 #include "servo.h"
 
-Servo::Servo(const uint pin, const uint maxDegree, const float freq, const float lowPeriod, const float highPeriod) : 
+Servo::Servo(const uint pin, Range degreeRange, Range imuRange, ImuUseAngle useAngle, const float freq, const float lowPeriod, const float highPeriod) : 
   maxDegree(maxDegree),
   lowPeriod(lowPeriod),
-  highPeriod(highPeriod) {    
+  highPeriod(highPeriod),
+  useAngle(useAngle),  
+  imuMap(imuRange, degreeRange),
+  euler(NAN, NAN, NAN) {     
     gpio_set_function(pin, GPIO_FUNC_PWM);  
     slice = pwm_gpio_to_slice_num(pin);
     channel = pwm_gpio_to_channel(pin);    
@@ -41,9 +44,14 @@ uint16_t Servo::getSlices(const float targetPeriod) {
   return ( targetPeriod / period ) * wrap;
 }
 
-uint Servo::setDegree(const float degree) {      
+uint Servo::setDegreeDirect(const float degree) {      
   const uint16_t slices = lowSlices + (step * degree); 
   pwm_set_chan_level(slice, channel, slices);
   return 1;
 }
 
+uint Servo::setDegree(const float degree) {      
+  const float sourceDeg = euler.getAngle(useAngle);
+  const float targetDeg = imuMap.getDestValue(sourceDeg);
+  return setDegreeDirect(degree);  
+}
