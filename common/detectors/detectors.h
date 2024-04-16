@@ -3,6 +3,7 @@
 #include "pico/stdlib.h"
 #include <math.h>
 #include "../config/config.h"
+#include <iostream>
 
 enum ImuUseAngle {
   IMU_USE_ROLL,
@@ -21,8 +22,7 @@ class Range {
 
 class RangeMap {
   private:
-    const float destDelta;
-    const float step;
+    const float destDelta;    
     const float sourceDelta;
     Range source;
     Range dest;
@@ -31,21 +31,21 @@ class RangeMap {
       source(source),
       dest(dest),
       destDelta(dest.to - dest.from),
-      sourceDelta(source.to - source.from),
-      step(destDelta / sourceDelta) {};
+      sourceDelta(source.to - source.from)
+      {};
     const float getDestValue(const float sourceValue);
 };
 
 class Euler {
   public:
-    Euler(const float roll, const float pitch, const float yaw);
+    Euler(float roll, float pitch, float yaw);
     float yaw;
     float pitch;
     float roll;
-    const float getRollAngle();
-    const float getPitchAngle();
-    const float getYawAngle();
-    const float getAngle(ImuUseAngle useAngle);
+    float getRollAngle();
+    float getPitchAngle();
+    float getYawAngle();
+    float getAngle(ImuUseAngle useAngle);
 };
 
 class StructureBasic {

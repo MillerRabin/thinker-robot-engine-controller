@@ -16,6 +16,7 @@ class ArmShoulderQueueParams {
 class ArmShoulder : private ArmPart {
   private:
     Position position;
+    static void busReceiverTask(void *instance);
     static void engineTask(void *instance);
     void busReceiveCallback(can2040_msg frame);
     static volatile QueueHandle_t queue;

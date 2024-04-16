@@ -27,10 +27,14 @@ class Servo {
     uint setFrequency(const uint freq);    
     ImuUseAngle useAngle;    
     RangeMap imuMap;
-    uint setDegreeDirect(const float degree);
+    uint setDegreeDirect(const float degree);    
+    float targetAngle = NAN;
+    float speed = 0;
   public:
     Servo(const uint pin, Range degreeRange, Range imuRange, ImuUseAngle useAngle, const float freq = 50, const float lowPeriod = 0.0005, const float highPeriod = 0.0025);
-    uint setDegree(const float degree);
+    bool setTargetAngle(const float angle);
+    float getSpeed();
+    float getImuAngle();
     Euler euler;
-    
+    void tick();
 };

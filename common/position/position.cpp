@@ -26,8 +26,8 @@ void Position::compassTask(void* instance) {
     
     if (datatype == SENSOR_REPORTID_ROTATION_VECTOR) {
       if (position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal)) {        
-        /*printf("qx: %d, qy: %d, qz: %d, qw: %d\n", 
-          position->quaternion.i, position->quaternion.j, position->quaternion.k, position->quaternion.real);*/
+        /*printf("qx: %d, qy: %d, qz: %d, qw: %d\n",
+          position->quaternion.rawI, position->quaternion.rawJ, position->quaternion.rawK, position->quaternion.rawReal);*/
         if (position->armPart->updateQuaternion(position) != 0) {
           printf("quat sending error\n");
         }
@@ -102,14 +102,14 @@ void Position::compassTask(void* instance) {
 }
 
 bool Position::updateQuaternionData(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal) {
-  uint16_t id = (rawQuatI > quaternion.i) ? rawQuatI - quaternion.i : quaternion.i - rawQuatI;
-  uint16_t jd = (rawQuatJ > quaternion.j) ? rawQuatJ - quaternion.j : quaternion.j - rawQuatJ;
-  uint16_t kd = (rawQuatK > quaternion.k) ? rawQuatK - quaternion.k : quaternion.k - rawQuatK;
-  uint16_t rd = (rawQuatReal > quaternion.real) ? rawQuatReal - quaternion.real : quaternion.real - rawQuatReal;
-  quaternion.i = rawQuatI;
-  quaternion.j = rawQuatJ;
-  quaternion.k = rawQuatK;
-  quaternion.real = rawQuatReal;
+  uint16_t id = (rawQuatI > quaternion.rawI) ? rawQuatI - quaternion.rawI : quaternion.rawI - rawQuatI;
+  uint16_t jd = (rawQuatJ > quaternion.rawJ) ? rawQuatJ - quaternion.rawJ : quaternion.rawJ - rawQuatJ;
+  uint16_t kd = (rawQuatK > quaternion.rawK) ? rawQuatK - quaternion.rawK : quaternion.rawK - rawQuatK;
+  uint16_t rd = (rawQuatReal > quaternion.real) ? rawQuatReal - quaternion.rawReal : quaternion.rawReal - rawQuatReal;
+  quaternion.rawI = rawQuatI;
+  quaternion.rawJ = rawQuatJ;
+  quaternion.rawK = rawQuatK;
+  quaternion.rawReal = rawQuatReal;
   return ((id > 1) || (jd > 1) || (kd > 1) || (rd > 1));
 }
 

@@ -5,10 +5,18 @@ volatile QueueHandle_t ArmShoulder::queue;
 void ArmShoulder::engineTask(void *instance) {  
   ArmShoulder* shoulder = (ArmShoulder*)instance;
   while(true) {        
+    shoulder->shoulderY.tick();
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+  }
+}
+
+void ArmShoulder::busReceiverTask(void *instance) {  
+  ArmShoulder* shoulder = (ArmShoulder*)instance;
+  while(true) {        
     ArmShoulderQueueParams params;    
     xQueueReceive(ArmShoulder::queue, &params, portMAX_DELAY);    
-    shoulder->shoulderZ.setDegree(params.shoulderZ);    
-    shoulder->shoulderY.setDegree(params.shoulderY);
+    shoulder->shoulderZ.setTargetAngle(params.shoulderZ);    
+    shoulder->shoulderY.setTargetAngle(params.shoulderY);
   }
 }
 
@@ -22,17 +30,20 @@ ArmShoulder::ArmShoulder(
   const uint canRxPin,
   const uint canTxPin) :
     ArmPart(canRxPin, canTxPin),
-    shoulderZ(engineZPin, Range(-90, 90), Range(0, 270), IMU_USE_YAW, 100),
-    shoulderY(engineYPin, Range(-180, 180), Range(0, 180), IMU_USE_PITCH, 100),
+    shoulderZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, 100),
+    shoulderY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
     position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
   {            
     ArmShoulder::queue = xQueueCreate(10, sizeof(ArmShoulderQueueParams));
-    xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, tskIDLE_PRIORITY, NULL);    
+    xTaskCreate(ArmShoulder::busReceiverTask, "ArmShoulder::busReceiverTask", 1024, this, 1, NULL);
+    xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, tskIDLE_PRIORITY, NULL);
 }
 
-int ArmShoulder::updateQuaternion(BasePosition* position) {
-  shoulderY.euler = position->quaternion.getEuler();
-  shoulderZ.euler = position->quaternion.getEuler();  
+int ArmShoulder::updateQuaternion(BasePosition* position) {  
+  Euler euler = position->quaternion.getEuler();  
+  //printf("Euler get pitch angle: %f\n", euler.getPitchAngle());
+  shoulderY.euler = euler;
+  shoulderZ.euler = euler;
   return ArmPart::updateQuaternion(position->quaternion);
 }
 

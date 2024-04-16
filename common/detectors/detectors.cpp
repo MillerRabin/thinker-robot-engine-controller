@@ -2,21 +2,23 @@
 
 
 const float RangeMap::getDestValue(const float sourceValue) {
-  const float zeroVal = sourceValue - source.from;  
-  return dest.from + (step * zeroVal);
+  const float step = (sourceValue - source.from) / sourceDelta;  
+  const float target = dest.from + (destDelta * step);  
+  if ((target < dest.from) || (target > dest.to)) return NAN;
+  return target;
 }
 
-Euler::Euler(const float roll, const float pitch, const float yaw) : 
+Euler::Euler(float roll, float pitch, float yaw) : 
   roll(roll),
   pitch(pitch),
   yaw(yaw)
 {}
 
-const float Euler::getRollAngle() { return roll * 180.0 / PI; }
-const float Euler::getPitchAngle() { return pitch * 180.0 / PI; }
-const float Euler::getYawAngle() { return yaw * 180.0 / PI; }
+float Euler::getRollAngle() { return roll * 180.0 / PI; }
+float Euler::getPitchAngle() { return pitch * 180.0 / PI; }
+float Euler::getYawAngle() { return yaw * 180.0 / PI; }
 
-const float Euler::getAngle(ImuUseAngle useAngle) {
+float Euler::getAngle(ImuUseAngle useAngle) {
   if (useAngle == IMU_USE_ROLL)
     return getRollAngle();
   if (useAngle == IMU_USE_PITCH)
@@ -31,17 +33,17 @@ float StructureBasic::qToFloat(int16_t fixedPointValue, uint8_t qPoint) {
 }
 
 uint64_t Quaternion::serialize() {
-  return (uint64_t)this->i |
-         (uint64_t)this->j << 16 |
-         (uint64_t)this->k << 32 |
-         (uint64_t)this->real << 48;
+  return (uint64_t)this->rawI |
+         (uint64_t)this->rawJ << 16 |
+         (uint64_t)this->rawK << 32 |
+         (uint64_t)this->rawReal << 48;
 }
 
 void Quaternion::deserialize(uint8_t data[8]) {
-  this->i = (uint16_t)data[1] << 8 | data[0];
-  this->j = (uint16_t)data[3] << 8 | data[2];
-  this->k = (uint16_t)data[5] << 8 | data[4];
-  this->real = (uint16_t)data[7] << 8 | data[6];
+  this->rawI = (uint16_t)data[1] << 8 | data[0];
+  this->rawJ = (uint16_t)data[3] << 8 | data[2];
+  this->rawK = (uint16_t)data[5] << 8 | data[4];
+  this->rawReal = (uint16_t)data[7] << 8 | data[6];
 }
 
 void Quaternion::convertRawData() {
