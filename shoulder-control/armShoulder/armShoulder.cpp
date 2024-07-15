@@ -5,8 +5,14 @@ volatile QueueHandle_t ArmShoulder::queue;
 void ArmShoulder::engineTask(void *instance) {  
   ArmShoulder* shoulder = (ArmShoulder*)instance;
   while(true) {        
-    shoulder->shoulderY.tick();
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    shoulder->shoulderY.tick();   
+    
+    Euler rEuler = shoulder->platform.bno.quaternion.getEuler();    
+    printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
+    
+    Euler sEuler = shoulder->position.quaternion.getEuler();      
+    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle()); 
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 

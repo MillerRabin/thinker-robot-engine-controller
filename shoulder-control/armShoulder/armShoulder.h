@@ -13,7 +13,7 @@ class ArmShoulderQueueParams {
     float shoulderZ = NAN;
 };
 
-class ArmShoulder : private ArmPart {
+class ArmShoulder : public ArmPart {
   private:
     Position position;
     static void busReceiverTask(void *instance);

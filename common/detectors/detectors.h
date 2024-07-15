@@ -5,11 +5,7 @@
 #include "../config/config.h"
 #include <iostream>
 
-enum ImuUseAngle {
-  IMU_USE_ROLL,
-  IMU_USE_PITCH,
-  IMU_USE_YAW
-};
+#include "../structureBase/structureBase.h"
 
 class Range {
   public:
@@ -36,54 +32,18 @@ class RangeMap {
     const float getDestValue(const float sourceValue);
 };
 
-class Euler {
-  public:
-    Euler(float roll, float pitch, float yaw);
-    float yaw;
-    float pitch;
-    float roll;
-    float getRollAngle();
-    float getPitchAngle();
-    float getYawAngle();
-    float getAngle(ImuUseAngle useAngle);
-};
 
-class StructureBasic {
-  public:
-    float qToFloat(int16_t fixedPointValue, uint8_t qPoint);
-};
-
-class Quaternion : public StructureBasic {
-  private:
-    void convertRawData();    
-  public:
-    uint16_t rawI;
-    uint16_t rawJ;
-    uint16_t rawK;
-    uint16_t rawReal;
-    float i;
-    float j;
-    float k;
-    float real;
-    uint8_t Q1 = 14;
-    uint8_t Q2;
-    uint8_t Q3;
-    uint64_t serialize();
-    void deserialize(uint8_t data[8]);
-    Euler getEuler();
-};
-
-class Accuracy : public StructureBasic {
+class Accuracy : public StructureBase {
 public:
   uint16_t quaternionRadAccuracy;
   uint8_t quaternionAccuracy;
   uint8_t accelerometerAccuracy;
-  uint8_t gyroscopeAccuracy;  
+  uint8_t gyroscopeAccuracy;
   uint64_t serialize();
   void deserialize(uint8_t data[8]);
 };
 
-class Accelerometer : public StructureBasic {
+class Accelerometer : public StructureBase {
 public:
   uint16_t x;
   uint16_t y;
@@ -95,7 +55,7 @@ public:
   void deserialize(uint8_t data[8]);
 };
 
-class Gyroscope : public StructureBasic {
+class Gyroscope : public StructureBase {
 public:
   uint16_t x;
   uint16_t y;

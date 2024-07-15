@@ -63,5 +63,5 @@ float Servo::getImuAngle() {
 void Servo::tick() {  
   const float current = getImuAngle();
   const float diff = targetAngle - current;
-  printf("current: %f, taret: %f, diff: %f\n", current, targetAngle, diff);
+  printf("current: %f, target: %f, diff: %f\n", current, targetAngle, diff);
 }

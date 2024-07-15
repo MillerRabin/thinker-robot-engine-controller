@@ -10,12 +10,17 @@ add_executable(${APP_SHOULDER_NAME}
   ${APP_SHOULDER_SRC_DIRECTORY}/main.cpp
   ${APP_SHOULDER_SRC_DIRECTORY}/armShoulder/armShoulder.cpp
   ${APP_COMMON_DIRECTORY}/canBus/src/can2040.c
-  ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp    
+  ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp
+  ${APP_COMMON_DIRECTORY}/remoteBNO/remoteBNO.cpp    
   ${APP_COMMON_DIRECTORY}/servo/servo.cpp
   ${APP_COMMON_DIRECTORY}/position/position.cpp
   ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
   ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp  
-  ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp  
+  ${APP_COMMON_DIRECTORY}/structureBase/structureBase.cpp
+  ${APP_COMMON_DIRECTORY}/euler/euler.cpp
+  ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp
+  ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp
+  ${APP_COMMON_DIRECTORY}/armPlatform/armPlatform.cpp  
 )
 
 # Link to built libraries

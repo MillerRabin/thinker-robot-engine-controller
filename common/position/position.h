@@ -18,8 +18,9 @@ class Position : public BasePosition
     const uint intPin;
     const uint rstPin;
     static void compassTask(void* instance);
-    static void compassCallback(uint gpio, uint32_t events);
-    static volatile QueueHandle_t queue;
+    static void compassCallback(uint gpio, uint32_t events);    
+    static uint notificationIndex;
+    static TaskHandle_t compassTaskHandle;
   public:
     ArmPart* armPart;
     BNO080 imu;    

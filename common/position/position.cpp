@@ -1,111 +1,65 @@
 #include "position.h"
 
-uint8_t action = 0;
-volatile QueueHandle_t Position::queue;
+uint Position::notificationIndex = 1;
+TaskHandle_t Position::compassTaskHandle;
+
 
 void Position::compassCallback(uint gpio, uint32_t events) {    
-  xQueueSend(queue, &action, 0);
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  vTaskNotifyGiveIndexedFromISR(Position::compassTaskHandle, Position::notificationIndex, &xHigherPriorityTaskWoken );
+  portYIELD_FROM_ISR( xHigherPriorityTaskWoken );   
+  //xQueueSend(queue, &action, 0);
 }
 
 void Position::compassTask(void* instance) {  
   Position* position = (Position*)instance;  
   BNO080 imu = position->imu;
+  uint32_t ulNotificationValue;
   
-  imu.getReadings();
-  float ax, ay, az, gx, gy, gz;
-  uint8_t linAccuracy = 0;
-  uint8_t gyroAccuracy = 0;
-      
+  imu.getReadings();  
+
   while (true) {
-    BaseType_t res = xQueueReceive(Position::queue, &action, 2000 / portTICK_PERIOD_MS);
+    ulNotificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(50));
     uint16_t datatype = imu.getReadings();
-    if (res != pdPASS) {      
-      printf("Position sending result %d\n", res);
-      continue;
+    if( ulNotificationValue == 0 )
+    {
+      printf("Position notificationResult error %d\n", ulNotificationValue);
+      continue;                
     }
-    
+            
     if (datatype == SENSOR_REPORTID_ROTATION_VECTOR) {
-      if (position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal)) {        
-        /*printf("qx: %d, qy: %d, qz: %d, qw: %d\n",
-          position->quaternion.rawI, position->quaternion.rawJ, position->quaternion.rawK, position->quaternion.rawReal);*/
-        if (position->armPart->updateQuaternion(position) != 0) {
-          printf("quat sending error\n");
-        }
-      }
-
-      if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
-        /*printf("Quaternion: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
-          position->accuracy.quaternionRadAccuracy, 
-          position->accuracy.quaternionAccuracy, 
-          position->accuracy.gyroscopeAccuracy, 
-          position->accuracy.accelerometerAccuracy
-        );*/
-        if (position->armPart->updateAccuracy(position) != 0) {
-          printf("Quaternion accuracy sendind error\n");
-        };
-      }
-    
-      //, imu.rawQuatRadianAccuracy, imu.quatAccuracy
-      //imu->getQuat(qx, qy, qz, qw, quatRadianAccuracy, quatAccuracy);    
-
-      /*float roll = (imu.getRoll()) * 180.0 / PI; // Convert roll to degrees
-      float pitch = (imu.getPitch()) * 180.0 / PI; // Convert pitch to degrees
-      float yaw = (imu.getYaw()) * 180.0 / PI; // Convert yaw / heading to degrees
-      printf("roll: %f, pitch: %f, yaw: %f\n", roll, pitch, yaw);*/
+      position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal);      
+      if (position->armPart->updateQuaternion(position) != 0) {
+        printf("quat sending error\n");
+      }      
     }
 
     if (datatype == SENSOR_REPORTID_GYROSCOPE) {
-      if (position->updateGyroscopeData(imu.rawGyroX, imu.rawGyroY, imu.rawGyroZ)) {
-       /*printf("gyroX: %d, gyroY: %d, gyroZ: %d\n", 
-          position->gyroscope.x, position->gyroscope.y, position->gyroscope.z);*/          
-        if (position->armPart->updateGyroscope(position) != 0) {
-          printf("Gyro sending error\n");
-        }
-      }
-
-      if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
-        /*printf("Gyroscope: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
-          position->accuracy.quaternionRadAccuracy, 
-          position->accuracy.quaternionAccuracy, 
-          position->accuracy.gyroscopeAccuracy, 
-          position->accuracy.accelerometerAccuracy
-        );*/
-        if (position->armPart->updateAccuracy(position) != 0) {
-          printf("Gyro Accuracy senging error\n");
-        }
-      }
+      position->updateGyroscopeData(imu.rawGyroX, imu.rawGyroY, imu.rawGyroZ);      
+      if (position->armPart->updateGyroscope(position) != 0) {
+        printf("Gyro sending error\n");
+      }    
     }
 
     if (datatype == SENSOR_REPORTID_LINEAR_ACCELERATION) {
-      if (position->updateAccelerometerData(imu.rawLinAccelX, imu.rawLinAccelY, imu.rawLinAccelZ)) {
-        /*printf("accX: %d, accY: %d, accZ: %d\n", 
-          position->accelerometer.x, position->accelerometer.y, position->accelerometer.z);*/
-        
-        if (position->armPart->updateAccelerometer(position) != 0) {
-          printf("Accelerometer sending error\n");
-        }
+      position->updateAccelerometerData(imu.rawLinAccelX, imu.rawLinAccelY, imu.rawLinAccelZ);
+      if (position->armPart->updateAccelerometer(position) != 0) {
+        printf("Accelerometer sending error\n");
       }
-
-      if (position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy)) {
-        /*printf("Acceleration: rawQuatRadianAccuracy: %d, quatAccuracy: %d, gyroAccuracy: %d, lineAccelAccuracy: %d\n", 
-          position->accuracy.quaternionRadAccuracy, 
-          position->accuracy.quaternionAccuracy, 
-          position->accuracy.gyroscopeAccuracy, 
-          position->accuracy.accelerometerAccuracy
-        );*/
-        if (position->armPart->updateAccuracy(position) != 0) {
-          printf("Accelerometer Accuracy sending error");
-        }
-      }      
     }
-  }  
+          
+    position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy);
+    if (position->armPart->updateAccuracy(position) != 0) {
+      printf("Quaternion accuracy sending error\n");
+    }
+  }
 }
 
 bool Position::updateQuaternionData(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal) {
   uint16_t id = (rawQuatI > quaternion.rawI) ? rawQuatI - quaternion.rawI : quaternion.rawI - rawQuatI;
   uint16_t jd = (rawQuatJ > quaternion.rawJ) ? rawQuatJ - quaternion.rawJ : quaternion.rawJ - rawQuatJ;
   uint16_t kd = (rawQuatK > quaternion.rawK) ? rawQuatK - quaternion.rawK : quaternion.rawK - rawQuatK;
-  uint16_t rd = (rawQuatReal > quaternion.real) ? rawQuatReal - quaternion.rawReal : quaternion.rawReal - rawQuatReal;
+  uint16_t rd = (rawQuatReal > quaternion.rawReal) ? rawQuatReal - quaternion.rawReal : quaternion.rawReal - rawQuatReal;
   quaternion.rawI = rawQuatI;
   quaternion.rawJ = rawQuatJ;
   quaternion.rawK = rawQuatK;
@@ -165,12 +119,13 @@ Position::Position(ArmPart* armPart, const uint sdaPin, const uint sclPin, const
   gpio_set_dir(intPin, GPIO_IN);
   gpio_pull_up(intPin);
   gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &Position::compassCallback);
-
-  Position::queue = xQueueCreate(1, sizeof(uint8_t));
-  xTaskCreate(Position::compassTask, "Position::compassTask", 1024, this, tskIDLE_PRIORITY, NULL);  
+  
+  xTaskCreate(Position::compassTask, "Position::compassTask", 1024, this, tskIDLE_PRIORITY, &Position::compassTaskHandle);  
   bi_decl(bi_2pins_with_func(sdaPin, sclPin, GPIO_FUNC_I2C));
     
   imu.begin(BNO080_DEFAULT_ADDRESS, i2c_default, intPin);  
+  printf("Clearing tare\n");
+  imu.clearTare();
   imu.calibrateAll();
   imu.enableRotationVector(50);  
   imu.enableLinearAccelerometer(50);

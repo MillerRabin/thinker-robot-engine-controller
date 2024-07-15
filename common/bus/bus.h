@@ -28,20 +28,26 @@ extern "C" {
 
 typedef void (* CanCallback)( void* armPart, can2040_msg frame );
 
-class Bus
-{
-private:
+
+typedef std::map<uint32_t, can2040_msg> CanMap;
+
+class Bus {
+private:  
   const uint32_t pio_num = 0;
   const uint32_t sys_clock = 125000000;
   const uint32_t bitrate = 1000000;
-  void* armPart;
+  void* armPart;  
   CanCallback busCallback;
-  static void busTask(void* instance); 
-  static void PIOx_IRQHandler(void);
-  static volatile QueueHandle_t queue;
+  static void busReceiveTask(void* instance);
+  static void busSendTask(void* instance);  
+  static void PIOx_IRQHandler(void);  
   static struct can2040 cbus;
-  static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);
-public:    
+  static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);  
+  static CanMap canSendMap;
+  static SemaphoreHandle_t sendMapSemaphore;
+  static CanMap canReceiveMap;
+  static SemaphoreHandle_t receiveMapSemaphore;  
+public: 
   Bus(const uint rxPin, const uint txPin, void* instance, CanCallback callback);
-  int send(uint32_t id, uint64_t data);
+  void send(uint32_t id, uint64_t data);
 };

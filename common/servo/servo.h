@@ -7,6 +7,7 @@
 #include <math.h>
 #include <iostream>
 #include "../detectors/detectors.h"
+#include "../euler/euler.h"
 
 class Servo {
   private:

@@ -5,6 +5,7 @@
 #include "../bus/bus.h"
 #include "../config/config.h"
 #include "../detectors/detectors.h"
+#include "../armPlatform/armPlatform.h"
 
 class BasePosition {
   public:
@@ -16,7 +17,7 @@ class BasePosition {
 
 class ArmPart {
   private:
-    Bus bus;
+    Bus bus;    
     static void canCallback(void* pArmPart, can2040_msg frame);
   protected:    
     virtual void busReceiveCallback(can2040_msg frame) {};
@@ -24,7 +25,8 @@ class ArmPart {
     int updateAccelerometer(Accelerometer acc);
     int updateGyroscope(Gyroscope gyro);
     int updateAccuracy(Accuracy acc);
-  public:    
+  public:
+    ArmPlatform platform; 
     virtual uint32_t getQuaternionMessageId() { return 0; };
     virtual uint32_t getAccelerometerMessageId() { return 0; };
     virtual uint32_t getGyroscopeMessageId() { return 0; };
