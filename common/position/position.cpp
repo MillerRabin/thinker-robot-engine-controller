@@ -7,8 +7,7 @@ TaskHandle_t Position::compassTaskHandle;
 void Position::compassCallback(uint gpio, uint32_t events) {    
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
   vTaskNotifyGiveIndexedFromISR(Position::compassTaskHandle, Position::notificationIndex, &xHigherPriorityTaskWoken );
-  portYIELD_FROM_ISR( xHigherPriorityTaskWoken );   
-  //xQueueSend(queue, &action, 0);
+  portYIELD_FROM_ISR( xHigherPriorityTaskWoken );     
 }
 
 void Position::compassTask(void* instance) {  
