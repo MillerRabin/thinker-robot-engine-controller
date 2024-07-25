@@ -5,11 +5,15 @@ set(PROJECT_NAME "THINKER_ROBOT_ENGINE_CONTROL")
 set(BUILD_NUMBER "1")
 
 # Set app name(s) and version(s)
-set(APP_SHOULDER_NAME "ENGINE_CONTROL")
+set(APP_SHOULDER_NAME "ENGINE_CONTROL_SHOULDER")
 set(APP_SHOULDER_VERSION_NUMBER "0.0.1")
+
+set(APP_ELBOW_NAME "ENGINE_CONTROL_ELBOW")
+set(APP_ELBOWVERSION_NUMBER "0.0.1")
 
 # Specify the app(s) source code
 set(APP_SHOULDER_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/shoulder-control")
+set(APP_ELBOW_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/elbow-control")
 
 set(APP_COMMON_DIRECTORY "${CMAKE_SOURCE_DIR}/common")
 
@@ -59,11 +63,11 @@ target_include_directories(FreeRTOS PUBLIC
 
 include_directories(RP2040
     ${CMAKE_SOURCE_DIR}/pico-sdk/src/rp2_common/cmsis/stub/CMSIS/Device/RaspberryPi/RP2040/Include
-    ${CMAKE_SOURCE_DIR}/pico-sdk/src/rp2_common/cmsis/stub/CMSIS/Core/Include
-    
+    ${CMAKE_SOURCE_DIR}/pico-sdk/src/rp2_common/cmsis/stub/CMSIS/Core/Include    
 )
 
 
 
 # Include the apps' source code
 add_subdirectory(${APP_SHOULDER_SRC_DIRECTORY})
+add_subdirectory(${APP_ELBOW_SRC_DIRECTORY})

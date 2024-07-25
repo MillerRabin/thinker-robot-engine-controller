@@ -7,6 +7,13 @@
         "array": "cpp",
         "string": "cpp",
         "string_view": "cpp",
-        "iostream": "cpp"
+        "iostream": "cpp",
+        "memory": "cpp",
+        "istream": "cpp",
+        "functional": "cpp",
+        "tuple": "cpp",
+        "utility": "cpp",
+        "cstdint": "cpp",
+        "cstddef": "cpp"
     }
 }

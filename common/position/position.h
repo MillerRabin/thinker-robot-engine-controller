@@ -19,7 +19,7 @@ class Position : public BasePosition
     const uint rstPin;
     static void compassTask(void* instance);
     static void compassCallback(uint gpio, uint32_t events);    
-    static uint notificationIndex;
+    static uint32_t notificationIndex;
     static TaskHandle_t compassTaskHandle;
   public:
     ArmPart* armPart;

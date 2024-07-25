@@ -1,28 +1,25 @@
 #include "position.h"
 
-uint Position::notificationIndex = 1;
+uint32_t Position::notificationIndex = 1;
 TaskHandle_t Position::compassTaskHandle;
 
 
 void Position::compassCallback(uint gpio, uint32_t events) {    
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
   vTaskNotifyGiveIndexedFromISR(Position::compassTaskHandle, Position::notificationIndex, &xHigherPriorityTaskWoken );
-  portYIELD_FROM_ISR( xHigherPriorityTaskWoken );     
+  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 void Position::compassTask(void* instance) {  
   Position* position = (Position*)instance;  
   BNO080 imu = position->imu;
-  uint32_t ulNotificationValue;
-  
+  uint32_t notificationValue;  
   imu.getReadings();  
-
   while (true) {
-    ulNotificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(50));
+    notificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(50));
     uint16_t datatype = imu.getReadings();
-    if( ulNotificationValue == 0 )
-    {
-      printf("Position notificationResult error %d\n", ulNotificationValue);
+    if( notificationValue == 0 ) {
+      printf("Position notificationResult error %d\n", notificationValue);
       continue;                
     }
             
@@ -32,6 +29,14 @@ void Position::compassTask(void* instance) {
         printf("quat sending error\n");
       }      
     }
+
+    if (datatype == SENSOR_REPORTID_GAME_ROTATION_VECTOR) {
+      position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal);      
+      if (position->armPart->updateQuaternion(position) != 0) {
+        printf("quat sending error\n");
+      }      
+    }
+    
 
     if (datatype == SENSOR_REPORTID_GYROSCOPE) {
       position->updateGyroscopeData(imu.rawGyroX, imu.rawGyroY, imu.rawGyroZ);      
@@ -127,6 +132,7 @@ Position::Position(ArmPart* armPart, const uint sdaPin, const uint sclPin, const
   imu.clearTare();
   imu.calibrateAll();
   imu.enableRotationVector(50);  
+  //imu.enableGameRotationVector(50);  
   imu.enableLinearAccelerometer(50);
   imu.enableGyro(50);
 }

@@ -2,7 +2,6 @@
 
 #include <map>
 
-
 #ifndef PI
   #define PI					3.14159265358979f
 #endif
@@ -18,7 +17,13 @@
 #define CAN_SHOULDER_GYROSCOPE 0x22
 #define CAN_SHOULDER_ACCURACY 0x23
 
+#define CAN_ELBOW_QUATERNION 0x30
+#define CAN_ELBOW_ACCELEROMETER 0x31
+#define CAN_ELBOW_GYROSCOPE 0x32
+#define CAN_ELBOW_ACCURACY 0x33
+
 #define CAN_SHOULDER_SET_YZ_DEGREE 0x60
+#define CAN_ELBOW_SET_Y_DEGREE 0x70
 
 #define SDA_PIN 0
 #define SCL_PIN 1
@@ -26,6 +31,7 @@
 #define RST_PIN 2
 #define SHOULDER_Z_PIN 9
 #define SHOULDER_Y_PIN 3
+#define ELBOW_Y_PIN 3
 #define RX_PIN 4
 #define TX_PIN 5
 #define CAN_SEND_LOOP_TIMEOUT 50
