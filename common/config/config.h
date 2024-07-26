@@ -6,6 +6,10 @@
   #define PI					3.14159265358979f
 #endif
 
+#ifndef DEG_TO_RAD
+  #define DEG_TO_RAD (PI / 180)
+#endif
+
 #define CAN_PLATFORM_QUATERNION 0x10
 #define CAN_PLATFORM_ACCELEROMETER 0x11
 #define CAN_PLATFORM_GYROSCOPE 0x12
