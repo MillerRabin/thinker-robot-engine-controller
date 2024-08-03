@@ -8,6 +8,7 @@
 #include "../../common/armPart/armPart.h"
 #include "../../common/i2cScan/i2cScan.h"
 #include "../../common/bmp280/bmp280.h"
+#include "../../common/mpu6500/mpu6500.h"
 
 class ArmElbowQueueParams {
   public:    
@@ -21,6 +22,7 @@ class ArmElbow : public ArmPart {
     void busReceiveCallback(can2040_msg frame);
     static volatile QueueHandle_t queue;    
     static BMP280 bmp;
+    static MPU6500 mpu;
   public:    
     Servo elbowY;
     ArmElbow(

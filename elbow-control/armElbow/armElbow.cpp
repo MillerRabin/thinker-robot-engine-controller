@@ -2,14 +2,19 @@
 
 volatile QueueHandle_t ArmElbow::queue;
 BMP280 ArmElbow::bmp;
+MPU6500 ArmElbow::mpu;
 
 void ArmElbow::engineTask(void *instance) {  
   ArmElbow* elbow = (ArmElbow*)instance;
-  
+
+  mpu.initMPU6500();
   while(true) {                
     //I2CScan::scan(i2c_default);
     float alt = bmp.readAltitude();
     printf("Altitude is %f\n", alt);
+    if (mpu.update()) {
+      printf("Yaw %f, Pitch %f, Roll: %f", mpu.getYaw(), mpu.getPitch(), mpu.getRoll());
+    }
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }

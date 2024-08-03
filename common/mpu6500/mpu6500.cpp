@@ -1,9 +1,9 @@
-#include "mpu9250.h"
+#include "mpu6500.h"
 
-bool MPU9250::setup(const uint8_t addr, const MPU9250Setting &mpu_setting, i2c_inst_t *_i2cPort)
+bool MPU6500::setup(const uint8_t addr, const MPU6500Setting &mpu_setting, i2c_inst_t *_i2cPort)
 {
   // addr should be valid for MPU
-  if ((addr < MPU9250_DEFAULT_ADDRESS) || (addr > MPU9250_DEFAULT_ADDRESS + 7))
+  if ((addr < MPU6500_DEFAULT_ADDRESS) || (addr > MPU6500_DEFAULT_ADDRESS + 7))
   {
     printf("I2C address 0x%x is not valid for MPU. Please check your I2C address.\n", addr);
     return false;
@@ -12,23 +12,16 @@ bool MPU9250::setup(const uint8_t addr, const MPU9250Setting &mpu_setting, i2c_i
   setting = mpu_setting;
   this->_i2cPort = _i2cPort;
 
-  if (isConnectedMPU9250())
+  if (isConnectedMPU6500())
   {
-    initMPU9250();
-    if (isConnectedAK8963())
-      initAK8963();
-    else
-    {
-      if (b_verbose)
-        printf("Could not connect to AK8963\n");
-      has_connected = false;
-      return false;
-    }
+    printf("MPU connected\n");
+    initMPU6500();
+    printf("MPU inited\n");
   }
   else
   {
     if (b_verbose)
-      printf("Could not connect to MPU9250\n");
+      printf("Could not connect to MPU6500\n");
     has_connected = false;
     return false;
   }
@@ -36,7 +29,7 @@ bool MPU9250::setup(const uint8_t addr, const MPU9250Setting &mpu_setting, i2c_i
   return true;
 }
 
-void MPU9250::sleep(bool b)
+void MPU6500::sleep(bool b)
 {
   uint8_t c = read_byte(mpu_i2c_addr, PWR_MGMT_1); // read the value, change sleep bit to match b, write uint8_t back to register
   if (b)
@@ -50,68 +43,57 @@ void MPU9250::sleep(bool b)
   write_byte(mpu_i2c_addr, PWR_MGMT_1, c);
 }
 
-void MPU9250::verbose(const bool b)
+void MPU6500::verbose(const bool b)
 {
   b_verbose = b;
 }
 
-void MPU9250::ahrs(const bool b)
+void MPU6500::ahrs(const bool b)
 {
   b_ahrs = b;
 }
 
-void MPU9250::calibrateAccelGyro()
+void MPU6500::calibrateAccelGyro()
 {
   calibrate_acc_gyro_impl();
 }
 
-void MPU9250::calibrateMag()
+bool MPU6500::isConnected()
 {
-  calibrate_mag_impl();
-}
-
-bool MPU9250::isConnected()
-{
-  has_connected = isConnectedMPU9250() && isConnectedAK8963();
+  has_connected = isConnectedMPU6500();
   return has_connected;
 }
 
-bool MPU9250::isConnectedMPU9250()
+bool MPU6500::isConnectedMPU6500()
 {
   uint8_t c = read_byte(mpu_i2c_addr, WHO_AM_I_MPU9250);
-  if (b_verbose) {
-    printf("MPU9250 WHO AM I = 0x%x\n", c);    
+  if (b_verbose)
+  {
+    printf("MPU6500 WHO AM I = 0x%x\n", c);
   }
-  bool b = (c == MPU9250_WHOAMI_DEFAULT_VALUE);
+  bool b = (c == MPU6500_WHOAMI_DEFAULT_VALUE);
   b |= (c == MPU9255_WHOAMI_DEFAULT_VALUE);
   b |= (c == MPU6500_WHOAMI_DEFAULT_VALUE);
   return b;
 }
 
-bool MPU9250::isConnectedAK8963()
+bool MPU6500::isSleeping()
 {
-  uint8_t c = read_byte(AK8963_ADDRESS, AK8963_WHO_AM_I);
-  if (b_verbose) {
-    printf("AK8963 WHO AM I = 0x%x\n", c);    
-  }
-  return (c == AK8963_WHOAMI_DEFAULT_VALUE);
-}
-
-bool MPU9250::isSleeping() {
   uint8_t c = read_byte(mpu_i2c_addr, PWR_MGMT_1);
   return (c & 0x40) == 0x40;
 }
 
-bool MPU9250::available() {
+bool MPU6500::available()
+{
   return has_connected && (read_byte(mpu_i2c_addr, INT_STATUS) & 0x01);
 }
 
-bool MPU9250::update() {
+bool MPU6500::update()
+{
   if (!available())
     return false;
 
   update_accel_gyro();
-  update_mag();
 
   // Madgwick function needs to be fed North, East, and Down direction like
   // (AN, AE, AD, GN, GE, GD, MN, ME, MD)
@@ -133,15 +115,19 @@ bool MPU9250::update() {
   float gn = +g[0] * DEG_TO_RAD;
   float ge = -g[1] * DEG_TO_RAD;
   float gd = -g[2] * DEG_TO_RAD;
-  float mn = +m[1];
-  float me = -m[0];
-  float md = +m[2];
+  float mn = 0;
+  float me = 0;
+  float md = 0;
 
-  for (size_t i = 0; i < n_filter_iter; ++i) {
+  printf("an: %f, ae: %f, ad:%f, gn: %f, ge: %f, gd:%f\n", an, ae, ad, gn, ge, gd);
+
+  for (size_t i = 0; i < n_filter_iter; ++i)
+  {
     quat_filter.update(an, ae, ad, gn, ge, gd, mn, me, md, q);
   }
 
-  if (!b_ahrs) {
+  if (!b_ahrs)
+  {
     temperature_count = read_temperature_data();              // Read the adc values
     temperature = ((float)temperature_count) / 333.87 + 21.0; // Temperature in degrees Centigrade
   }
@@ -152,14 +138,14 @@ bool MPU9250::update() {
   return true;
 }
 
-void MPU9250::setAccBias(const float x, const float y, const float z)
+void MPU6500::setAccBias(const float x, const float y, const float z)
 {
   acc_bias[0] = x;
   acc_bias[1] = y;
   acc_bias[2] = z;
   write_accel_offset();
 }
-void MPU9250::setGyroBias(const float x, const float y, const float z)
+void MPU6500::setGyroBias(const float x, const float y, const float z)
 {
   gyro_bias[0] = x;
   gyro_bias[1] = y;
@@ -167,60 +153,49 @@ void MPU9250::setGyroBias(const float x, const float y, const float z)
   write_gyro_offset();
 }
 
-void MPU9250::setMagBias(const float x, const float y, const float z)
-{
-  mag_bias[0] = x;
-  mag_bias[1] = y;
-  mag_bias[2] = z;
-}
-
-void MPU9250::setMagScale(const float x, const float y, const float z)
-{
-  mag_scale[0] = x;
-  mag_scale[1] = y;
-  mag_scale[2] = z;
-}
-
-void MPU9250::selectFilter(QuatFilterSel sel)
+void MPU6500::selectFilter(QuatFilterSel sel)
 {
   quat_filter.select_filter(sel);
 }
 
-void MPU9250::setFilterIterations(const size_t n)
+void MPU6500::setFilterIterations(const size_t n)
 {
   if (n > 0)
     n_filter_iter = n;
 }
 
-bool MPU9250::selftest()
+bool MPU6500::selftest()
 {
   return self_test_impl();
 }
 
-void MPU9250::initMPU9250()
+void MPU6500::initMPU6500()
 {
   acc_resolution = get_acc_resolution(setting.accel_fs_sel);
   gyro_resolution = get_gyro_resolution(setting.gyro_fs_sel);
-  mag_resolution = get_mag_resolution(setting.mag_output_bits);
-
-  // reset device
-  write_byte(mpu_i2c_addr, PWR_MGMT_1, 0x80); // Write a one to bit 7 reset bit; toggle reset device
-  vTaskDelay(pdMS_TO_TICKS(100));
   
+  // reset device
+  printf("reset device\n");
+  write_byte(mpu_i2c_addr, PWR_MGMT_1, 0x80); // Write a one to bit 7 reset bit; toggle reset device
+  printf("device reseted\n");
+  vTaskDelay(pdMS_TO_TICKS(100));
   // wake up device
+  printf("device wake up\n");
   write_byte(mpu_i2c_addr, PWR_MGMT_1, 0x00); // Clear sleep mode bit (6), enable all sensors
-  vTaskDelay(pdMS_TO_TICKS(100));                                 // Wait for all registers to reset
+  printf("device wake up done\n");
+  vTaskDelay(pdMS_TO_TICKS(100)); // Wait for all registers to reset
 
   // get stable time source
+  printf("Select clock source\n");
   write_byte(mpu_i2c_addr, PWR_MGMT_1, 0x01); // Auto select clock source to be PLL gyroscope reference if ready else
   vTaskDelay(pdMS_TO_TICKS(200));
-
+  printf("Select clock source done\n");
   // Configure Gyro and Thermometer
   // Disable FSYNC and set thermometer and gyro bandwidth to 41 and 42 Hz, respectively;
   // minimum delay time for this setting is 5.9 ms, which means sensor fusion update rates cannot
   // be higher than 1 / 0.0059 = 170 Hz
   // GYRO_DLPF_CFG = bits 2:0 = 011; this limits the sample rate to 1000 Hz for both
-  // With the MPU9250, it is possible to get gyro sample rates of 32 kHz (!), 8 kHz, or 1 kHz
+  // With the MPU6500, it is possible to get gyro sample rates of 32 kHz (!), 8 kHz, or 1 kHz
   uint8_t mpu_config = (uint8_t)setting.gyro_dlpf_cfg;
   write_byte(mpu_i2c_addr, MPU_CONFIG, mpu_config);
 
@@ -267,35 +242,7 @@ void MPU9250::initMPU9250()
   vTaskDelay(pdMS_TO_TICKS(100));
 }
 
-void MPU9250::initAK8963()
-{
-  // First extract the factory calibration for each magnetometer axis
-  uint8_t raw_data[3];                           // x/y/z gyro calibration data stored here
-  write_byte(AK8963_ADDRESS, AK8963_CNTL, 0x00); // Power down magnetometer
-  vTaskDelay(pdMS_TO_TICKS(10));
-  write_byte(AK8963_ADDRESS, AK8963_CNTL, 0x0F); // Enter Fuse ROM access mode
-  vTaskDelay(pdMS_TO_TICKS(10));
-  read_bytes(AK8963_ADDRESS, AK8963_ASAX, 3, &raw_data[0]);     // Read the x-, y-, and z-axis calibration values
-  mag_bias_factory[0] = (float)(raw_data[0] - 128) / 256. + 1.; // Return x-axis sensitivity adjustment values, etc.
-  mag_bias_factory[1] = (float)(raw_data[1] - 128) / 256. + 1.;
-  mag_bias_factory[2] = (float)(raw_data[2] - 128) / 256. + 1.;
-  write_byte(AK8963_ADDRESS, AK8963_CNTL, 0x00); // Power down magnetometer
-  vTaskDelay(pdMS_TO_TICKS(10));
-  // Configure the magnetometer for continuous read and highest resolution
-  // set Mscale bit 4 to 1 (0) to enable 16 (14) bit resolution in CNTL register,
-  // and enable continuous mode data acquisition MAG_MODE (bits [3:0]), 0010 for 8 Hz and 0110 for 100 Hz sample rates
-  write_byte(AK8963_ADDRESS, AK8963_CNTL, (uint8_t)setting.mag_output_bits << 4 | MAG_MODE); // Set magnetometer data resolution and sample ODR
-  vTaskDelay(pdMS_TO_TICKS(10));
-
-  if (b_verbose) {
-    printf("Mag Factory Calibration Values: \n");
-    printf("  X-Axis sensitivity offset value: %f\n", mag_bias_factory[0]);
-    printf("  Y-Axis sensitivity offset value: %f\n", mag_bias_factory[1]);
-    printf("  Z-Axis sensitivity offset value: %f'n", mag_bias_factory[2]);    
-  }
-}
-
-void MPU9250::update_rpy(float qw, float qx, float qy, float qz)
+void MPU6500::update_rpy(float qw, float qx, float qy, float qz)
 {
   // Define output variables from updated quaternion---these are Tait-Bryan angles, commonly used in aircraft orientation.
   // In this coordinate system, the positive z-axis is down toward Earth.
@@ -318,7 +265,6 @@ void MPU9250::update_rpy(float qw, float qx, float qy, float qz)
   rpy[0] *= 180.0f / PI;
   rpy[1] *= 180.0f / PI;
   rpy[2] *= 180.0f / PI;
-  rpy[2] += magnetic_declination;
   if (rpy[2] >= +180.f)
     rpy[2] -= 360.f;
   else if (rpy[2] < -180.f)
@@ -329,9 +275,9 @@ void MPU9250::update_rpy(float qw, float qx, float qy, float qz)
   lin_acc[2] = a[2] - a33;
 }
 
-void MPU9250::update_accel_gyro()
+void MPU6500::update_accel_gyro()
 {
-  int16_t raw_acc_gyro_data[7];       // used to read all 14 bytes at once from the MPU9250 accel/gyro
+  int16_t raw_acc_gyro_data[7];       // used to read all 14 bytes at once from the MPU6500 accel/gyro
   read_accel_gyro(raw_acc_gyro_data); // INT cleared on any read
 
   // Now we'll calculate the accleration value into actual g's
@@ -348,7 +294,7 @@ void MPU9250::update_accel_gyro()
   g[2] = (float)raw_acc_gyro_data[6] * gyro_resolution;
 }
 
-void MPU9250::read_accel_gyro(int16_t *destination)
+void MPU6500::read_accel_gyro(int16_t *destination)
 {
   uint8_t raw_data[14];                                                // x/y/z accel register data stored here
   read_bytes(mpu_i2c_addr, ACCEL_XOUT_H, 14, &raw_data[0]);            // Read the 14 raw data registers into data array
@@ -361,49 +307,7 @@ void MPU9250::read_accel_gyro(int16_t *destination)
   destination[6] = ((int16_t)raw_data[12] << 8) | (int16_t)raw_data[13];
 }
 
-void MPU9250::update_mag()
-{
-  int16_t mag_count[3] = {0, 0, 0}; // Stores the 16-bit signed magnetometer sensor output
-
-  // Read the x/y/z adc values
-  if (read_mag(mag_count))
-  {
-    // Calculate the magnetometer values in milliGauss
-    // Include factory calibration per data sheet and user environmental corrections
-    // mag_bias is calcurated in 16BITS
-    float bias_to_current_bits = mag_resolution / get_mag_resolution(MAG_OUTPUT_BITS::M16BITS);
-    m[0] = (float)(mag_count[0] * mag_resolution * mag_bias_factory[0] - mag_bias[0] * bias_to_current_bits) * mag_scale[0]; // get actual magnetometer value, this depends on scale being set
-    m[1] = (float)(mag_count[1] * mag_resolution * mag_bias_factory[1] - mag_bias[1] * bias_to_current_bits) * mag_scale[1];
-    m[2] = (float)(mag_count[2] * mag_resolution * mag_bias_factory[2] - mag_bias[2] * bias_to_current_bits) * mag_scale[2];
-  }
-}
-
-bool MPU9250::read_mag(int16_t *destination)
-{
-  const uint8_t st1 = read_byte(AK8963_ADDRESS, AK8963_ST1);
-  if (st1 & 0x01)
-  {                                                             // wait for magnetometer data ready bit to be set
-    uint8_t raw_data[7];                                        // x/y/z gyro register data, ST2 register stored here, must read ST2 at end of data acquisition
-    read_bytes(AK8963_ADDRESS, AK8963_XOUT_L, 7, &raw_data[0]); // Read the six raw data and ST2 registers sequentially into data array
-    if (MAG_MODE == 0x02 || MAG_MODE == 0x04 || MAG_MODE == 0x06)
-    {                        // continuous or external trigger read mode
-      if ((st1 & 0x02) != 0) // check if data is not skipped
-        return false;        // this should be after data reading to clear DRDY register
-    }
-
-    uint8_t c = raw_data[6]; // End data read by reading ST2 register
-    if (!(c & 0x08))
-    {                                                             // Check if magnetic sensor overflow set, if not then report data
-      destination[0] = ((int16_t)raw_data[1] << 8) | raw_data[0]; // Turn the MSB and LSB into a signed 16-bit value
-      destination[1] = ((int16_t)raw_data[3] << 8) | raw_data[2]; // Data stored as little Endian
-      destination[2] = ((int16_t)raw_data[5] << 8) | raw_data[4];
-      return true;
-    }
-  }
-  return false;
-}
-
-int16_t MPU9250::read_temperature_data()
+int16_t MPU6500::read_temperature_data()
 {
   uint8_t raw_data[2];                                   // x/y/z gyro register data stored here
   read_bytes(mpu_i2c_addr, TEMP_OUT_H, 2, &raw_data[0]); // Read the two raw data registers sequentially into data array
@@ -414,18 +318,18 @@ int16_t MPU9250::read_temperature_data()
 // of the at-rest readings and then loads the resulting offsets into accelerometer and gyro bias registers.
 // ACCEL_FS_SEL: 2g (maximum sensitivity)
 // GYRO_FS_SEL: 250dps (maximum sensitivity)
-void MPU9250::calibrate_acc_gyro_impl()
+void MPU6500::calibrate_acc_gyro_impl()
 {
   set_acc_gyro_to_calibration();
   collect_acc_gyro_data_to(acc_bias, gyro_bias);
   write_accel_offset();
   write_gyro_offset();
   vTaskDelay(pdMS_TO_TICKS(100));
-  initMPU9250();
+  initMPU6500();
   vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
-void MPU9250::set_acc_gyro_to_calibration()
+void MPU6500::set_acc_gyro_to_calibration()
 {
   // reset device
   write_byte(mpu_i2c_addr, PWR_MGMT_1, 0x80); // Write a one to bit 7 reset bit; toggle reset device
@@ -458,7 +362,7 @@ void MPU9250::set_acc_gyro_to_calibration()
   vTaskDelay(pdMS_TO_TICKS(40));
 }
 
-void MPU9250::collect_acc_gyro_data_to(float *a_bias, float *g_bias)
+void MPU6500::collect_acc_gyro_data_to(float *a_bias, float *g_bias)
 {
   // At end of sample accumulation, turn off FIFO sensor read
   uint8_t data[12];                                   // data array to hold accelerometer and gyro x, y, z, data
@@ -502,7 +406,7 @@ void MPU9250::collect_acc_gyro_data_to(float *a_bias, float *g_bias)
   }
 }
 
-void MPU9250::write_accel_offset()
+void MPU6500::write_accel_offset()
 {
   // Construct the accelerometer biases for push to the hardware accelerometer bias registers. These registers contain
   // factory trim values which must be added to the calculated accelerometer biases; on boot up these registers will hold
@@ -554,7 +458,7 @@ void MPU9250::write_accel_offset()
   write_byte(mpu_i2c_addr, ZA_OFFSET_L, write_data[5]);
 }
 
-void MPU9250::write_gyro_offset()
+void MPU6500::write_gyro_offset()
 {
   // Construct the gyro biases for push to the hardware gyro bias registers, which are reset to zero upon device startup
   uint8_t gyro_offset_data[6]{0};
@@ -574,92 +478,9 @@ void MPU9250::write_gyro_offset()
   write_byte(mpu_i2c_addr, ZG_OFFSET_L, gyro_offset_data[5]);
 }
 
-// mag calibration is executed in MAG_OUTPUT_BITS: 16BITS
-void MPU9250::calibrate_mag_impl()
-{
-  // set MAG_OUTPUT_BITS to maximum to calibrate
-  MAG_OUTPUT_BITS mag_output_bits_cache = setting.mag_output_bits;
-  setting.mag_output_bits = MAG_OUTPUT_BITS::M16BITS;
-  initAK8963();
-  collect_mag_data_to(mag_bias, mag_scale);
-
-  if (b_verbose) {
-    printf("Mag Calibration done!");
-    printf("AK8963 mag biases (mG) %f, %f, %f\n", mag_bias[0], mag_bias[1], mag_bias[2]);        
-    printf("AK8963 mag scale (mG) %f, %f, %f\n", mag_scale[0], mag_scale[1], mag_scale[2]);    
-  }
-
-  // restore MAG_OUTPUT_BITS
-  setting.mag_output_bits = mag_output_bits_cache;
-  initAK8963();
-}
-
-void MPU9250::collect_mag_data_to(float *m_bias, float *m_scale)
-{
-  if (b_verbose)
-    printf("Mag Calibration: Wave device in a figure eight until done!");
-  vTaskDelay(pdMS_TO_TICKS(4000));
-
-  // shoot for ~fifteen seconds of mag data
-  uint16_t sample_count = 0;
-  if (MAG_MODE == 0x02)
-    sample_count = 128;      // at 8 Hz ODR, new mag data is available every 125 ms
-  else if (MAG_MODE == 0x06) // in this library, fixed to 100Hz
-    sample_count = 1500;     // at 100 Hz ODR, new mag data is available every 10 ms
-
-  int32_t bias[3] = {0, 0, 0}, scale[3] = {0, 0, 0};
-  int16_t mag_max[3] = {-32767, -32767, -32767};
-  int16_t mag_min[3] = {32767, 32767, 32767};
-  int16_t mag_temp[3] = {0, 0, 0};
-  for (uint16_t ii = 0; ii < sample_count; ii++)
-  {
-    read_mag(mag_temp); // Read the mag data
-    for (int jj = 0; jj < 3; jj++)
-    {
-      if (mag_temp[jj] > mag_max[jj])
-        mag_max[jj] = mag_temp[jj];
-      if (mag_temp[jj] < mag_min[jj])
-        mag_min[jj] = mag_temp[jj];
-    }
-    if (MAG_MODE == 0x02)
-      vTaskDelay(pdMS_TO_TICKS(135)); // at 8 Hz ODR, new mag data is available every 125 ms
-    if (MAG_MODE == 0x06)
-      vTaskDelay(pdMS_TO_TICKS(12));; // at 100 Hz ODR, new mag data is available every 10 ms
-  }
-
-  if (b_verbose) {
-    printf("mag x min/max: %d/%d\n", mag_min[0], mag_max[0]);    
-    printf("mag y min/max: %d/%d\n", mag_min[1], mag_max[1]);    
-    printf("mag z min/max: %d/%d\n", mag_min[2], mag_max[2]);    
-  }
-
-  // Get hard iron correction
-  bias[0] = (mag_max[0] + mag_min[0]) / 2; // get average x mag bias in counts
-  bias[1] = (mag_max[1] + mag_min[1]) / 2; // get average y mag bias in counts
-  bias[2] = (mag_max[2] + mag_min[2]) / 2; // get average z mag bias in counts
-
-  float bias_resolution = get_mag_resolution(MAG_OUTPUT_BITS::M16BITS);
-  m_bias[0] = (float)bias[0] * bias_resolution * mag_bias_factory[0]; // save mag biases in G for main program
-  m_bias[1] = (float)bias[1] * bias_resolution * mag_bias_factory[1];
-  m_bias[2] = (float)bias[2] * bias_resolution * mag_bias_factory[2];
-
-  // Get soft iron correction estimate
-  //*** multiplication by mag_bias_factory added in accordance with the following comment
-  //*** https://github.com/kriswiner/MPU9250/issues/456#issue-836657973
-  scale[0] = (float)(mag_max[0] - mag_min[0]) * mag_bias_factory[0] / 2; // get average x axis max chord length in counts
-  scale[1] = (float)(mag_max[1] - mag_min[1]) * mag_bias_factory[1] / 2; // get average y axis max chord length in counts
-  scale[2] = (float)(mag_max[2] - mag_min[2]) * mag_bias_factory[2] / 2; // get average z axis max chord length in counts
-
-  float avg_rad = scale[0] + scale[1] + scale[2];
-  avg_rad /= 3.0;
-
-  m_scale[0] = avg_rad / ((float)scale[0]);
-  m_scale[1] = avg_rad / ((float)scale[1]);
-  m_scale[2] = avg_rad / ((float)scale[2]);
-}
-
 // Accelerometer and gyroscope self test; check calibration wrt factory settings
-bool MPU9250::self_test_impl() { // Should return percent deviation from factory trim values, +/- 14 or less deviation is a pass
+bool MPU6500::self_test_impl()
+{ // Should return percent deviation from factory trim values, +/- 14 or less deviation is a pass
   uint8_t raw_data[6] = {0, 0, 0, 0, 0, 0};
   int32_t gAvg[3] = {0}, aAvg[3] = {0}, aSTAvg[3] = {0}, gSTAvg[3] = {0};
   float factoryTrim[6];
@@ -746,23 +567,26 @@ bool MPU9250::self_test_impl() { // Should return percent deviation from factory
     self_test_result[i + 3] = 100.0 * ((float)(gSTAvg[i] - gAvg[i])) / factoryTrim[i + 3] - 100.; // Report percent differences
   }
 
-  if (b_verbose) {
+  if (b_verbose)
+  {
     printf("x-axis self test: acceleration trim within : %f % of factory value\n", self_test_result[0]);
-    printf("y-axis self test: acceleration trim within : % of factory value\n", self_test_result[1]);
-    printf("z-axis self test: acceleration trim within : % of factory value\n", self_test_result[2]);
-    printf("x-axis self test: gyration trim within : % of factory value\n", self_test_result[3]);
-    printf("y-axis self test: gyration trim within : % of factory value\n", self_test_result[4]);
-    printf("z-axis self test: gyration trim within : % of factory value\n", self_test_result[5]);
+    printf("y-axis self test: acceleration trim within : %f % of factory value\n", self_test_result[1]);
+    printf("z-axis self test: acceleration trim within : %f % of factory value\n", self_test_result[2]);
+    printf("x-axis self test: gyration trim within : %f % of factory value\n", self_test_result[3]);
+    printf("y-axis self test: gyration trim within : %f % of factory value\n", self_test_result[4]);
+    printf("z-axis self test: gyration trim within : %f % of factory value\n", self_test_result[5]);
   }
 
   bool b = true;
-  for (uint8_t i = 0; i < 6; ++i) {
+  for (uint8_t i = 0; i < 6; ++i)
+  {
     b &= fabs(self_test_result[i]) <= 14.f;
   }
   return b;
 }
 
-float MPU9250::get_acc_resolution(const ACCEL_FS_SEL accel_af_sel) const {
+float MPU6500::get_acc_resolution(const ACCEL_FS_SEL accel_af_sel) const
+{
   switch (accel_af_sel)
   {
   // Possible accelerometer scales (and their register bit settings) are:
@@ -781,7 +605,7 @@ float MPU9250::get_acc_resolution(const ACCEL_FS_SEL accel_af_sel) const {
   }
 }
 
-float MPU9250::get_gyro_resolution(const GYRO_FS_SEL gyro_fs_sel) const
+float MPU6500::get_gyro_resolution(const GYRO_FS_SEL gyro_fs_sel) const
 {
   switch (gyro_fs_sel)
   {
@@ -801,58 +625,46 @@ float MPU9250::get_gyro_resolution(const GYRO_FS_SEL gyro_fs_sel) const
   }
 }
 
-float MPU9250::get_mag_resolution(const MAG_OUTPUT_BITS mag_output_bits) const
-{
-  switch (mag_output_bits)
-  {
-  // Possible magnetometer scales (and their register bit settings) are:
-  // 14 bit resolution (0) and 16 bit resolution (1)
-  // Proper scale to return milliGauss
-  case MAG_OUTPUT_BITS::M14BITS:
-    return 10. * 4912. / 8190.0;
-  case MAG_OUTPUT_BITS::M16BITS:
-    return 10. * 4912. / 32760.0;
-  default:
-    return 0.;
-  }
-}
-
-void MPU9250::write_byte(uint8_t address, uint8_t subAddress, uint8_t data)
-{
-  int wr = i2c_write_blocking(_i2cPort, subAddress, &data, 1, false);    
+void MPU6500::write_byte(uint8_t address, uint8_t subAddress, uint8_t data) {
+  uint8_t pdata[2] = { subAddress, data };
+  int wr = i2c_write_blocking(_i2cPort, subAddress, pdata, 2, false);
   if (wr == PICO_ERROR_GENERIC)
     print_i2c_error();
 }
 
-uint8_t MPU9250::read_byte(uint8_t address, uint8_t subAddress)
+uint8_t MPU6500::read_byte(uint8_t address, uint8_t subAddress)
 {
-  int wr = i2c_write_blocking(_i2cPort, address, &subAddress, 1, false);
-  if (wr == PICO_ERROR_GENERIC) {
+  int wr = i2c_write_blocking(_i2cPort, address, &subAddress, 1, true);
+  if (wr == PICO_ERROR_GENERIC)
+  {
     print_i2c_error();
     return 0;
   }
   uint8_t pdata[1];
   int rr = i2c_read_blocking(_i2cPort, address, pdata, 1, false);
-  if (rr == PICO_ERROR_GENERIC) {
+  if (rr == PICO_ERROR_GENERIC)
+  {
     print_i2c_error();
     return 0;
   }
-  return pdata[0];    
+  return pdata[0];
 }
 
-int MPU9250::read_bytes(uint8_t address, uint8_t subAddress, uint8_t count, uint8_t *dest)
+int MPU6500::read_bytes(uint8_t address, uint8_t subAddress, uint8_t count, uint8_t *dest)
 {
-  int wr = i2c_write_blocking(_i2cPort, address, &subAddress, 1, false);
-  if (wr == PICO_ERROR_GENERIC) return 0;
-  int rr = i2c_read_blocking(_i2cPort, address, dest, count, false);  
-  if (rr == PICO_ERROR_GENERIC) {
+  int wr = i2c_write_blocking(_i2cPort, address, &subAddress, 1, true);
+  if (wr == PICO_ERROR_GENERIC)
+    return 0;
+  int rr = i2c_read_blocking(_i2cPort, address, dest, count, false);
+  if (rr == PICO_ERROR_GENERIC)
+  {
     print_i2c_error();
     return 0;
   }
   return rr;
 }
 
-void MPU9250::print_i2c_error()
+void MPU6500::print_i2c_error()
 {
   printf("I2C ERROR CODE: %d\n", i2c_err_);
 }

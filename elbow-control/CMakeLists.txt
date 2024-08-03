@@ -23,8 +23,8 @@ add_executable(${APP_ELBOW_NAME}
   ${APP_COMMON_DIRECTORY}/i2cScan/i2cScan.cpp
   ${APP_COMMON_DIRECTORY}/bmp280/sensor.cpp
   ${APP_COMMON_DIRECTORY}/bmp280/bmp280.cpp  
-  ${APP_COMMON_DIRECTORY}/mpu9250/quaternionFilter.cpp
-  ${APP_COMMON_DIRECTORY}/mpu9250/mpu9250.cpp  
+  ${APP_COMMON_DIRECTORY}/quaternionFilter/quaternionFilter.cpp
+  ${APP_COMMON_DIRECTORY}/mpu6500/mpu6500.cpp  
   
 )
 

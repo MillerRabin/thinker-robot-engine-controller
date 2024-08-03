@@ -30,7 +30,7 @@ class QuaternionFilter
   float Kp = 30.0;
   float Ki = 0.0;
 
-  QuatFilterSel filter_sel{QuatFilterSel::MADGWICK};
+  QuatFilterSel filter_sel{QuatFilterSel::MAHONY};
   double deltaT{0.};
   uint32_t newTime{0}, oldTime{0};
 
@@ -54,5 +54,5 @@ public:
   // float Ki = 0.0;
   // with MPU-9250, angles start oscillating at Kp=40. Ki does not seem to help and is not required.
   // with MPU-6050, some instability observed at Kp=100 Now set to 30.
-  void mahony(float ax, float ay, float az, float gx, float gy, float gz, float mx, float my, float mz, float *q);  
+  void mahony(float ax, float ay, float az, float gx, float gy, float gz, float *q);  
 };
