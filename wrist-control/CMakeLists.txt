@@ -1,14 +1,14 @@
 cmake_minimum_required(VERSION 3.14)
 
 # Make project data accessible to compiler
-add_compile_definitions(APP_NAME="${APP_ELBOW_NAME}")
-add_compile_definitions(APP_VERSION="${APP_ELBOW_VERSION_NUMBER}")
+add_compile_definitions(APP_NAME="${APP_WRIST_NAME}")
+add_compile_definitions(APP_VERSION="${APP_WRIST_VERSION_NUMBER}")
 add_compile_definitions(BUILD_NUM=${BUILD_NUMBER})
 
 # Include app source code file(s)
-add_executable(${APP_ELBOW_NAME}
-  ${APP_ELBOW_SRC_DIRECTORY}/main.cpp
-  ${APP_ELBOW_SRC_DIRECTORY}/armElbow/armElbow.cpp
+add_executable(${APP_WRIST_NAME}
+  ${APP_WRIST_SRC_DIRECTORY}/main.cpp
+  ${APP_WRIST_SRC_DIRECTORY}/armWrist/armWrist.cpp
   ${APP_COMMON_DIRECTORY}/canBus/src/can2040.c
   ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp
   ${APP_COMMON_DIRECTORY}/remoteBNO/remoteBNO.cpp    
@@ -24,7 +24,7 @@ add_executable(${APP_ELBOW_NAME}
 )
 
 # Link to built libraries
-target_link_libraries(${APP_ELBOW_NAME} LINK_PUBLIC
+target_link_libraries(${APP_WRIST_NAME} LINK_PUBLIC
   pico_stdlib
   hardware_i2c
   hardware_pwm
@@ -32,8 +32,8 @@ target_link_libraries(${APP_ELBOW_NAME} LINK_PUBLIC
 )
 
 # Enable/disable STDIO via USB and UART
-pico_enable_stdio_usb(${APP_ELBOW_NAME} 1)
-pico_enable_stdio_uart(${APP_ELBOW_NAME} 0)
+pico_enable_stdio_usb(${APP_WRIST_NAME} 1)
+pico_enable_stdio_uart(${APP_WRIST_NAME} 0)
 
 # Enable extra build products
-pico_add_extra_outputs(${APP_ELBOW_NAME})
+pico_add_extra_outputs(${APP_WRIST_NAME})

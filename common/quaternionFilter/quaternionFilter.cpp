@@ -17,7 +17,7 @@ void QuaternionFilter::update(float ax, float ay, float az, float gx, float gy, 
   case QuatFilterSel::MADGWICK:
     madgwick(ax, ay, az, gx, gy, gz, mx, my, mz, q);
     break;
-  case QuatFilterSel::MAHONY:
+  case QuatFilterSel::MAHONY:    
     mahony(ax, ay, az, gx, gy, gz, q);
     break;
   default:
@@ -162,6 +162,7 @@ void QuaternionFilter::mahony(float ax, float ay, float az, float gx, float gy, 
 
   // Compute feedback only if accelerometer measurement valid (avoids NaN in accelerometer normalisation)
   tmp = ax * ax + ay * ay + az * az;
+  printf("mahony tmp %f\n", tmp);
   if (tmp > 0.0)
   {
     // Normalise accelerometer (assumed to measure the direction of gravity in body frame)
@@ -175,11 +176,15 @@ void QuaternionFilter::mahony(float ax, float ay, float az, float gx, float gy, 
     vy = q[0] * q[1] + q[2] * q[3];
     vz = q[0] * q[0] - 0.5f + q[3] * q[3];
 
+    printf("vx: %f, vy: %f, vz: %f\n", vx, vy, vz);
+
     // Error is cross product between estimated and measured direction of gravity in body frame
     // (half the actual magnitude)
     ex = (ay * vz - az * vy);
     ey = (az * vx - ax * vz);
     ez = (ax * vy - ay * vx);
+
+    printf("ex: %f, ey: %f, ez: %f\n", ex, ey, ez);
 
     // Compute and apply to gyro term the integral feedback, if enabled
     if (Ki > 0.0f)

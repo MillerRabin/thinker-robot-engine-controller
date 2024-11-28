@@ -11,7 +11,7 @@
 #include <task.h>
 
 #include "registerMap.h"
-#include "../quaternionFilter/quaternionFilter.h"
+#include "../sensorFusion/sensorFusion.h"
 
 enum class ACCEL_FS_SEL {
   A2G,
@@ -100,8 +100,8 @@ class MPU6500 {
   float m[3]{0.f, 0.f, 0.f};
   float q[4] = {1.0f, 0.0f, 0.0f, 0.0f}; // vector to hold quaternion
   float rpy[3]{0.f, 0.f, 0.f};
-  float lin_acc[3]{0.f, 0.f, 0.f}; // linear acceleration (acceleration with gravity component subtracted)
-  QuaternionFilter quat_filter;
+  float lin_acc[3]{0.f, 0.f, 0.f}; // linear acceleration (acceleration with gravity component subtracted)  
+  SF fusion;
   size_t n_filter_iter{1};
 
   // Other settings
@@ -168,8 +168,7 @@ public:
   float getTemperature() const { return temperature; }
   void setAccBias(const float x, const float y, const float z);  
   void setGyroBias(const float x, const float y, const float z);  
-    
-  void selectFilter(QuatFilterSel sel);
+      
   void setFilterIterations(const size_t n);  
   bool selftest();  
   void initMPU6500();    

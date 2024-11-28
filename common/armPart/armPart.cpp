@@ -6,7 +6,7 @@ ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) :
 
 int ArmPart::updateQuaternion(Quaternion quat) {  
   uint64_t data = quat.serialize();  
-  uint8_t id = getQuaternionMessageId();
+  uint8_t id = getQuaternionMessageId();  
   if (id == 0) return -1;
   bus.send(id, data);
   return 0;

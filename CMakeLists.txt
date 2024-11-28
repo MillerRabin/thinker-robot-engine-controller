@@ -9,11 +9,15 @@ set(APP_SHOULDER_NAME "ENGINE_CONTROL_SHOULDER")
 set(APP_SHOULDER_VERSION_NUMBER "0.0.1")
 
 set(APP_ELBOW_NAME "ENGINE_CONTROL_ELBOW")
-set(APP_ELBOWVERSION_NUMBER "0.0.1")
+set(APP_ELBOW_VERSION_NUMBER "0.0.1")
+
+set(APP_WRIST_NAME "ENGINE_CONTROL_WRIST")
+set(APP_WRIST_VERSION_NUMBER "0.0.1")
 
 # Specify the app(s) source code
 set(APP_SHOULDER_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/shoulder-control")
 set(APP_ELBOW_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/elbow-control")
+set(APP_WRIST_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/wrist-control")
 
 set(APP_COMMON_DIRECTORY "${CMAKE_SOURCE_DIR}/common")
 
@@ -71,3 +75,4 @@ include_directories(RP2040
 # Include the apps' source code
 add_subdirectory(${APP_SHOULDER_SRC_DIRECTORY})
 add_subdirectory(${APP_ELBOW_SRC_DIRECTORY})
+add_subdirectory(${APP_WRIST_SRC_DIRECTORY})

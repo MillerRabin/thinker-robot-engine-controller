@@ -109,7 +109,7 @@ bool MPU6500::update()
   // gyro will be convert from [deg/s] to [rad/s] inside of this function
   // quat_filter.update(-a[0], a[1], a[2], g[0] * DEG_TO_RAD, -g[1] * DEG_TO_RAD, -g[2] * DEG_TO_RAD, m[1], -m[0], m[2], q);
 
-  float an = -a[0];
+  /*float an = -a[0];
   float ae = +a[1];
   float ad = +a[2];
   float gn = +g[0] * DEG_TO_RAD;
@@ -117,24 +117,35 @@ bool MPU6500::update()
   float gd = -g[2] * DEG_TO_RAD;
   float mn = 0;
   float me = 0;
-  float md = 0;
+  float md = 0;*/
+  
+  printf("ax: %f, ay: %f, az:%f, gx: %f, gy: %f, gz:%f\n", a[0], a[1], a[2], g[0], g[1], g[2]);
+  float deltat = fusion.deltatUpdate();
+  fusion.MahonyUpdate(g[0], g[1], g[2], a[0], a[1], a[2], deltat);  //else use the magwick
 
-  printf("an: %f, ae: %f, ad:%f, gn: %f, ge: %f, gd:%f\n", an, ae, ad, gn, ge, gd);
+  float roll = fusion.getRoll();
+  float pitch = fusion.getPitch();
+  float yaw = fusion.getYaw();
 
-  for (size_t i = 0; i < n_filter_iter; ++i)
+  printf("roll: %f, pitch: %f, yaw: %f\n", roll, pitch, yaw);
+
+  
+
+  /*for (size_t i = 0; i < n_filter_iter; ++i)
   {
     quat_filter.update(an, ae, ad, gn, ge, gd, mn, me, md, q);
-  }
+  }*/
 
-  if (!b_ahrs)
+  /*if (!b_ahrs)
   {
     temperature_count = read_temperature_data();              // Read the adc values
     temperature = ((float)temperature_count) / 333.87 + 21.0; // Temperature in degrees Centigrade
   }
   else
   {
+    printf("Update rpy q[0]: %f, q[1]: %f, q[2]: %f, q[3]: %f\n", q[0], q[1], q[2], q[3]);
     update_rpy(q[0], q[1], q[2], q[3]);
-  }
+  }*/
   return true;
 }
 
@@ -151,17 +162,6 @@ void MPU6500::setGyroBias(const float x, const float y, const float z)
   gyro_bias[1] = y;
   gyro_bias[2] = z;
   write_gyro_offset();
-}
-
-void MPU6500::selectFilter(QuatFilterSel sel)
-{
-  quat_filter.select_filter(sel);
-}
-
-void MPU6500::setFilterIterations(const size_t n)
-{
-  if (n > 0)
-    n_filter_iter = n;
 }
 
 bool MPU6500::selftest()
@@ -262,9 +262,9 @@ void MPU6500::update_rpy(float qw, float qx, float qy, float qz)
   rpy[0] = atan2f(a31, a33);
   rpy[1] = -asinf(a32);
   rpy[2] = atan2f(a12, a22);
-  rpy[0] *= 180.0f / PI;
-  rpy[1] *= 180.0f / PI;
-  rpy[2] *= 180.0f / PI;
+  rpy[0] *= RAD_TO_DEG;
+  rpy[1] *= RAD_TO_DEG;
+  rpy[2] *= RAD_TO_DEG;
   if (rpy[2] >= +180.f)
     rpy[2] -= 360.f;
   else if (rpy[2] < -180.f)
@@ -479,8 +479,7 @@ void MPU6500::write_gyro_offset()
 }
 
 // Accelerometer and gyroscope self test; check calibration wrt factory settings
-bool MPU6500::self_test_impl()
-{ // Should return percent deviation from factory trim values, +/- 14 or less deviation is a pass
+bool MPU6500::self_test_impl() { // Should return percent deviation from factory trim values, +/- 14 or less deviation is a pass
   uint8_t raw_data[6] = {0, 0, 0, 0, 0, 0};
   int32_t gAvg[3] = {0}, aAvg[3] = {0}, aSTAvg[3] = {0}, gSTAvg[3] = {0};
   float factoryTrim[6];
@@ -569,12 +568,12 @@ bool MPU6500::self_test_impl()
 
   if (b_verbose)
   {
-    printf("x-axis self test: acceleration trim within : %f % of factory value\n", self_test_result[0]);
-    printf("y-axis self test: acceleration trim within : %f % of factory value\n", self_test_result[1]);
-    printf("z-axis self test: acceleration trim within : %f % of factory value\n", self_test_result[2]);
-    printf("x-axis self test: gyration trim within : %f % of factory value\n", self_test_result[3]);
-    printf("y-axis self test: gyration trim within : %f % of factory value\n", self_test_result[4]);
-    printf("z-axis self test: gyration trim within : %f % of factory value\n", self_test_result[5]);
+    printf("x-axis self test: acceleration trim within : %f %% of factory value\n", self_test_result[0]);
+    printf("y-axis self test: acceleration trim within : %f %% of factory value\n", self_test_result[1]);
+    printf("z-axis self test: acceleration trim within : %f %% of factory value\n", self_test_result[2]);
+    printf("x-axis self test: gyration trim within : %f %% of factory value\n", self_test_result[3]);
+    printf("y-axis self test: gyration trim within : %f %% of factory value\n", self_test_result[4]);
+    printf("z-axis self test: gyration trim within : %f %% of factory value\n", self_test_result[5]);
   }
 
   bool b = true;
@@ -627,7 +626,7 @@ float MPU6500::get_gyro_resolution(const GYRO_FS_SEL gyro_fs_sel) const
 
 void MPU6500::write_byte(uint8_t address, uint8_t subAddress, uint8_t data) {
   uint8_t pdata[2] = { subAddress, data };
-  int wr = i2c_write_blocking(_i2cPort, subAddress, pdata, 2, false);
+  int wr = i2c_write_blocking(_i2cPort, address, pdata, 2, false);
   if (wr == PICO_ERROR_GENERIC)
     print_i2c_error();
 }

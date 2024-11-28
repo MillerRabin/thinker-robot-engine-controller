@@ -30,7 +30,7 @@ class QuaternionFilter
   float Kp = 30.0;
   float Ki = 0.0;
 
-  QuatFilterSel filter_sel{QuatFilterSel::MAHONY};
+  QuatFilterSel filter_sel{QuatFilterSel::NONE};
   double deltaT{0.};
   uint32_t newTime{0}, oldTime{0};
 

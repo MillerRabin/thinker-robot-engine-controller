@@ -6,9 +6,9 @@ Euler::Euler(float roll, float pitch, float yaw) :
   yaw(yaw)
 {}
 
-float Euler::getRollAngle() { return roll * 180.0 / PI; }
-float Euler::getPitchAngle() { return pitch * 180.0 / PI; }
-float Euler::getYawAngle() { return yaw * 180.0 / PI; }
+float Euler::getRollAngle() { return roll * RAD_TO_DEG; }
+float Euler::getPitchAngle() { return pitch * RAD_TO_DEG; }
+float Euler::getYawAngle() { return yaw * RAD_TO_DEG; }
 
 float Euler::getYawDegree() { 
   const float angle = getYawAngle();

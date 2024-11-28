@@ -7,12 +7,13 @@
 #include "../../common/config/config.h"
 #include "../../common/armPart/armPart.h"
 
-class ArmElbowQueueParams {
+class ArmWristQueueParams {
   public:    
-    float elbowY = NAN;    
+    float wristY = NAN;
+    float wristZ = NAN;
 };
 
-class ArmElbow : public ArmPart {
+class ArmWrist : public ArmPart {
   private:
     Position position;
     static void busReceiverTask(void *instance);
@@ -20,8 +21,9 @@ class ArmElbow : public ArmPart {
     void busReceiveCallback(can2040_msg frame);
     static volatile QueueHandle_t queue;
   public:    
-    Servo elbowY;
-    ArmElbow(
+    Servo wristY;
+    Servo wristZ;
+    ArmWrist(
       uint memsSdaPin, 
       uint memsSclPin, 
       uint memsIntPin, 
@@ -31,10 +33,10 @@ class ArmElbow : public ArmPart {
       uint canRxPin,
       uint canTxPin
     );
-    uint32_t getQuaternionMessageId() { return CAN_ELBOW_QUATERNION; };
-    uint32_t getAccelerometerMessageId() { return CAN_ELBOW_ACCELEROMETER; };
-    uint32_t getGyroscopeMessageId() { return CAN_ELBOW_GYROSCOPE; };
-    uint32_t getAccuracyMessageId() { return CAN_ELBOW_ACCURACY; };
+    uint32_t getQuaternionMessageId() { return CAN_WRIST_QUATERNION; };
+    uint32_t getAccelerometerMessageId() { return CAN_WRIST_ACCELEROMETER; };
+    uint32_t getGyroscopeMessageId() { return CAN_WRIST_GYROSCOPE; };
+    uint32_t getAccuracyMessageId() { return CAN_WRIST_ACCURACY; };
     int updateQuaternion(BasePosition* position);
     int updateAccelerometer(BasePosition* position);
     int updateGyroscope(BasePosition* position);
