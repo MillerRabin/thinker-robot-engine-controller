@@ -19,7 +19,7 @@ void Position::compassTask(void* instance) {
     notificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(50));
     uint16_t datatype = imu.getReadings();
     if( notificationValue == 0 ) {
-      printf("Position notificationResult error %d\n", notificationValue);
+      //printf("Position notificationResult error %d\n", notificationValue);
       continue;                
     }
             

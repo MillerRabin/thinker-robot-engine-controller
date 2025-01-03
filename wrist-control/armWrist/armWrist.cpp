@@ -13,6 +13,7 @@ void ArmWrist::engineTask(void *instance) {
     
     Euler sEuler = wrist->position.quaternion.getEuler();      
     printf("Wrist roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle()); 
+    
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
@@ -38,7 +39,7 @@ ArmWrist::ArmWrist(
   const uint canTxPin) :
     ArmPart(canRxPin, canTxPin),    
     wristY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
-    wristZ(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
+    wristZ(engineZPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
     position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
   {            
     ArmWrist::queue = xQueueCreate(10, sizeof(ArmWristQueueParams));
