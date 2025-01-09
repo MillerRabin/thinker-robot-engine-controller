@@ -2,7 +2,7 @@
 
 #include "pico/stdlib.h"
 #include "../../common/servo/servo.h"
-#include "../../common/position/position.h"
+#include "../../common/position/positionBNO.h"
 #include "../../common/bus/bus.h"
 #include "../../common/config/config.h"
 #include "../../common/armPart/armPart.h"
@@ -26,7 +26,6 @@ class ArmElbow : public ArmPart {
       uint memsSclPin, 
       uint memsIntPin, 
       uint memsRstPin, 
-      uint engineZPin, 
       uint engineYPin, 
       uint canRxPin,
       uint canTxPin

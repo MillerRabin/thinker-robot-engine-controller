@@ -14,10 +14,14 @@ set(APP_ELBOW_VERSION_NUMBER "0.0.1")
 set(APP_WRIST_NAME "ENGINE_CONTROL_WRIST")
 set(APP_WRIST_VERSION_NUMBER "0.0.1")
 
+set(APP_CLAW_NAME "ENGINE_CONTROL_CLAW")
+set(APP_CLAW_VERSION_NUMBER "0.0.1")
+
 # Specify the app(s) source code
 set(APP_SHOULDER_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/shoulder-control")
 set(APP_ELBOW_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/elbow-control")
 set(APP_WRIST_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/wrist-control")
+set(APP_CLAW_SRC_DIRECTORY "${CMAKE_SOURCE_DIR}/claw-control")
 
 set(APP_COMMON_DIRECTORY "${CMAKE_SOURCE_DIR}/common")
 
@@ -39,8 +43,8 @@ include(pico_sdk_import.cmake)
 
 # Name the project
 project(${PROJECT_NAME}
-        LANGUAGES C CXX ASM
-        DESCRIPTION "Engine control for robotic arm"
+    LANGUAGES C CXX ASM
+    DESCRIPTION "Engine control for robotic arm"
 )
 
 # Initialise the Pico SDK
@@ -76,3 +80,4 @@ include_directories(RP2040
 add_subdirectory(${APP_SHOULDER_SRC_DIRECTORY})
 add_subdirectory(${APP_ELBOW_SRC_DIRECTORY})
 add_subdirectory(${APP_WRIST_SRC_DIRECTORY})
+add_subdirectory(${APP_CLAW_SRC_DIRECTORY})

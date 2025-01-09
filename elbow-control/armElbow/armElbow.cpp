@@ -29,8 +29,7 @@ ArmElbow::ArmElbow(
   const uint memsSdaPin, 
   const uint memsSclPin, 
   const uint memsIntPin, 
-  const uint memsRstPin, 
-  const uint engineZPin, 
+  const uint memsRstPin,
   const uint engineYPin, 
   const uint canRxPin,
   const uint canTxPin) :

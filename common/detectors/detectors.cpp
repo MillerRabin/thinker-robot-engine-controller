@@ -44,7 +44,3 @@ void Accuracy::deserialize(uint8_t data[8]) {
   this->quaternionRadAccuracy = (uint16_t)data[3] << 8 | data[2];
   this->gyroscopeAccuracy = data[4];  
 }
-
-
-
-

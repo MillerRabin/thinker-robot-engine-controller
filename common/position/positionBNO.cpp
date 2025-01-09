@@ -1,4 +1,4 @@
-#include "position.h"
+#include "positionBNO.h"
 
 uint32_t Position::notificationIndex = 1;
 TaskHandle_t Position::compassTaskHandle;
