@@ -1,10 +1,20 @@
 #include "WitMotion.h"
 
-volatile char WitMotion::s_cDataUpdate = 0;
 uint32_t WitMotion::c_uiBaud[10] = {0, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600};
+volatile bool WitMotion::dataAvailable = false;
 
-static void Usart1Init(uint32_t baud_rate)
-{
+volatile uint16_t WitMotion::rawAccX = 0;
+volatile uint16_t WitMotion::rawAccY = 0;
+volatile uint16_t WitMotion::rawAccZ = 0;
+volatile uint16_t WitMotion::rawGyrX = 0;
+volatile uint16_t WitMotion::rawGyrY = 0;
+volatile uint16_t WitMotion::rawGyrZ = 0;
+volatile uint16_t WitMotion::rawRoll = 0;
+volatile uint16_t WitMotion::rawPitch = 0;
+volatile uint16_t WitMotion::rawYaw = 0;
+volatile uint32_t WitMotion::rawHeight = 0;
+
+static void Usart1Init(uint32_t baud_rate) {
   uart_init(MEMS_UART_ID, 9600);  
   gpio_set_function(MEMS_TX_PIN, GPIO_FUNC_UART);
   gpio_set_function(MEMS_RX_PIN, GPIO_FUNC_UART);
@@ -25,59 +35,6 @@ void WitMotion::readDetectorTask(void *pvParameters) {
 	}
 }
 
-void WitMotion::writeDetectorData(void *pvParameters) {	
-  float fAcc[3], fGyro[3], fAngle[3], q[4];
-	int i;	
-  AutoScanSensor();  
-	while (1) {		
-    if(s_cDataUpdate) {      
-			float rawHeight = sReg[HeightL];
-			float height = 4200 + rawHeight;
-			bool updated = false;
-			for(i = 0; i < 3; i++)
-			{
-				fAcc[i] = sReg[AX+i] / 32768.0f * 16.0f;
-				fGyro[i] = sReg[GX+i] / 32768.0f * 2000.0f;
-				fAngle[i] = sReg[Roll+i] / 32768.0f * 180.0f;
-			}
-      
-			if(s_cDataUpdate & ACC_UPDATE)
-			{
-				//printf("acc:%.3f %.3f %.3f", fAcc[0], fAcc[1], fAcc[2]);
-				updated = true;
-				s_cDataUpdate &= ~ACC_UPDATE;
-			}
-			if(s_cDataUpdate & GYRO_UPDATE)
-			{
-				//printf("\tgyro:%.3f %.3f %.3f", fGyro[0], fGyro[1], fGyro[2]);
-				updated = true;
-				s_cDataUpdate &= ~GYRO_UPDATE;
-			}
-			if(s_cDataUpdate & ANGLE_UPDATE)
-			{
-        q[0] = sReg[q0];
-        q[1] = sReg[q1];
-        q[2] = sReg[q2];
-        q[3] = sReg[q3];
-				printf("\tangle:%.3f %.3f %.3f\n", fAngle[0], fAngle[1], fAngle[2]);
-        printf("\tQ:%.3f %.3f %.3f %.3f\n", q[0], q[1], q[2], q[3]);
-				updated = true;
-				s_cDataUpdate &= ~ANGLE_UPDATE;
-			}
-			if(s_cDataUpdate & MAG_UPDATE)
-			{
-				//printf("\tmag:%d %d %d", sReg[HX], sReg[HY], sReg[HZ]);
-				printf("\theight:%.3f", height);
-				updated = true;
-				s_cDataUpdate &= ~MAG_UPDATE;
-			}
-			if (updated) {
-				printf("\r\n");				
-			}
-		}    
-	}
-}
-
 void WitMotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum)
 {	  
   for(int i = 0; i < uiRegNum; i++){
@@ -85,25 +42,33 @@ void WitMotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum)
       //case AX:
       //case AY:
       case AZ:
-		    s_cDataUpdate |= ACC_UPDATE;
+		   rawAccX = sReg[AX];
+       rawAccY = sReg[AY];
+       rawAccZ = sReg[AZ];
+       dataAvailable = true;
       break;
       //case GX:
       //case GY:
       case GZ:
-				s_cDataUpdate |= GYRO_UPDATE;
-      break;
-      //case HX:
-      //case HY:
-      case HZ:
-				s_cDataUpdate |= MAG_UPDATE;
+       rawGyrX = sReg[GX];
+       rawGyrY = sReg[GY];
+       rawGyrZ = sReg[GZ];
+       dataAvailable = true;
       break;
       //case Roll:
       //case Pitch:
       case Yaw:
-				s_cDataUpdate |= ANGLE_UPDATE;
+				rawRoll = sReg[Roll];
+        rawPitch = sReg[Pitch];
+        rawYaw = sReg[Yaw];
+        dataAvailable = true;
       break;
+      //case PressureL
+      case PressureH:
+        rawHeight = (uint32_t)sReg[PressureH] << 16 | sReg[PressureL];
+        dataAvailable = true;
       default:
-				s_cDataUpdate |= READ_UPDATE;
+				dataAvailable = true;
 			break;
     }
 		uiReg++;
@@ -127,10 +92,10 @@ void WitMotion::AutoScanSensor(void) {
 		iRetry = 2;
 		do
 		{
-			s_cDataUpdate = 0;
+			dataAvailable = false;
 			WitReadReg(AX, 3);
 			Delayms(100);
-			if(s_cDataUpdate != 0)
+			if(dataAvailable)
 			{
 				printf("%lu baud find sensor\r\n\r\n", c_uiBaud[i]);				
 				return ;
@@ -163,8 +128,4 @@ WitMotion::WitMotion(const uint memsRxPin, const uint memsTxPin, const uint mems
   gpio_set_irq_enabled_with_callback(memsIntPin, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
     
   BaseType_t readTaskStatus = xTaskCreate(readDetectorTask, "readDetectorTask", 128, NULL, 5, NULL);
-  BaseType_t writeTaskStatus = xTaskCreate(writeDetectorData, "writeDetectorData", 1024, NULL, 5, NULL);
-  //BaseType_t scanI2cTaskStatus = xTaskCreate(startRangeDetector, "startRangeDetector", 1024, NULL, 5, NULL);
-  //BaseType_t scanI2cTaskStatus = xTaskCreate(scanI2cTask, "scanI2cTask", 1024, NULL, 5, NULL);
-  queue = xQueueCreate(4, sizeof(uint8_t));
 }
