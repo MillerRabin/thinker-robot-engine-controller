@@ -23,6 +23,9 @@ class ArmClaw : public ArmPart {
     static void engineTask(void *instance);
     void busReceiveCallback(can2040_msg frame);
     static volatile QueueHandle_t queue;
+    static void scanI2cTask();
+    static bool reserved_addr(uint8_t addr);    
+    static bool vl6180xEnabled;
   public:    
     Servo clawX;
     Servo clawY;
@@ -45,8 +48,8 @@ class ArmClaw : public ArmPart {
 
     uint32_t getQuaternionMessageId() { return CAN_CLAW_QUATERNION; };
     uint32_t getAccelerometerMessageId() { return CAN_CLAW_ACCELEROMETER; };
-    uint32_t getGyroscopeMessageId() { return CAN_CLAW_GYROSCOPE; };
-    uint32_t getAccuracyMessageId() { return CAN_CLAW_ACCURACY; };
+    uint32_t getGyroscopeMessageId() { return CAN_CLAW_GYROSCOPE; };    
+    uint32_t getHeightMessageId() { return CAN_CLAW_HEIGHT; };
     int updateQuaternion(BasePosition* position);
     int updateAccelerometer(BasePosition* position);
     int updateGyroscope(BasePosition* position);

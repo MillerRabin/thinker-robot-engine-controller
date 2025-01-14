@@ -36,6 +36,14 @@ int ArmPart::updateAccuracy(Accuracy acc) {
   return 0;
 }
 
+int ArmPart::updateHeight(uint32_t height) {
+  uint64_t data = (uint64_t)height;
+  uint8_t id = getHeightMessageId();
+  if (id == 0) return -1;
+  bus.send(id, data);
+  return 0;
+}
+
 void ArmPart::canCallback(void* pArmPart, can2040_msg frame) {
   uint32_t ident = frame.id;
   ArmPart* armPart = (ArmPart*)pArmPart;

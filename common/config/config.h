@@ -44,6 +44,7 @@
 #define CAN_CLAW_GYROSCOPE 0x52
 #define CAN_CLAW_ACCURACY 0x53
 #define CAN_CLAW_EULER_AND_HEIGHT 0x54
+#define CAN_CLAW_HEIGHT 0x55
 
 #define MEMS_SDA_PIN 0
 #define MEMS_SCL_PIN 1
@@ -54,19 +55,23 @@
 
 #define WITMOTION_XSHUT_PIN 6
 #define WITMOTION_INT_PIN 7
+#define VL_6180X_SHUT_PIN 13
+#define VL_53LOX_SHUT_PIN 14
 
 #define MEMS_UART_ID uart0
 #define DETECTORS_SDA_PIN 2
 #define DETECTORS_SCL_PIN 3
+
+
 #define SHOULDER_Z_PIN 9
 #define SHOULDER_Y_PIN 3
 #define ELBOW_Y_PIN 3
 #define WRIST_Z_PIN 9
 #define WRIST_Y_PIN 3
-#define CLAW_X_PIN 7
-#define CLAW_Y_PIN 8
-#define CLAW_Z_PIN 9
-#define CLAW_GRIPPER_PIN 10
+#define CLAW_X_PIN 8
+#define CLAW_Y_PIN 9
+#define CLAW_Z_PIN 10
+#define CLAW_GRIPPER_PIN 11
 #define CAN_RX_PIN 4
 #define CAN_TX_PIN 5
 #define CAN_SEND_LOOP_TIMEOUT 50

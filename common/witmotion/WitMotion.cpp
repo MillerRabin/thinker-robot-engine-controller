@@ -3,16 +3,20 @@
 uint32_t WitMotion::c_uiBaud[10] = {0, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600};
 volatile bool WitMotion::dataAvailable = false;
 
-volatile uint16_t WitMotion::rawAccX = 0;
-volatile uint16_t WitMotion::rawAccY = 0;
-volatile uint16_t WitMotion::rawAccZ = 0;
-volatile uint16_t WitMotion::rawGyrX = 0;
-volatile uint16_t WitMotion::rawGyrY = 0;
-volatile uint16_t WitMotion::rawGyrZ = 0;
+volatile uint16_t WitMotion::rawLinAccelX = 0;
+volatile uint16_t WitMotion::rawLinAccelY = 0;
+volatile uint16_t WitMotion::rawLinAccelZ = 0;
+volatile uint16_t WitMotion::rawGyroX = 0;
+volatile uint16_t WitMotion::rawGyroY = 0;
+volatile uint16_t WitMotion::rawGyroZ = 0;
 volatile uint16_t WitMotion::rawRoll = 0;
 volatile uint16_t WitMotion::rawPitch = 0;
 volatile uint16_t WitMotion::rawYaw = 0;
 volatile uint32_t WitMotion::rawHeight = 0;
+volatile uint16_t WitMotion::rawQuatReal = 0;
+volatile uint16_t WitMotion::rawQuatI = 0;
+volatile uint16_t WitMotion::rawQuatJ = 0;
+volatile uint16_t WitMotion::rawQuatK = 0;
 
 static void Usart1Init(uint32_t baud_rate) {
   uart_init(MEMS_UART_ID, 9600);  
@@ -35,6 +39,17 @@ void WitMotion::readDetectorTask(void *pvParameters) {
 	}
 }
 
+void WitMotion::init(void *pvParameters) {
+  AutoScanSensor();
+  printf("Set content Mode to Quaternion\n");
+  if (WitSetContent( RSW_ACC | RSW_GYRO | RSW_PRESS | RSW_Q) != WIT_HAL_OK) {
+		printf("Set RSW Error\n");
+    return;
+  }
+  printf("Set content Mode Success\n");
+  vTaskDelete( NULL );
+}
+
 void WitMotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum)
 {	  
   for(int i = 0; i < uiRegNum; i++){
@@ -42,17 +57,17 @@ void WitMotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum)
       //case AX:
       //case AY:
       case AZ:
-		   rawAccX = sReg[AX];
-       rawAccY = sReg[AY];
-       rawAccZ = sReg[AZ];
+		   rawLinAccelX = sReg[AX];
+       rawLinAccelY = sReg[AY];
+       rawLinAccelZ = sReg[AZ];
        dataAvailable = true;
       break;
       //case GX:
       //case GY:
       case GZ:
-       rawGyrX = sReg[GX];
-       rawGyrY = sReg[GY];
-       rawGyrZ = sReg[GZ];
+       rawGyroX = sReg[GX];
+       rawGyroY = sReg[GY];
+       rawGyroZ = sReg[GZ];
        dataAvailable = true;
       break;
       //case Roll:
@@ -61,13 +76,19 @@ void WitMotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum)
 				rawRoll = sReg[Roll];
         rawPitch = sReg[Pitch];
         rawYaw = sReg[Yaw];
-        dataAvailable = true;
+        dataAvailable = true;        
       break;
       //case PressureL
       case PressureH:
         rawHeight = (uint32_t)sReg[PressureH] << 16 | sReg[PressureL];
         dataAvailable = true;
-      default:
+      case q3:
+        rawQuatReal = sReg[q0];
+        rawQuatI = sReg[q1];
+        rawQuatJ = sReg[q2];
+        rawQuatK = sReg[q3];        
+        dataAvailable = true;
+      default:        
 				dataAvailable = true;
 			break;
     }
@@ -85,9 +106,8 @@ void WitMotion::gpio_callback(uint gpio, uint32_t events) {
 
 void WitMotion::AutoScanSensor(void) {
 	int i, iRetry;
-  printf("AutoScan Sensor\r\n");
-	for(i = 1; i < 10; i++)
-	{
+  printf("AutoScan Sensor\r\n");  
+	for(i = 1; i < 10; i++) {
 		uart_set_baudrate(MEMS_UART_ID, c_uiBaud[i]);
 		iRetry = 2;
 		do
@@ -126,6 +146,7 @@ WitMotion::WitMotion(const uint memsRxPin, const uint memsTxPin, const uint mems
   gpio_init(memsIntPin);
   gpio_set_dir(memsIntPin, GPIO_IN);
   gpio_set_irq_enabled_with_callback(memsIntPin, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
-    
-  BaseType_t readTaskStatus = xTaskCreate(readDetectorTask, "readDetectorTask", 128, NULL, 5, NULL);
+
+  BaseType_t readTaskStatus = xTaskCreate(readDetectorTask, "WitMotion::readDetectorTask", 128, NULL, 5, NULL);
+  BaseType_t initTaskStatus = xTaskCreate(init, "WitMotion::init", 1024, NULL, 5, NULL);
 }

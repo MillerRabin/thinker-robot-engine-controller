@@ -27,6 +27,6 @@ class PositionWitMotion : public BasePosition
     bool updateQuaternionData(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal);
     bool updateAccelerometerData(uint16_t rawAccX, uint16_t rawAccY, uint16_t rawAccZ);
     bool updateGyroscopeData(uint16_t rawGyroX, uint16_t rawGyroY, uint16_t rawGyroZ);
-    bool updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quaternionAccuracy, uint8_t gyroscopeAccuracy, uint8_t accelerometerAccuracy);
+    bool updateHeightData(uint32_t height);
     PositionWitMotion(ArmPart* armPart, const uint memsRxPin, const uint memsTxPin, const uint memsRstPin, const uint memsIntPin);
 };
