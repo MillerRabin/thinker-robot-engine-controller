@@ -21,7 +21,17 @@ add_executable(${APP_CLAW_NAME}
   ${APP_COMMON_DIRECTORY}/euler/euler.cpp
   ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp
   ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp
-  ${APP_COMMON_DIRECTORY}/armPlatform/armPlatform.cpp    
+  ${APP_COMMON_DIRECTORY}/armPlatform/armPlatform.cpp
+  ${APP_COMMON_DIRECTORY}/VL53L0X/Pico_VL53L0X.cpp
+  ${APP_COMMON_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_calibration.cpp
+  ${APP_COMMON_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_core.cpp
+  ${APP_COMMON_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_ranging.cpp
+  ${APP_COMMON_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_strings.cpp
+  ${APP_COMMON_DIRECTORY}/VL53L0X/core/src/vl53l0x_api.cpp
+  ${APP_COMMON_DIRECTORY}/VL53L0X/platform/src/vl53l0x_i2c_comms.cpp
+  ${APP_COMMON_DIRECTORY}/VL53L0X/platform/src/vl53l0x_platform.cpp
+  ${APP_COMMON_DIRECTORY}/VL6180x/VL6180x.cpp
+  ${APP_COMMON_DIRECTORY}/rangeDetector/rangeDetector.cpp
 )
 
 # Link to built libraries

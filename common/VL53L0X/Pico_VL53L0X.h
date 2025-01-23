@@ -1,6 +1,5 @@
 
-#ifndef VL53L0X_H
-#define VL53L0X_H
+#pragma once
 
 #include "vl53l0x_api.h"
 #include "vl53l0x_api_core.h"
@@ -17,27 +16,12 @@ public:
     VL53L0X_SENSE_HIGH_ACCURACY
   } VL53L0X_Sense_config_t;
 
-  bool begin(uint8_t i2c_addr = VL53L0X_I2C_ADDR, bool debug = false,
-                i2c_inst_t *i2c = i2c_default,
-                VL53L0X_Sense_config_t vl_config = VL53L0X_SENSE_DEFAULT);
-  bool setAddress(uint8_t newAddr);
-
-  // uint8_t getAddress(void); // not currently implemented
-
-  /**************************************************************************/
-  /*!
-      @brief  get a ranging measurement from the device
-      @param  pRangingMeasurementData the pointer to the struct the data will be
-     stored in
-      @param debug Optional debug flag. If true debug information will print via
-     Serial.print during execution. Defaults to false.
-      @returns True if address was set successfully, False otherwise
-  */
-  /**************************************************************************/
-  VL53L0X_Error
-  rangingTest(VL53L0X_RangingMeasurementData_t *pRangingMeasurementData,
-              bool debug = false) {
-    return getSingleRangingMeasurement(pRangingMeasurementData, debug);
+    bool begin(i2c_inst_t *i2c = i2c_default,
+               VL53L0X_Sense_config_t vl_config = VL53L0X_SENSE_DEFAULT);
+    bool setAddress(uint8_t newAddr);
+    
+  VL53L0X_Error rangingTest(VL53L0X_RangingMeasurementData_t *pRangingMeasurementData) {
+    return getSingleRangingMeasurement(pRangingMeasurementData);
   };
 
   VL53L0X_Error getSingleRangingMeasurement(
@@ -128,5 +112,3 @@ private:
 
   uint8_t _rangeStatus;
 };
-
-#endif

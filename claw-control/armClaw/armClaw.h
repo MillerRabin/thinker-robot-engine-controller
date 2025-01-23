@@ -6,6 +6,7 @@
 #include "../../common/bus/bus.h"
 #include "../../common/config/config.h"
 #include "../../common/armPart/armPart.h"
+#include "../../common/rangeDetector/rangeDetector.h"
 
 class ArmClawQueueParams {
   public:
@@ -23,27 +24,27 @@ class ArmClaw : public ArmPart {
     static void engineTask(void *instance);
     void busReceiveCallback(can2040_msg frame);
     static volatile QueueHandle_t queue;
-    static void scanI2cTask();
-    static bool reserved_addr(uint8_t addr);    
-    static bool vl6180xEnabled;
+    RangeDetector rangeDetector;
   public:    
     Servo clawX;
     Servo clawY;
     Servo clawZ;
     Servo clawGripper;
     ArmClaw(
-      const uint detectorsSdaPin, 
-      const uint detectorsSclPin, 
-      const uint engineXPin, 
-      const uint engineYPin, 
-      const uint engineZPin,
-      const uint engineGripperPin,
-      const uint canRxPin,
-      const uint canTxPin,
-      const uint memsRxPin,
-      const uint memsTxPin,
-      const uint memsRstPin,
-      const uint memsIntPin
+      const uint8_t detectorsSdaPin, 
+      const uint8_t detectorsSclPin, 
+      const uint8_t engineXPin, 
+      const uint8_t engineYPin, 
+      const uint8_t engineZPin,
+      const uint8_t engineGripperPin,
+      const uint8_t canRxPin,
+      const uint8_t canTxPin,
+      const uint8_t memsRxPin,
+      const uint8_t memsTxPin,
+      const uint8_t memsRstPin,
+      const uint8_t memsIntPin,
+      const uint8_t shortDetectorShutPin,
+      const uint8_t longDetectorShutPin
     );
 
     uint32_t getQuaternionMessageId() { return CAN_CLAW_QUATERNION; };

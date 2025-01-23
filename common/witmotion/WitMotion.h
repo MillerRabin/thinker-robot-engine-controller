@@ -13,12 +13,6 @@
 #include <task.h>
 #include <queue.h>
 
-#define ACC_UPDATE		0x01
-#define GYRO_UPDATE		0x02
-#define ANGLE_UPDATE	0x04
-#define MAG_UPDATE		0x08
-#define READ_UPDATE		0x80
-
 class WitMotion {
   private:
     const uint memsRxPin;

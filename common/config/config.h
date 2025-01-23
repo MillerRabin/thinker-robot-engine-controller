@@ -62,7 +62,6 @@
 #define DETECTORS_SDA_PIN 2
 #define DETECTORS_SCL_PIN 3
 
-
 #define SHOULDER_Z_PIN 9
 #define SHOULDER_Y_PIN 3
 #define ELBOW_Y_PIN 3
