@@ -597,7 +597,7 @@ VL53L0X_Error perform_ref_signal_measurement(VL53L0X_DEV Dev,
     status =
         VL53L0X_PerformSingleRangingMeasurement(Dev, &rangingMeasurementData);
 
-  printf("Signle range status: %d\n", status);
+  //printf("Signle range status: %d\n", status);
   
   if (status == VL53L0X_ERROR_NONE)
     status = VL53L0X_WrByte(Dev, 0xFF, 0x01);

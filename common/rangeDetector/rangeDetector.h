@@ -26,15 +26,16 @@ class RangeDetector {
     Pico_VL53L0X longDistanceDetector;
     VL6180x shortDistanceDetector;
     static void detectorTask(void *instance); 
-    static bool reserved_addr(uint8_t addr);    
+    static bool reserved_addr(uint8_t addr);        
     uint dCounter = 0;
     void printIdentification(struct VL6180xIdentification *temp);
     void initShortDistanceSensor();
+    static bool switchToShortDistance(RangeDetector* instance, bool useShortDistance);    
   public: 
-    bool enabled(bool value);    
+    bool enabled(bool value);
+    bool useShortDistance;
     i2c_inst_t* i2c;
-    Pico_VL53L0X& current;
     void scanI2cTask();
-    void switchToShortDistance(bool useShortDistance);
+    uint16_t range = 0;
     RangeDetector(i2c_inst_t* i2c, const uint8_t longDetectorShutPin, const uint8_t shortDetectorShutPin);
 };

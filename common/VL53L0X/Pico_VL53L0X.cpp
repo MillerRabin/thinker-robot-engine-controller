@@ -24,17 +24,15 @@ bool Pico_VL53L0X::begin(i2c_inst_t *i2c, VL53L0X_Sense_config_t vl_config) {
   
   Status = VL53L0X_DataInit(&MyDevice); // Data initialization
   
-  
-
   if (!setAddress(VL53L0X_I2C_ADDR))
     return false;
   
   Status = VL53L0X_GetDeviceInfo(&MyDevice, &DeviceInfo);
   
   if (Status == VL53L0X_ERROR_NONE) {    
-    printf("VL53L0X Info:\n");
-    printf("Device Name: %s, Type: %s, ID: %s\n", DeviceInfo.Name, DeviceInfo.Type, DeviceInfo.ProductId);                        
-    printf("Rev Major: %d, minor %d\n", DeviceInfo.ProductRevisionMajor, DeviceInfo.ProductRevisionMinor);      
+    //printf("VL53L0X Info:\n");
+    //printf("Device Name: %s, Type: %s, ID: %s\n", DeviceInfo.Name, DeviceInfo.Type, DeviceInfo.ProductId);                        
+    //printf("Rev Major: %d, minor %d\n", DeviceInfo.ProductRevisionMajor, DeviceInfo.ProductRevisionMinor);      
     
     if ((DeviceInfo.ProductRevisionMajor != 1) ||
         (DeviceInfo.ProductRevisionMinor != 1)) {
@@ -44,26 +42,26 @@ bool Pico_VL53L0X::begin(i2c_inst_t *i2c, VL53L0X_Sense_config_t vl_config) {
   }
 
   if (Status == VL53L0X_ERROR_NONE) {
-    printf("VL53L0X: StaticInit\n");
+    //printf("VL53L0X: StaticInit\n");
     Status = VL53L0X_StaticInit(pMyDevice); // Device Initialization
   }
 
   if (Status == VL53L0X_ERROR_NONE) {    
-    printf("VL53L0X: PerformRefSpadManagement\n");
+    //printf("VL53L0X: PerformRefSpadManagement\n");
     Status = VL53L0X_PerformRefSpadManagement(
     pMyDevice, &refSpadCount, &isApertureSpads); // Device Initialization
-    printf("refSpadCount = %d, isApertureSpads = %d\n", refSpadCount, isApertureSpads);      
+    //printf("refSpadCount = %d, isApertureSpads = %d\n", refSpadCount, isApertureSpads);      
   }
 
   if (Status == VL53L0X_ERROR_NONE) {    
-    printf("VL53L0X: PerformRefCalibration\n");    
+    //printf("VL53L0X: PerformRefCalibration\n");    
     Status = VL53L0X_PerformRefCalibration(pMyDevice, &VhvSettings,
                                            &PhaseCal); // Device Initialization
   }
 
   if (Status == VL53L0X_ERROR_NONE) {
     // no need to do this when we use VL53L0X_PerformSingleRangingMeasurement  
-    printf("VL53L0X: SetDeviceMode\n");
+    //printf("VL53L0X: SetDeviceMode\n");
     
     Status = VL53L0X_SetDeviceMode(
       pMyDevice,

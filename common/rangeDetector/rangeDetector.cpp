@@ -7,17 +7,13 @@ RangeDetector::RangeDetector(i2c_inst_t *i2c, const uint8_t longDetectorShutPin,
   longDistanceDetector(),
   shortDistanceDetector(i2c, VL6180X_ADDRESS),
   longDetectorShutPin(longDetectorShutPin),
-  shortDetectorShutPin(shortDetectorShutPin),
-  current(longDistanceDetector) {
+  shortDetectorShutPin(shortDetectorShutPin) {
   printf("Init detectors\n");
   gpio_init(shortDetectorShutPin);
   gpio_set_dir(shortDetectorShutPin, GPIO_OUT);
   gpio_init(longDetectorShutPin);
   gpio_set_dir(longDetectorShutPin, GPIO_OUT);
-  enabled(true);
-  //switchToShortDistance(true);
-  //current.begin(i2c);
-  switchToShortDistance(false);  
+  enabled(true);  
   xTaskCreate(RangeDetector::detectorTask, "RangeDetector::detectorTask", 1024, this, 5, NULL);
 }
 
@@ -51,44 +47,41 @@ void RangeDetector::printIdentification(struct VL6180xIdentification *temp){
 
 void RangeDetector::initShortDistanceSensor() {
   VL6180xIdentification identification;
-  shortDistanceDetector.getIdentification(&identification); // Retrieve manufacture info from device memory
-  printIdentification(&identification); // Helper function to print all the Module information
+  //shortDistanceDetector.getIdentification(&identification); // Retrieve manufacture info from device memory
+  //printIdentification(&identification); // Helper function to print all the Module information
 
   if(shortDistanceDetector.VL6180xInit() != 0){
     printf("FAILED TO INITALIZE\n"); //Initialize device and check for errors
   }; 
-
   shortDistanceDetector.VL6180xDefautSettings(); //Load default settings to get started.
 }
 
 void RangeDetector::detectorTask(void *instance) {  
-  RangeDetector* detector = (RangeDetector*)instance;
-  detector->initShortDistanceSensor();
-  //detector->longDistanceDetector.begin(detector->i2c);
-  //detector->longDistanceDetector.startRangeContinuous();
+  RangeDetector* detector = (RangeDetector*)instance;  
+  bool useShortDistance = switchToShortDistance(detector, true);  
   while(true) {
-      printf("Ambient Light Level (Lux) = ");
-      //Input GAIN for light levels, 
-      // GAIN_20     // Actual ALS Gain of 20
-      // GAIN_10     // Actual ALS Gain of 10.32
-      // GAIN_5      // Actual ALS Gain of 5.21
-      // GAIN_2_5    // Actual ALS Gain of 2.60
-      // GAIN_1_67   // Actual ALS Gain of 1.72
-      // GAIN_1_25   // Actual ALS Gain of 1.28
-      // GAIN_1      // Actual ALS Gain of 1.01
-      // GAIN_40     // Actual ALS Gain of 40
-  
-      printf("%f\n", detector->shortDistanceDetector.getAmbientLight(GAIN_1) );
+    if (detector->range > 200) {
+      useShortDistance = switchToShortDistance(detector, false);
 
-      //Get Distance and report in mm
-      printf("Distance measured (mm) = ");
-      printf("%d\n", detector->shortDistanceDetector.getDistance() ); 
-    
-    /*printf("Reading range\n");
-    if (detector->longDistanceDetector.isRangeComplete()) {
-      printf("Distance in mm: %d\n", detector->longDistanceDetector.readRange());
+    } else {
+      useShortDistance = switchToShortDistance(detector, true);
     }
-    //detector->scanI2cTask();*/
+
+    if (detector->range == 8191 ) {
+      switchToShortDistance(detector, true);      
+      detector->range = 0;
+    }
+         
+    if (useShortDistance) {
+      detector->range = detector->shortDistanceDetector.getDistance();
+      printf("Short %d\n", detector->range);
+    } else {
+      if (detector->longDistanceDetector.isRangeComplete()) {
+        detector->range = detector->longDistanceDetector.readRange();
+        printf("Long %d\n", detector->range);
+      }
+    }
+                
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
@@ -106,16 +99,26 @@ bool RangeDetector::enabled(bool value) {
   }
 }
 
-void RangeDetector::switchToShortDistance(bool useShortDistance) {  
-  if (useShortDistance) {
-    gpio_put(shortDetectorShutPin, isEnabled);
-    gpio_put(longDetectorShutPin, 0);
-    //this->current = this->shortDistanceDetector;
+bool RangeDetector::switchToShortDistance(RangeDetector* instance, bool useShortDistance) {
+  if (useShortDistance) {            
+    if (!instance->useShortDistance) {      
+      instance->longDistanceDetector.stopRangeContinuous();      
+    }
+    gpio_put(instance->shortDetectorShutPin, isEnabled);
+    gpio_put(instance->longDetectorShutPin, 0);
+    if (!instance->useShortDistance) {      
+      instance->initShortDistanceSensor();
+    }
   } else {
-    gpio_put(shortDetectorShutPin, 0);
-    gpio_put(longDetectorShutPin, isEnabled);
-    //this->current = this->longDistanceDetector;
+    gpio_put(instance->shortDetectorShutPin, 0);
+    gpio_put(instance->longDetectorShutPin, isEnabled);        
+    if (instance->useShortDistance) {
+      instance->longDistanceDetector.begin(instance->i2c);
+      instance->longDistanceDetector.startRangeContinuous();
+    }
   }
+  instance->useShortDistance = useShortDistance;
+  return useShortDistance;
 }
 
 void RangeDetector::scanI2cTask() {
@@ -126,25 +129,25 @@ void RangeDetector::scanI2cTask() {
       printf("%d VL6810X is enabled\n", dCounter);
       printf("VL53L0X is disabled\n");
       this->enabled(true);
-      this->switchToShortDistance(true);
+      switchToShortDistance(this, true);
       break;
     case 1:
       printf("%d VL6810X is disabled\n", dCounter);
       printf("VL53L0X is disabled\n");
       this->enabled(false);
-      this->switchToShortDistance(true);
+      this->switchToShortDistance(this, true);
       break;
     case 2:
       printf("%d VL6810X is disabled\n", dCounter);
       printf("VL53L0X is enabled\n");
       this->enabled(true);
-      this->switchToShortDistance(false);
+      this->switchToShortDistance(this, false);
       break;
     case 3:
       printf("%d VL6810X is disabled\n", dCounter);
       printf("VL53L0X is disabled\n");
       this->enabled(false);
-      this->switchToShortDistance(false);
+      this->switchToShortDistance(this, false);
       break;
   }
 
