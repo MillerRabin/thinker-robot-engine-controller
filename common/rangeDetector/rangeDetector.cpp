@@ -2,7 +2,8 @@
 
 bool RangeDetector::isEnabled = true;
 
-RangeDetector::RangeDetector(i2c_inst_t *i2c, const uint8_t longDetectorShutPin, const uint8_t shortDetectorShutPin) : 
+RangeDetector::RangeDetector(ArmPart* armPart, i2c_inst_t *i2c, const uint8_t longDetectorShutPin, const uint8_t shortDetectorShutPin) : 
+  armPart(armPart),
   i2c(i2c),
   longDistanceDetector(),
   shortDistanceDetector(i2c, VL6180X_ADDRESS),
@@ -74,15 +75,18 @@ void RangeDetector::detectorTask(void *instance) {
          
     if (useShortDistance) {
       detector->range = detector->shortDistanceDetector.getDistance();
-      printf("Short %d\n", detector->range);
+      //printf("Short %d\n", detector->range);
     } else {
       if (detector->longDistanceDetector.isRangeComplete()) {
         detector->range = detector->longDistanceDetector.readRange();
-        printf("Long %d\n", detector->range);
+        //printf("Long %d\n", detector->range);
       }
     }
-                
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    const int res = detector->armPart->updateRange(detector->range, (useShortDistance) ? 0 : 1);
+    if (res == -1) {
+      printf("Error sending range\n");
+    }
+    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 

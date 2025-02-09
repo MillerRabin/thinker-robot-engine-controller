@@ -64,7 +64,7 @@ ArmClaw::ArmClaw(
     clawZ(engineZPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
     clawGripper(engineGripperPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
     position(this, memsRxPin, memsTxPin, memsRstPin, memsIntPin),
-    rangeDetector(i2c1, longDetectorShutPin, shortDetectorShutPin)
+    rangeDetector(this, i2c1, longDetectorShutPin, shortDetectorShutPin)
   {            
     i2c_init(i2c1, 400 * 1000);
     gpio_set_function(detectorsSdaPin, GPIO_FUNC_I2C);
@@ -98,5 +98,12 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     ArmClawQueueParams params;
     params.set(frame.data);    
     xQueueSend(ArmClaw::queue, &params, 0);
+  }
+  
+  if (frame.id == 0x0A) {
+    printf("Frame received 0x%x\n", frame.id);
+  }    
+  if (frame.id == CAN_CLAW_FIRMWARE_UPGRADE) {
+    printf("Firmware upgrade command received\n");
   }
 }

@@ -19,7 +19,7 @@ void Bus::busReceiveTask(void* pInstance) {
       can2040_msg frame = item.second;      
       instance->busCallback(instance->armPart, frame);
     }
-    //canReceiveMap.clear();
+    canReceiveMap.clear();
     xSemaphoreGive(Bus::receiveMapSemaphore);
     //printf("Semaphore give\n");
     vTaskDelay(pdMS_TO_TICKS(CAN_RECEIVE_LOOP_TIMEOUT));
@@ -60,7 +60,7 @@ void Bus::PIOx_IRQHandler(void) {
 
 Bus::Bus(const uint rxPin, const uint txPin, void* instance, CanCallback callback) : 
     armPart(instance),
-    busCallback(callback) {   
+    busCallback(callback) {  
   can2040_setup(&Bus::cbus, pio_num);
   can2040_callback_config(&Bus::cbus, Bus::can2040_cb);  
   irq_set_exclusive_handler(PIO0_IRQ_0_IRQn, Bus::PIOx_IRQHandler);
@@ -68,8 +68,8 @@ Bus::Bus(const uint rxPin, const uint txPin, void* instance, CanCallback callbac
   NVIC_EnableIRQ(PIO0_IRQ_0_IRQn);  
   //Bus::sendMapSemaphore = xSemaphoreCreateMutex();
   Bus::receiveMapSemaphore = xSemaphoreCreateMutex();
-  xTaskCreate(Bus::busReceiveTask, "busReceiveTask", 4096, this, tskIDLE_PRIORITY, NULL);
-  xTaskCreate(Bus::busSendTask, "busSendTask", 4096, this, tskIDLE_PRIORITY, NULL);  
+  xTaskCreate(Bus::busReceiveTask, "busReceiveTask", 4096, this, 5, NULL);
+  xTaskCreate(Bus::busSendTask, "busSendTask", 4096, this, 5, NULL);  
   can2040_start(&cbus, sys_clock, bitrate, rxPin, txPin);  
 }
 

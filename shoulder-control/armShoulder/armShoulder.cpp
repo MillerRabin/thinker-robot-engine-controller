@@ -8,10 +8,10 @@ void ArmShoulder::engineTask(void *instance) {
     shoulder->shoulderY.tick();   
     
     Euler rEuler = shoulder->platform.bno.quaternion.getEuler();    
-    printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
+    //printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     
     Euler sEuler = shoulder->position.quaternion.getEuler();      
-    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle()); 
+    //printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle()); 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
@@ -71,5 +71,8 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame) {
     memcpy(&params.shoulderY, &frame.data32[0], 4);
     memcpy(&params.shoulderZ, &frame.data32[1], 4);              
     xQueueSend(ArmShoulder::queue, &params, 0);
+  }  
+  if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE) {
+    rebootInBootMode();
   }
 }

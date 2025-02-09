@@ -8,6 +8,7 @@
 #include "../config/config.h"
 #include "../VL53L0X/Pico_VL53L0X.h"
 #include "../VL6180x/VL6180x.h"
+#include "../armPart/armPart.h"
 
 #include "pico/stdlib.h"
 #include <FreeRTOS.h>
@@ -20,7 +21,7 @@
 
 class RangeDetector {
   private:
-    static bool isEnabled;
+    static bool isEnabled;    
     const uint8_t longDetectorShutPin;
     const uint8_t shortDetectorShutPin;
     Pico_VL53L0X longDistanceDetector;
@@ -32,10 +33,11 @@ class RangeDetector {
     void initShortDistanceSensor();
     static bool switchToShortDistance(RangeDetector* instance, bool useShortDistance);    
   public: 
+    ArmPart* armPart;
     bool enabled(bool value);
     bool useShortDistance;
     i2c_inst_t* i2c;
     void scanI2cTask();
     uint16_t range = 0;
-    RangeDetector(i2c_inst_t* i2c, const uint8_t longDetectorShutPin, const uint8_t shortDetectorShutPin);
+    RangeDetector(ArmPart* armPart, i2c_inst_t* i2c, const uint8_t longDetectorShutPin, const uint8_t shortDetectorShutPin);
 };

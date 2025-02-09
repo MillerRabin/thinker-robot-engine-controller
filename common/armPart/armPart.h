@@ -26,7 +26,7 @@ class ArmPart {
     int updateAccelerometer(Accelerometer acc);
     int updateGyroscope(Gyroscope gyro);
     int updateAccuracy(Accuracy acc);
-    int updateHeight(uint32_t height);
+    int updateHeight(uint32_t height);    
   public:
     ArmPlatform platform; 
     virtual uint32_t getQuaternionMessageId() { return 0; };
@@ -34,11 +34,13 @@ class ArmPart {
     virtual uint32_t getGyroscopeMessageId() { return 0; };
     virtual uint32_t getAccuracyMessageId() { return 0; };
     virtual uint32_t getHeightMessageId() { return 0; };
+    virtual uint32_t getRangeMessageId() { return 0; };
     virtual int updateQuaternion(BasePosition* position) { return 0; };
     virtual int updateAccelerometer(BasePosition* position) { return 0; };
     virtual int updateGyroscope(BasePosition* position) { return 0; };
     virtual int updateAccuracy(BasePosition* position) { return 0; };
-    virtual int updateHeight(BasePosition* position) { return 0; };
+    virtual int updateHeight(BasePosition* position) { return 0; };  
+    virtual int updateRange(uint16_t range, uint16_t measureType);
     ArmPart(const uint canRxPin, const uint canTxPin);
 };
 
