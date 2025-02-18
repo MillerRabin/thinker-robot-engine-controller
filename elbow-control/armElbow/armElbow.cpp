@@ -38,8 +38,8 @@ ArmElbow::ArmElbow(
     position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
   {            
     ArmElbow::queue = xQueueCreate(10, sizeof(ArmElbowQueueParams));
-    xTaskCreate(ArmElbow::busReceiverTask, "ArmElbow::busReceiverTask", 1024, this, 1, NULL);
-    xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 1024, this, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(ArmElbow::busReceiverTask, "ArmElbow::busReceiverTask", 1024, this, 5, NULL);
+    xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 1024, this, 5, NULL);
 }
 
 int ArmElbow::updateQuaternion(BasePosition* position) {  
@@ -66,5 +66,9 @@ void ArmElbow::busReceiveCallback(can2040_msg frame) {
     ArmElbowQueueParams params;    
     memcpy(&params.elbowY, &frame.data32[0], 4);    
     xQueueSend(ArmElbow::queue, &params, 0);
+  }
+
+  if (frame.id == CAN_ELBOW_FIRMWARE_UPGRADE) {
+    rebootInBootMode();
   }
 }

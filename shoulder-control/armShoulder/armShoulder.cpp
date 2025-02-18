@@ -41,8 +41,8 @@ ArmShoulder::ArmShoulder(
     position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
   {            
     ArmShoulder::queue = xQueueCreate(10, sizeof(ArmShoulderQueueParams));
-    xTaskCreate(ArmShoulder::busReceiverTask, "ArmShoulder::busReceiverTask", 1024, this, 1, NULL);
-    xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(ArmShoulder::busReceiverTask, "ArmShoulder::busReceiverTask", 1024, this, 5, NULL);
+    xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL);
 }
 
 int ArmShoulder::updateQuaternion(BasePosition* position) {  

@@ -6,6 +6,7 @@
 #include "../../common/bus/bus.h"
 #include "../../common/config/config.h"
 #include "../../common/armPart/armPart.h"
+#include "../../common/bootsel/bootsel.h"
 
 class ArmWristQueueParams {
   public:    

@@ -14,6 +14,7 @@ void ArmWrist::engineTask(void *instance) {
     Euler sEuler = wrist->position.quaternion.getEuler();      
     printf("Wrist roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle()); 
     
+
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
@@ -43,8 +44,8 @@ ArmWrist::ArmWrist(
     position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
   {            
     ArmWrist::queue = xQueueCreate(10, sizeof(ArmWristQueueParams));
-    xTaskCreate(ArmWrist::busReceiverTask, "ArmWrist::busReceiverTask", 1024, this, 1, NULL);
-    xTaskCreate(ArmWrist::engineTask, "ArmWrist::engineTask", 1024, this, tskIDLE_PRIORITY, NULL);
+    //xTaskCreate(ArmWrist::busReceiverTask, "ArmWrist::busReceiverTask", 1024, this, 5, NULL);
+    xTaskCreate(ArmWrist::engineTask, "ArmWrist::engineTask", 1024, this, 5, NULL);
 }
 
 int ArmWrist::updateQuaternion(BasePosition* position) {  
@@ -68,10 +69,15 @@ int ArmWrist::updateAccuracy(BasePosition* position) {
 }
 
 void ArmWrist::busReceiveCallback(can2040_msg frame) {
-  if (frame.id == CAN_SHOULDER_SET_YZ_DEGREE) {    
+  /*if (frame.id == CAN_SHOULDER_SET_YZ_DEGREE) {    
     ArmWristQueueParams params;    
     memcpy(&params.wristY, &frame.data32[0], 4);
     memcpy(&params.wristZ, &frame.data32[1], 4);
     xQueueSend(ArmWrist::queue, &params, 0);
+  }*/
+  if (frame.id == CAN_WRIST_FIRMWARE_UPGRADE) {
+    printf("Upgrade request received\n");
+    rebootInBootMode();
   }
+
 }
