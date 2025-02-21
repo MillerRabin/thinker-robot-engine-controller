@@ -11,7 +11,7 @@ void ArmElbow::engineTask(void *instance) {
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     
     Euler sEuler = elbow->position.quaternion.getEuler();      
-    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle()); 
+    printf("Elbow roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle()); 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }

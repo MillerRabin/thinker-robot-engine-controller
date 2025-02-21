@@ -1,6 +1,7 @@
 #include "armClaw.h"
 
 volatile QueueHandle_t ArmClaw::queue;
+int counter = 0;
 
 void ArmClawQueueParams::set(uint8_t data[]) {
   uint16_t clawX;
@@ -17,16 +18,8 @@ void ArmClawQueueParams::set(uint8_t data[]) {
 void ArmClaw::engineTask(void *instance) {  
   ArmClaw* claw = (ArmClaw*)instance;
   while(true) {        
-    /*claw->clawX.tick();   
-    claw->clawY.tick();
-    claw->clawZ.tick(); 
-    claw->clawGripper.tick();
-    Euler rEuler = claw->platform.bno.quaternion.getEuler();    
-    printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
-    Euler sEuler = claw->position.quaternion.getEuler();      
-    printf("Wrist roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle()); */
-    //scanI2cTask();
-    //printf("engine task\n");
+    counter++;
+    printf("engine task %d\n", counter);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
@@ -99,11 +92,8 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     params.set(frame.data);    
     xQueueSend(ArmClaw::queue, &params, 0);
   }
-  
-  if (frame.id == 0x0A) {
-    printf("Frame received 0x%x\n", frame.id);
-  }    
+    
   if (frame.id == CAN_CLAW_FIRMWARE_UPGRADE) {
-    printf("Firmware upgrade command received\n");
+    rebootInBootMode();
   }
 }

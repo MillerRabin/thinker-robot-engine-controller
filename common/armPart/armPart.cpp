@@ -55,9 +55,6 @@ int ArmPart::updateRange(uint16_t range, uint16_t measureType) {
 
 void ArmPart::canCallback(void* pArmPart, can2040_msg frame) {
   uint32_t ident = frame.id;
-  if (frame.id == CAN_CLAW_FIRMWARE_UPGRADE) {
-    printf("frame received: 0x%x\n", ident);
-  }    
   ArmPart* armPart = (ArmPart*)pArmPart;
   armPart->platform.dispatchMessage(frame);
   armPart->busReceiveCallback(frame);  

@@ -7,6 +7,7 @@
 #include "../../common/config/config.h"
 #include "../../common/armPart/armPart.h"
 #include "../../common/rangeDetector/rangeDetector.h"
+#include "../../common/bootsel/bootsel.h"
 
 class ArmClawQueueParams {
   public:
