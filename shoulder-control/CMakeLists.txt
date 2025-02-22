@@ -21,7 +21,8 @@ add_executable(${APP_SHOULDER_NAME}
   ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp
   ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp
   ${APP_COMMON_DIRECTORY}/armPlatform/armPlatform.cpp
-  ${APP_COMMON_DIRECTORY}/bootsel/bootsel.cpp  
+  ${APP_COMMON_DIRECTORY}/bootsel/bootsel.cpp
+  ${APP_COMMON_DIRECTORY}/measureRange/measureRange.cpp
 )
 
 # Link to built libraries

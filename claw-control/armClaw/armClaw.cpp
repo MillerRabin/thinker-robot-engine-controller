@@ -57,8 +57,7 @@ ArmClaw::ArmClaw(
     clawZ(engineZPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
     clawGripper(engineGripperPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
     position(this, memsRxPin, memsTxPin, memsRstPin, memsIntPin),
-    rangeDetector(this, i2c1, longDetectorShutPin, shortDetectorShutPin)
-  {            
+    rangeDetector(this, i2c1, longDetectorShutPin, shortDetectorShutPin) {            
     i2c_init(i2c1, 400 * 1000);
     gpio_set_function(detectorsSdaPin, GPIO_FUNC_I2C);
     gpio_set_function(detectorsSclPin, GPIO_FUNC_I2C);
@@ -87,7 +86,7 @@ int ArmClaw::updateAccuracy(BasePosition* position) {
 }
 
 void ArmClaw::busReceiveCallback(can2040_msg frame) {
-  if (frame.id == CAN_CLAW_SET_XYZG_DEGREE) {    
+  if (frame.id == CAN_CLAW_SET_XYZG_DEGREE) {
     ArmClawQueueParams params;
     params.set(frame.data);    
     xQueueSend(ArmClaw::queue, &params, 0);

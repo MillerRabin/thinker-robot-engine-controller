@@ -5,6 +5,7 @@
 #include "../bus/bus.h"
 #include "../config/config.h"
 #include "../detectors/detectors.h"
+#include "../measureRange/measureRange.h"
 #include "../armPlatform/armPlatform.h"
 
 class BasePosition {

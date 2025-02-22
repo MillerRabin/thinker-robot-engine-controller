@@ -32,6 +32,7 @@ add_executable(${APP_CLAW_NAME}
   ${APP_COMMON_DIRECTORY}/VL53L0X/platform/src/vl53l0x_platform.cpp
   ${APP_COMMON_DIRECTORY}/VL6180x/VL6180x.cpp
   ${APP_COMMON_DIRECTORY}/rangeDetector/rangeDetector.cpp
+  ${APP_COMMON_DIRECTORY}/measureRange/measureRange.cpp
   ${APP_COMMON_DIRECTORY}/bootsel/bootsel.cpp
 )
 

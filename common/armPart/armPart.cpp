@@ -45,8 +45,9 @@ int ArmPart::updateHeight(uint32_t height) {
 }
 
 int ArmPart::updateRange(uint16_t range, uint16_t measureType) {
-  uint64_t data = (uint64_t)range |
-                  (uint64_t)measureType << 16;
+  MeasureRange mRange;
+  mRange.set(range, measureType);  
+  uint64_t data = mRange.serialize();
   uint8_t id = getRangeMessageId();
   if (id == 0) return -1;
   bus.send(id, data);
