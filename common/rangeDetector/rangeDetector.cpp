@@ -48,8 +48,8 @@ void RangeDetector::printIdentification(struct VL6180xIdentification *temp){
 
 void RangeDetector::initShortDistanceSensor() {
   VL6180xIdentification identification;
-  //shortDistanceDetector.getIdentification(&identification); // Retrieve manufacture info from device memory
-  //printIdentification(&identification); // Helper function to print all the Module information
+  shortDistanceDetector.getIdentification(&identification); // Retrieve manufacture info from device memory
+  printIdentification(&identification); // Helper function to print all the Module information
 
   if(shortDistanceDetector.VL6180xInit() != 0){
     printf("FAILED TO INITALIZE\n"); //Initialize device and check for errors
@@ -60,32 +60,35 @@ void RangeDetector::initShortDistanceSensor() {
 void RangeDetector::detectorTask(void *instance) {  
   RangeDetector* detector = (RangeDetector*)instance;  
   bool useShortDistance = switchToShortDistance(detector, true);  
-  while(true) {
-    if (detector->range > 200) {
+  while(true) {    
+    /*if (detector->range > 200) {
       useShortDistance = switchToShortDistance(detector, false);
-
     } else {
       useShortDistance = switchToShortDistance(detector, true);
-    }
+    }*/
 
-    if (detector->range == 8191 ) {
+    /*if (detector->range == 8191 ) {
+      vTaskDelay(100 / portTICK_PERIOD_MS);
       switchToShortDistance(detector, true);      
       detector->range = 0;
-    }
+    }*/
          
-    if (useShortDistance) {
+    //if (useShortDistance) {
       detector->range = detector->shortDistanceDetector.getDistance();
       //printf("Short %d\n", detector->range);
-    } else {
+    //}
+    
+    /*else {
       if (detector->longDistanceDetector.isRangeComplete()) {
         detector->range = detector->longDistanceDetector.readRange();
         //printf("Long %d\n", detector->range);
       }
-    }
+    }*/
     const int res = detector->armPart->updateRange(detector->range, (useShortDistance) ? 0 : 1);
     if (res == -1) {
       printf("Error sending range\n");
     }
+    
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
@@ -105,21 +108,21 @@ bool RangeDetector::enabled(bool value) {
 
 bool RangeDetector::switchToShortDistance(RangeDetector* instance, bool useShortDistance) {
   if (useShortDistance) {            
-    if (!instance->useShortDistance) {      
+    /*if (!instance->useShortDistance) {      
       instance->longDistanceDetector.stopRangeContinuous();      
-    }
-    gpio_put(instance->shortDetectorShutPin, isEnabled);
+    }*/
+    gpio_put(instance->shortDetectorShutPin, 1);
     gpio_put(instance->longDetectorShutPin, 0);
-    if (!instance->useShortDistance) {      
-      instance->initShortDistanceSensor();
-    }
+    //if (!instance->useShortDistance) {      
+    instance->initShortDistanceSensor();
+    //}
   } else {
-    gpio_put(instance->shortDetectorShutPin, 0);
+    /*gpio_put(instance->shortDetectorShutPin, 0);
     gpio_put(instance->longDetectorShutPin, isEnabled);        
-    if (instance->useShortDistance) {
-      instance->longDistanceDetector.begin(instance->i2c);
+    if (instance->useShortDistance) {      
+      instance->longDistanceDetector.begin(instance->i2c);      
       instance->longDistanceDetector.startRangeContinuous();
-    }
+    }*/
   }
   instance->useShortDistance = useShortDistance;
   return useShortDistance;

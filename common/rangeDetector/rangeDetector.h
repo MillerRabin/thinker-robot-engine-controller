@@ -21,7 +21,7 @@
 
 class RangeDetector {
   private:
-    static bool isEnabled;    
+    static bool isEnabled;
     const uint8_t longDetectorShutPin;
     const uint8_t shortDetectorShutPin;
     Pico_VL53L0X longDistanceDetector;

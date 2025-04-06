@@ -46,6 +46,7 @@ int ArmPart::updateHeight(uint32_t height) {
 
 int ArmPart::updateRange(uint16_t range, uint16_t measureType) {
   MeasureRange mRange;
+  //printf("Range: %d, Type: %d\n", range, measureType);
   mRange.set(range, measureType);  
   uint64_t data = mRange.serialize();
   uint8_t id = getRangeMessageId();

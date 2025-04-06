@@ -18,8 +18,8 @@ void ArmClawQueueParams::set(uint8_t data[]) {
 void ArmClaw::engineTask(void *instance) {  
   ArmClaw* claw = (ArmClaw*)instance;
   while(true) {        
-    counter++;
-    printf("engine task %d\n", counter);
+    //counter++;
+    //printf("engine task %d\n", counter);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
