@@ -45,9 +45,10 @@ private:
   static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);  
   static CanMap canSendMap;
   static SemaphoreHandle_t sendMapSemaphore;
-  static CanMap canReceiveMap;
+  static QueueHandle_t receiveQueue;
   static SemaphoreHandle_t receiveMapSemaphore;  
-public: 
+public:
+  static volatile uint32_t droppedFrames;
   Bus(const uint rxPin, const uint txPin, void* instance, CanCallback callback);
   void send(uint32_t id, uint64_t data);
 };

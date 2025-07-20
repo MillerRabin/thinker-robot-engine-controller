@@ -11,48 +11,48 @@ void Position::compassCallback(uint gpio, uint32_t events) {
 }
 
 void Position::compassTask(void* instance) {  
-  Position* position = (Position*)instance;  
-  BNO080 imu = position->imu;
+  Position* position = (Position*)instance;
+  BNO080 *imu = &(position->imu);
   uint32_t notificationValue;  
-  imu.getReadings();  
+  imu->getReadings();  
   while (true) {
-    notificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(50));
-    uint16_t datatype = imu.getReadings();
-    if( notificationValue == 0 ) {
-      //printf("Position notificationResult error %d\n", notificationValue);
-      continue;                
+    position->armPart->setPositionTaskStatus(true);
+    notificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(COMPASS_DATA_WAIT_TIMEOUT));
+    if (notificationValue == 0) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
     }
-            
+    
+    uint16_t datatype = imu->getReadings();
     if (datatype == SENSOR_REPORTID_ROTATION_VECTOR) {
-      position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal);      
+      position->updateQuaternionData(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);      
       if (position->armPart->updateQuaternion(position) != 0) {
         printf("quat sending error\n");
       }      
     }
 
     if (datatype == SENSOR_REPORTID_GAME_ROTATION_VECTOR) {
-      position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal);      
+      position->updateQuaternionData(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);      
       if (position->armPart->updateQuaternion(position) != 0) {
         printf("quat sending error\n");
       }      
     }
     
-
     if (datatype == SENSOR_REPORTID_GYROSCOPE) {
-      position->updateGyroscopeData(imu.rawGyroX, imu.rawGyroY, imu.rawGyroZ);      
+      position->updateGyroscopeData(imu->rawGyroX, imu->rawGyroY, imu->rawGyroZ);      
       if (position->armPart->updateGyroscope(position) != 0) {
         printf("Gyro sending error\n");
       }    
     }
 
     if (datatype == SENSOR_REPORTID_LINEAR_ACCELERATION) {
-      position->updateAccelerometerData(imu.rawLinAccelX, imu.rawLinAccelY, imu.rawLinAccelZ);
+      position->updateAccelerometerData(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
       if (position->armPart->updateAccelerometer(position) != 0) {
         printf("Accelerometer sending error\n");
       }
     }
           
-    position->updateAccuracy(imu.rawQuatRadianAccuracy, imu.quatAccuracy, imu.gyroAccuracy, imu.accelLinAccuracy);
+    position->updateAccuracy(imu->rawQuatRadianAccuracy, imu->quatAccuracy, imu->gyroAccuracy, imu->accelLinAccuracy);
     if (position->armPart->updateAccuracy(position) != 0) {
       printf("Quaternion accuracy sending error\n");
     }

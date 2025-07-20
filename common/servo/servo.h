@@ -9,6 +9,10 @@
 #include "../detectors/detectors.h"
 #include "../euler/euler.h"
 
+#define SERVO_DEGREE_IS_BELOW_MINIMUM 1
+#define SERVO_DEGREE_IS_ABOVE_MAXIMUM 2
+#define SERVO_DEGREE_IS_NAN 3
+
 class Servo {
   private:
     uint slice;
@@ -18,7 +22,8 @@ class Servo {
     float period = 0;
     const float lowPeriod;
     const float highPeriod;
-    const uint maxDegree;
+    const float maxDegree;
+    const float minDegree;
     uint16_t lowSlices;
     uint16_t highSlices;
     uint16_t delta;
@@ -29,7 +34,7 @@ class Servo {
     ImuUseAngle useAngle;    
     RangeMap imuMap;
     uint setDegreeDirect(const float degree);    
-    float targetAngle = NAN;
+    volatile float targetAngle = NAN;
     float speed = 0;
   public:
     Servo(const uint pin, Range degreeRange, Range imuRange, ImuUseAngle useAngle, const float freq = 50, const float lowPeriod = 0.0005, const float highPeriod = 0.0025);

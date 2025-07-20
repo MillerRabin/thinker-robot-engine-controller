@@ -44,9 +44,18 @@ int ArmPart::updateHeight(uint32_t height) {
   return 0;
 }
 
+int ArmPart::updateStatuses()
+{  
+  uint8_t id = getStatusesMessageId();
+  if (id == 0)
+    return -1;
+  bus.send(id, statuses);
+  statuses = 0;
+  return 0;
+}
+
 int ArmPart::updateRange(uint16_t range, uint16_t measureType) {
-  MeasureRange mRange;
-  //printf("Range: %d, Type: %d\n", range, measureType);
+  MeasureRange mRange;  
   mRange.set(range, measureType);  
   uint64_t data = mRange.serialize();
   uint8_t id = getRangeMessageId();
@@ -60,4 +69,20 @@ void ArmPart::canCallback(void* pArmPart, can2040_msg frame) {
   ArmPart* armPart = (ArmPart*)pArmPart;
   armPart->platform.dispatchMessage(frame);
   armPart->busReceiveCallback(frame);  
+}
+
+void ArmPart::setPositionTaskStatus(bool value) {
+  if (value) {
+    statuses |= ARM_POSITION_TASK_OK;
+  } else {
+    statuses &= ~ARM_POSITION_TASK_OK;
+  }
+}
+
+void ArmPart::setEngineTaskStatus(bool value) {
+  if (value) {
+    statuses |= ARM_ENGINE_TASK_OK;
+  } else {
+    statuses &= ~ARM_ENGINE_TASK_OK;
+  }
 }

@@ -11,21 +11,22 @@ void PositionWitMotion::compassTask(void* instance) {
     position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal);
     if (position->armPart->updateQuaternion(position) != 0) {
       printf("quat sending error\n");
-    }      
-    
+    }
+
     position->updateAccelerometerData(imu.rawLinAccelX, imu.rawLinAccelY, imu.rawLinAccelZ);
     if (position->armPart->updateAccelerometer(position) != 0) {
       printf("Accelerometer sending error\n");
     }
-        
+
     position->updateGyroscopeData(imu.rawGyroX, imu.rawGyroZ, imu.rawGyroZ);
     if (position->armPart->updateGyroscope(position) != 0) {
       printf("Gyro sending error\n");
     }
+
     position->updateHeightData(imu.rawHeight);
     if (position->armPart->updateHeight(position) != 0) {
       printf("Height sending error\n");
-    }        
+    }
     vTaskDelay(50 / portTICK_PERIOD_MS);                
   }
 }

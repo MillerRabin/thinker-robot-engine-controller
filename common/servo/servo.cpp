@@ -1,7 +1,8 @@
 #include "servo.h"
 
 Servo::Servo(const uint pin, Range degreeRange, Range imuRange, ImuUseAngle useAngle, const float freq, const float lowPeriod, const float highPeriod) :
-  maxDegree(maxDegree),
+  minDegree(degreeRange.from),
+  maxDegree(degreeRange.to),
   lowPeriod(lowPeriod),
   highPeriod(highPeriod),
   useAngle(useAngle),  
@@ -45,12 +46,20 @@ uint16_t Servo::getSlices(const float targetPeriod) {
 }
 
 uint Servo::setDegreeDirect(const float degree) {
-  const uint16_t slices = lowSlices + (step * degree); 
+  if (isnan(degree))
+      return SERVO_DEGREE_IS_NAN;
+  if (degree < minDegree)
+    return SERVO_DEGREE_IS_BELOW_MINIMUM;
+  if (degree > maxDegree)
+    return SERVO_DEGREE_IS_ABOVE_MAXIMUM;  
+  const uint16_t slices = lowSlices + (step * degree);
   pwm_set_chan_level(slice, channel, slices);
-  return 1;
+  return 0;
 }
 
 bool Servo::setTargetAngle(const float angle) {
+  if (isnan(angle)) 
+    return false;
   targetAngle = angle;
   return true;
 }
@@ -64,4 +73,5 @@ void Servo::tick() {
   const float current = getImuAngle();
   const float diff = targetAngle - current;
   printf("current: %f, target: %f, diff: %f\n", current, targetAngle, diff);
+  setDegreeDirect(targetAngle);
 }

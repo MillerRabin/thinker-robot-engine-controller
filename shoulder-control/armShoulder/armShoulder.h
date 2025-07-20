@@ -8,19 +8,13 @@
 #include "../../common/armPart/armPart.h"
 #include "../../common/bootsel/bootsel.h"
 
-class ArmShoulderQueueParams {
-  public:    
-    float shoulderY = NAN;
-    float shoulderZ = NAN;
-};
-
 class ArmShoulder : public ArmPart {
   private:
     Position position;
     static void busReceiverTask(void *instance);
     static void engineTask(void *instance);
     void busReceiveCallback(can2040_msg frame);
-    static volatile QueueHandle_t queue;
+    static volatile QueueHandle_t angleQueue;
   public:
     Servo shoulderZ;
     Servo shoulderY;
@@ -33,13 +27,14 @@ class ArmShoulder : public ArmPart {
       uint engineYPin, 
       uint canRxPin,
       uint canTxPin
-    );
+    );    
     uint32_t getQuaternionMessageId() { return CAN_SHOULDER_QUATERNION; };
     uint32_t getAccelerometerMessageId() { return CAN_SHOULDER_ACCELEROMETER; };
     uint32_t getGyroscopeMessageId() { return CAN_SHOULDER_GYROSCOPE; };
     uint32_t getAccuracyMessageId() { return CAN_SHOULDER_ACCURACY; };
-    int updateQuaternion(BasePosition* position);
+    uint32_t getStatusesMessageId() { return CAN_SHOULDER_STATUSES; };
     int updateAccelerometer(BasePosition* position);
     int updateGyroscope(BasePosition* position);
     int updateAccuracy(BasePosition* position);
+    int updateQuaternion(BasePosition *position);
 };
