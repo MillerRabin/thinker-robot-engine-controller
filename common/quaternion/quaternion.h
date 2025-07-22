@@ -33,4 +33,5 @@ public:
   Euler getEuler();
   bool set(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal);
   void setRotate(float i, float j, float k, float real);
+  
 };

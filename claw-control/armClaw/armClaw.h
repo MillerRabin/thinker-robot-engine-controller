@@ -53,6 +53,7 @@ class ArmClaw : public ArmPart {
     uint32_t getGyroscopeMessageId() { return CAN_CLAW_GYROSCOPE; };    
     uint32_t getHeightMessageId() { return CAN_CLAW_HEIGHT; };
     uint32_t getRangeMessageId() { return CAN_CLAW_RANGE; };
+    uint32_t getStatusesMessageId() { return CAN_CLAW_STATUSES; };
     int updateQuaternion(BasePosition* position);
     int updateAccelerometer(BasePosition* position);
     int updateGyroscope(BasePosition* position);

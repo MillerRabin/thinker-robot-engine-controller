@@ -38,8 +38,10 @@ class ArmWrist : public ArmPart {
     uint32_t getAccelerometerMessageId() { return CAN_WRIST_ACCELEROMETER; };
     uint32_t getGyroscopeMessageId() { return CAN_WRIST_GYROSCOPE; };
     uint32_t getAccuracyMessageId() { return CAN_WRIST_ACCURACY; };
+    uint32_t getStatusesMessageId() { return CAN_WRIST_STATUSES; };
     int updateQuaternion(BasePosition* position);
     int updateAccelerometer(BasePosition* position);
     int updateGyroscope(BasePosition* position);
     int updateAccuracy(BasePosition* position);
+
 };

@@ -35,6 +35,7 @@ class ArmElbow : public ArmPart {
     uint32_t getAccelerometerMessageId() { return CAN_ELBOW_ACCELEROMETER; };
     uint32_t getGyroscopeMessageId() { return CAN_ELBOW_GYROSCOPE; };
     uint32_t getAccuracyMessageId() { return CAN_ELBOW_ACCURACY; };
+    uint32_t getStatusesMessageId() { return CAN_ELBOW_STATUSES; };
     int updateQuaternion(BasePosition* position);
     int updateAccelerometer(BasePosition* position);
     int updateGyroscope(BasePosition* position);
