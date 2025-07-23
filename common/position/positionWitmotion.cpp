@@ -8,7 +8,7 @@ void PositionWitMotion::compassTask(void* instance) {
   PositionWitMotion* position = (PositionWitMotion*)instance;  
   WitMotion imu = position->imu;
   while (true) {        
-    position->updateQuaternionData(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal);
+    position->quaternion.fromWitmotion(imu.rawQuatI, imu.rawQuatJ, imu.rawQuatK, imu.rawQuatReal, 32768.0f);
     if (position->armPart->updateQuaternion(position) != 0) {
       printf("quat sending error\n");
     }
@@ -29,18 +29,6 @@ void PositionWitMotion::compassTask(void* instance) {
     }
     vTaskDelay(50 / portTICK_PERIOD_MS);                
   }
-}
-
-bool PositionWitMotion::updateQuaternionData(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal) {
-  uint16_t id = (rawQuatI > quaternion.rawI) ? rawQuatI - quaternion.rawI : quaternion.rawI - rawQuatI;
-  uint16_t jd = (rawQuatJ > quaternion.rawJ) ? rawQuatJ - quaternion.rawJ : quaternion.rawJ - rawQuatJ;
-  uint16_t kd = (rawQuatK > quaternion.rawK) ? rawQuatK - quaternion.rawK : quaternion.rawK - rawQuatK;
-  uint16_t rd = (rawQuatReal > quaternion.rawReal) ? rawQuatReal - quaternion.rawReal : quaternion.rawReal - rawQuatReal;
-  quaternion.rawI = rawQuatI;
-  quaternion.rawJ = rawQuatJ;
-  quaternion.rawK = rawQuatK;
-  quaternion.rawReal = rawQuatReal;
-  return ((id > 1) || (jd > 1) || (kd > 1) || (rd > 1));
 }
 
 bool PositionWitMotion::updateAccelerometerData(uint16_t rawAccX, uint16_t rawAccY, uint16_t rawAccZ) {

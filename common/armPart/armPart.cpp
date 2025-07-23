@@ -4,7 +4,7 @@ ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) :
   bus(canRxPin, canTxPin, (void*)this, canCallback)
 {}
 
-int ArmPart::updateQuaternion(Quaternion quat) {  
+int ArmPart::updateQuaternion(IMUQuaternion quat) {  
   uint64_t data = quat.serialize();  
   uint8_t id = getQuaternionMessageId();  
   if (id == 0) return -1;

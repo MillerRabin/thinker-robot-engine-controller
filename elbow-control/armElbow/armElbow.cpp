@@ -9,7 +9,7 @@ void ArmElbow::engineTask(void *instance)
     elbow->elbowY.tick();
 
     Euler rEuler = elbow->platform.bno.quaternion.getEuler();
-    Euler sEuler = elbow->position.quaternion.getEuler();
+    Euler sEuler = elbow->bno.quaternion.getEuler();
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
     printf("Dropped frames %d\n", Bus::droppedFrames);
@@ -28,7 +28,7 @@ ArmElbow::ArmElbow(
     const uint canRxPin,
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),                           
                            elbowY(engineYPin, Range(0, 270), Range(-90, 90), IMU_USE_PITCH, 100),
-                           position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
+                           bno(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
   if (!xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 1024, this, 5, NULL)) {
     setEngineTaskStatus(false);

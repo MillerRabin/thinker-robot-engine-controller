@@ -2,7 +2,7 @@
 
 #include "pico/stdlib.h"
 #include "../../common/servo/servo.h"
-#include "../../common/position/positionBNO.h"
+#include "../../common/localBNO/localBNO.h"
 #include "../../common/bus/bus.h"
 #include "../../common/config/config.h"
 #include "../../common/armPart/armPart.h"
@@ -10,7 +10,7 @@
 
 class ArmShoulder : public ArmPart {
   private:
-    Position position;
+    LocalBNO bno;
     static void busReceiverTask(void *instance);
     static void engineTask(void *instance);
     void busReceiveCallback(can2040_msg frame);

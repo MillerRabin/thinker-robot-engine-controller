@@ -8,17 +8,17 @@
 #include "../measureRange/measureRange.h"
 #include "../armPlatform/armPlatform.h"
 
+#define ARM_POSITION_TASK_OK 1
+#define ARM_ENGINE_TASK_OK 2
+
 class BasePosition {
   public:
-    Quaternion quaternion;
+    IMUQuaternion quaternion;
     Accuracy accuracy;
     Gyroscope gyroscope;
     Accelerometer accelerometer;
     uint32_t height;    
 };
-
-#define ARM_POSITION_TASK_OK 1
-#define ARM_ENGINE_TASK_OK 2
 
 class ArmPart {
   private:
@@ -27,7 +27,7 @@ class ArmPart {
     volatile uint64_t statuses;
   protected:    
     virtual void busReceiveCallback(can2040_msg frame) {};
-    int updateQuaternion(Quaternion quat);
+    int updateQuaternion(IMUQuaternion quat);
     int updateAccelerometer(Accelerometer acc);
     int updateGyroscope(Gyroscope gyro);
     int updateAccuracy(Accuracy acc);

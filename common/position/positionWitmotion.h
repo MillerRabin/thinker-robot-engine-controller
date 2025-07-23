@@ -24,7 +24,6 @@ class PositionWitMotion : public BasePosition
   public:
     ArmPart* armPart;
     WitMotion imu;
-    bool updateQuaternionData(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal);
     bool updateAccelerometerData(uint16_t rawAccX, uint16_t rawAccY, uint16_t rawAccZ);
     bool updateGyroscopeData(uint16_t rawGyroX, uint16_t rawGyroY, uint16_t rawGyroZ);
     bool updateHeightData(uint32_t height);

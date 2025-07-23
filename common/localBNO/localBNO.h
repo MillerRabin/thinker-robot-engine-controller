@@ -10,8 +10,7 @@
 #include <queue.h>
 #include "pico/binary_info.h"
 
-class Position : public BasePosition
-{
+class LocalBNO : public BasePosition {
   private:    
     const uint sdaPin;
     const uint sclPin;
@@ -21,13 +20,16 @@ class Position : public BasePosition
     static void compassCallback(uint gpio, uint32_t events);    
     static uint32_t notificationIndex;
     static TaskHandle_t compassTaskHandle;
-  public:
-    ArmPart* armPart;
-    BNO080 imu;    
+    static Quaternion lastQuaternion;
+    static Quaternion rotateQuatenion;
+  protected:
+    void initIMU();
+    ArmPart *armPart;
+    BNO080 imu;
     int16_t accelerometer_Q1;
-    bool updateQuaternionData(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal);
     bool updateAccelerometerData(uint16_t rawAccX, uint16_t rawAccY, uint16_t rawAccZ);
     bool updateGyroscopeData(uint16_t rawGyroX, uint16_t rawGyroY, uint16_t rawGyroZ);
     bool updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quaternionAccuracy, uint8_t gyroscopeAccuracy, uint8_t accelerometerAccuracy);
-    Position(ArmPart* armPart, const uint sdaPin, const uint sclPin, const uint intPin, const uint rstPin);
+  public:
+    LocalBNO(ArmPart * armPart, const uint sdaPin, const uint sclPin, const uint intPin, const uint rstPin);
 };

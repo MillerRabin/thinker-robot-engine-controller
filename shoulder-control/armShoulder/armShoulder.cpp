@@ -8,7 +8,7 @@ void ArmShoulder::engineTask(void *instance) {
     shoulder->shoulderZ.tick();
     
     Euler rEuler = shoulder->platform.bno.quaternion.getEuler();
-    Euler sEuler = shoulder->position.quaternion.getEuler();
+    Euler sEuler = shoulder->bno.quaternion.getEuler();
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
     printf("Dropped frames %d\n", Bus::droppedFrames);
@@ -29,7 +29,7 @@ ArmShoulder::ArmShoulder(
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
                            shoulderZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, 100),
                            shoulderY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
-                           position(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
+                           bno(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
   if (!xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL)) {
     setEngineTaskStatus(false);
