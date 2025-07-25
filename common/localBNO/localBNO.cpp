@@ -81,23 +81,17 @@ void LocalBNO::compassTask(void* instance) {
 }
 
 bool LocalBNO::updateAccelerometerData(uint16_t rawAccX, uint16_t rawAccY, uint16_t rawAccZ) {
-  uint16_t xd = (rawAccX > accelerometer.x) ? rawAccX - accelerometer.x : accelerometer.x - rawAccX;
-  uint16_t yd = (rawAccY > accelerometer.y) ? rawAccY - accelerometer.y : accelerometer.y - rawAccY;
-  uint16_t zd = (rawAccZ > accelerometer.z) ? rawAccZ - accelerometer.z : accelerometer.z - rawAccZ;  
   accelerometer.x = rawAccX;
   accelerometer.y = rawAccY;
   accelerometer.z = rawAccZ;  
-  return ((xd > 1) || (yd > 1) || (zd > 1));
+  return true;
 }
 
 bool LocalBNO::updateGyroscopeData(uint16_t rawGyroX, uint16_t rawGyroY, uint16_t rawGyroZ) {
-  uint16_t xd = (rawGyroX > gyroscope.x) ? rawGyroX - gyroscope.x : gyroscope.x - rawGyroX;
-  uint16_t yd = (rawGyroY > gyroscope.y) ? rawGyroY - gyroscope.y : gyroscope.y - rawGyroY;
-  uint16_t zd = (rawGyroZ > gyroscope.z) ? rawGyroZ - gyroscope.z : gyroscope.z - rawGyroZ;  
   gyroscope.x = rawGyroX;
   gyroscope.y = rawGyroY;
   gyroscope.z = rawGyroZ;  
-  return ((xd > 1) || (yd > 1) || (zd > 1));
+  return true;
 }
 
 bool LocalBNO::updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quaternionAccuracy, uint8_t gyroscopeAccuracy, uint8_t accelerometerAccuracy) {

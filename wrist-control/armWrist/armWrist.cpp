@@ -13,7 +13,7 @@ void ArmWrist::engineTask(void *instance)
     Euler sEuler = wrist->bno.quaternion.getEuler();
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     printf("wrist roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
-    printf("Dropped frames %d\n", Bus::droppedFrames);
+    printf("Dropped frames %d\n", Bus::getDroppedFrames());
     wrist->setEngineTaskStatus(true);
     wrist->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
