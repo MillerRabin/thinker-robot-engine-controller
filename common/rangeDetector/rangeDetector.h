@@ -31,13 +31,15 @@ class RangeDetector {
     uint dCounter = 0;
     void printIdentification(struct VL6180xIdentification *temp);
     void initShortDistanceSensor();
-    static bool switchToShortDistance(RangeDetector* instance, bool useShortDistance);    
-  public: 
-    ArmPart* armPart;
+    void initLongDistanceSensor();
+    void setupAddresses();
+    void activateSensor(bool shortSensor);
+  public:
+    ArmPart *armPart;
     bool enabled(bool value);
     bool useShortDistance;
-    i2c_inst_t* i2c;
+    i2c_inst_t *i2c;
     void scanI2cTask();
     uint16_t range = 0;
-    RangeDetector(ArmPart* armPart, i2c_inst_t* i2c, const uint8_t longDetectorShutPin, const uint8_t shortDetectorShutPin);
+    RangeDetector(ArmPart * armPart, i2c_inst_t * i2c, const uint8_t longDetectorShutPin, const uint8_t shortDetectorShutPin);
 };
