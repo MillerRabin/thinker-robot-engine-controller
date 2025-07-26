@@ -12,16 +12,16 @@ void Bus::busReceiveTask(void *pInstance) {
 
   while (true) {
     CanMap localCopy;
-    if (xSemaphoreTake(Bus::receiveMapSemaphore, pdMS_TO_TICKS(1)) == pdTRUE) {
+    if (xSemaphoreTake(Bus::receiveMapSemaphore, pdMS_TO_TICKS(CAN_RECEIVE_WAIT_TIMEOUT)) == pdTRUE) {
       localCopy = std::move(Bus::canReceiveMap);
       Bus::canReceiveMap.clear();
       xSemaphoreGive(Bus::receiveMapSemaphore);
+      for (auto &item : localCopy) {
+        instance->busCallback(instance->armPart, item.second);
+      }
+    } else {
+      printf("Can't obtain receiveMapSemaphore in busReceiveTask\n");
     }
-
-    for (auto &item : localCopy) {
-      instance->busCallback(instance->armPart, item.second);
-    }
-
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(CAN_RECEIVE_LOOP_TIMEOUT));
   }
 }
@@ -45,7 +45,7 @@ Bus::Bus(const uint rxPin, const uint txPin, void *instance, CanCallback callbac
 
   Bus::sendMapSemaphore = xSemaphoreCreateMutex();
   Bus::receiveMapSemaphore = xSemaphoreCreateMutex();
-  
+
   xTaskCreate(Bus::busReceiveTask, "busReceiveTask", 4096, this, 5, NULL);
   xTaskCreate(Bus::busSendTask, "busSendTask", 4096, this, 5, NULL);
 
