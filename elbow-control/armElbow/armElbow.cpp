@@ -12,7 +12,6 @@ void ArmElbow::engineTask(void *instance)
     Euler sEuler = elbow->imu.quaternion.getEuler();
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
-    printf("Dropped frames %d\n", Bus::getDroppedFrames());
     elbow->setEngineTaskStatus(true);
     elbow->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));

@@ -2,56 +2,37 @@
 
 can2040 Bus::cbus;
 CanMap Bus::canSendMap;
+CanMap Bus::canReceiveMap;
 SemaphoreHandle_t Bus::sendMapSemaphore;
+SemaphoreHandle_t Bus::receiveMapSemaphore;
 
-can2040_msg Bus::receiveBuffer[CAN_RECEIVE_BUFFER_SIZE];
-volatile size_t Bus::receiveHead = 0;
-volatile size_t Bus::receiveTail = 0;
-SemaphoreHandle_t Bus::receiveBufferMutex;
-volatile uint32_t Bus::droppedFrames = 0;
-
-bool Bus::popReceivedFrame(can2040_msg &msg) {
-  bool hasData = false;
-  if (xSemaphoreTake(Bus::receiveBufferMutex, pdMS_TO_TICKS(1)) == pdTRUE) {
-    if (receiveHead != receiveTail) {
-      msg = receiveBuffer[receiveTail];
-      receiveTail = (receiveTail + 1) % CAN_RECEIVE_BUFFER_SIZE;
-      hasData = true;
-    }
-    xSemaphoreGive(Bus::receiveBufferMutex);
-  }
-  return hasData;
-}
-
-void Bus::pushReceivedFrameFromISR(const can2040_msg &msg) {
-  size_t nextHead = (receiveHead + 1) % CAN_RECEIVE_BUFFER_SIZE;
-  if (nextHead == receiveTail)
-  {
-    receiveTail = (receiveTail + 1) % CAN_RECEIVE_BUFFER_SIZE;
-    droppedFrames++;
-  }
-  receiveBuffer[receiveHead] = msg;
-  receiveHead = nextHead;
-}
-
-// === Задача приёма ===
-void Bus::busReceiveTask(void *pInstance)
-{
+void Bus::busReceiveTask(void *pInstance) {
   auto *instance = static_cast<Bus *>(pInstance);
   TickType_t lastWakeTime = xTaskGetTickCount();
-  can2040_msg frame;
 
   while (true) {
-    while (instance->popReceivedFrame(frame))
-    {
-      instance->busCallback(instance->armPart, frame);
+    CanMap localCopy;
+    if (xSemaphoreTake(Bus::receiveMapSemaphore, pdMS_TO_TICKS(1)) == pdTRUE) {
+      localCopy = std::move(Bus::canReceiveMap);
+      Bus::canReceiveMap.clear();
+      xSemaphoreGive(Bus::receiveMapSemaphore);
     }
+
+    for (auto &item : localCopy) {
+      instance->busCallback(instance->armPart, item.second);
+    }
+
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(CAN_RECEIVE_LOOP_TIMEOUT));
   }
 }
 
 void Bus::can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg) {
-  Bus::pushReceivedFrameFromISR(*msg);
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  if (xSemaphoreTakeFromISR(Bus::receiveMapSemaphore, &xHigherPriorityTaskWoken) == pdTRUE) {
+    Bus::canReceiveMap[msg->id] = *msg;
+    xSemaphoreGiveFromISR(Bus::receiveMapSemaphore, &xHigherPriorityTaskWoken);
+  }
+  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 Bus::Bus(const uint rxPin, const uint txPin, void *instance, CanCallback callback)
@@ -63,8 +44,8 @@ Bus::Bus(const uint rxPin, const uint txPin, void *instance, CanCallback callbac
   NVIC_EnableIRQ(PIO0_IRQ_0_IRQn);
 
   Bus::sendMapSemaphore = xSemaphoreCreateMutex();
-  Bus::receiveBufferMutex = xSemaphoreCreateMutex();
-
+  Bus::receiveMapSemaphore = xSemaphoreCreateMutex();
+  
   xTaskCreate(Bus::busReceiveTask, "busReceiveTask", 4096, this, 5, NULL);
   xTaskCreate(Bus::busSendTask, "busSendTask", 4096, this, 5, NULL);
 

@@ -44,18 +44,10 @@ class Bus {
     static struct can2040 cbus;
     static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);  
     static CanMap canSendMap;
+    static CanMap canReceiveMap;
     static SemaphoreHandle_t sendMapSemaphore;
-    static QueueHandle_t receiveQueue;
     static SemaphoreHandle_t receiveMapSemaphore;
-    static can2040_msg receiveBuffer[CAN_RECEIVE_BUFFER_SIZE];
-    static volatile size_t receiveHead;
-    static volatile size_t receiveTail;
-    static SemaphoreHandle_t receiveBufferMutex;
-    static volatile uint32_t droppedFrames;
-    static bool popReceivedFrame(can2040_msg &msg);
-    static void pushReceivedFrameFromISR(const can2040_msg &msg);
     public:
       Bus(const uint rxPin, const uint txPin, void *instance, CanCallback callback);
-      static uint32_t getDroppedFrames() { return droppedFrames; };
       void send(uint32_t id, uint64_t data);
     };
