@@ -27,7 +27,6 @@ void Bus::pushReceivedFrameFromISR(const can2040_msg &msg) {
   size_t nextHead = (receiveHead + 1) % CAN_RECEIVE_BUFFER_SIZE;
   if (nextHead == receiveTail)
   {
-    // Буфер полон — перезаписываем старый кадр
     receiveTail = (receiveTail + 1) % CAN_RECEIVE_BUFFER_SIZE;
     droppedFrames++;
   }
@@ -42,8 +41,7 @@ void Bus::busReceiveTask(void *pInstance)
   TickType_t lastWakeTime = xTaskGetTickCount();
   can2040_msg frame;
 
-  while (true)
-  {
+  while (true) {
     while (instance->popReceivedFrame(frame))
     {
       instance->busCallback(instance->armPart, frame);
@@ -78,7 +76,7 @@ void Bus::busSendTask(void *pInstance) {
   TickType_t lastWakeTime = xTaskGetTickCount();
 
   while (true) {
-    if (xSemaphoreTake(Bus::sendMapSemaphore, pdMS_TO_TICKS(500)) == pdTRUE) {
+    if (xSemaphoreTake(Bus::sendMapSemaphore, pdMS_TO_TICKS(CAN_SEND_WAIT_TIMEOUT)) == pdTRUE) {
       for (auto &item : Bus::canSendMap) {
         can2040_msg frame = item.second;
         int attempts = CAN_SEND_ATTEMPTS;
@@ -91,7 +89,8 @@ void Bus::busSendTask(void *pInstance) {
       }
       Bus::canSendMap.clear();
       xSemaphoreGive(Bus::sendMapSemaphore);
-    } else {
+    }
+    else {
       printf("Can't obtain sendMapSemaphore in busSendTask\n");
     }
 

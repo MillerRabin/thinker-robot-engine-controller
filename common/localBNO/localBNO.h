@@ -3,6 +3,7 @@
 #include "../BNO080/BNO080.h"
 #include <iostream>
 #include <hardware/i2c.h>
+#include "../imuBase/imuBase.h"
 #include "../armPart/armPart.h"
 #include <RP2040.h>
 #include <FreeRTOS.h>
@@ -10,7 +11,7 @@
 #include <queue.h>
 #include "pico/binary_info.h"
 
-class LocalBNO : public BasePosition {
+class LocalBNO : public IMUBase {
   private:    
     const uint sdaPin;
     const uint sclPin;

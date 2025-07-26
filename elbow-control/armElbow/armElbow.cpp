@@ -8,8 +8,8 @@ void ArmElbow::engineTask(void *instance)
   {
     elbow->elbowY.tick();
 
-    Euler rEuler = elbow->platform.bno.quaternion.getEuler();
-    Euler sEuler = elbow->bno.quaternion.getEuler();
+    Euler rEuler = elbow->platform.imu.quaternion.getEuler();
+    Euler sEuler = elbow->imu.quaternion.getEuler();
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
     printf("Dropped frames %d\n", Bus::getDroppedFrames());
@@ -23,40 +23,42 @@ ArmElbow::ArmElbow(
     const uint memsSdaPin,
     const uint memsSclPin,
     const uint memsIntPin,
-    const uint memsRstPin,    
+    const uint memsRstPin,
     const uint engineYPin,
     const uint canRxPin,
-    const uint canTxPin) : ArmPart(canRxPin, canTxPin),                           
+    const uint canTxPin) : ArmPart(canRxPin, canTxPin),
                            elbowY(engineYPin, Range(0, 270), Range(-90, 90), IMU_USE_PITCH, 100),
-                           bno(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
+                           imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
-  if (!xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 1024, this, 5, NULL)) {
+  if (!xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 1024, this, 5, NULL))
+  {
     setEngineTaskStatus(false);
   }
-  else {
+  else
+  {
     setEngineTaskStatus(true);
   }
 }
 
-int ArmElbow::updateQuaternion(BasePosition *position)
+int ArmElbow::updateQuaternion(IMUBase *position)
 {
   Euler euler = position->quaternion.getEuler();
   // printf("Euler get pitch angle: %f\n", euler.getPitchAngle());
-  elbowY.euler = euler;  
+  elbowY.euler = euler;
   return ArmPart::updateQuaternion(position->quaternion);
 }
 
-int ArmElbow::updateGyroscope(BasePosition *position)
+int ArmElbow::updateGyroscope(IMUBase *position)
 {
   return ArmPart::updateGyroscope(position->gyroscope);
 }
 
-int ArmElbow::updateAccelerometer(BasePosition *position)
+int ArmElbow::updateAccelerometer(IMUBase *position)
 {
   return ArmPart::updateAccelerometer(position->accelerometer);
 }
 
-int ArmElbow::updateAccuracy(BasePosition *position)
+int ArmElbow::updateAccuracy(IMUBase *position)
 {
   return ArmPart::updateAccuracy(position->accuracy);
 }
@@ -66,10 +68,11 @@ void ArmElbow::busReceiveCallback(can2040_msg frame)
   if (frame.id == CAN_ELBOW_SET_Y_DEGREE)
   {
     uint32_t raw = frame.data32[0];
-    uint16_t angleYS = raw & 0xFFFF;    
+    uint16_t angleYS = raw & 0xFFFF;
     float angleY = angleYS / 100.0f;
-    
-    if (!isnan(angleY)) {
+
+    if (!isnan(angleY))
+    {
       elbowY.setTargetAngle(angleY);
     }
   }

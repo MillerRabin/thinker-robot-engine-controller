@@ -9,8 +9,8 @@ void ArmWrist::engineTask(void *instance)
     wrist->wristY.tick();
     wrist->wristZ.tick();
 
-    Euler rEuler = wrist->platform.bno.quaternion.getEuler();
-    Euler sEuler = wrist->bno.quaternion.getEuler();
+    Euler rEuler = wrist->platform.imu.quaternion.getEuler();
+    Euler sEuler = wrist->imu.quaternion.getEuler();
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     printf("wrist roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
     printf("Dropped frames %d\n", Bus::getDroppedFrames());
@@ -31,7 +31,7 @@ ArmWrist::ArmWrist(
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
                            wristZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, 100),
                            wristY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
-                           bno(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
+                           imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
   if (!xTaskCreate(ArmWrist::engineTask, "ArmWrist::engineTask", 1024, this, 5, NULL))
   {
@@ -43,7 +43,7 @@ ArmWrist::ArmWrist(
   }
 }
 
-int ArmWrist::updateQuaternion(BasePosition *position)
+int ArmWrist::updateQuaternion(IMUBase *position)
 {
   Euler euler = position->quaternion.getEuler();
   // printf("Euler get pitch angle: %f\n", euler.getPitchAngle());
@@ -52,17 +52,17 @@ int ArmWrist::updateQuaternion(BasePosition *position)
   return ArmPart::updateQuaternion(position->quaternion);
 }
 
-int ArmWrist::updateGyroscope(BasePosition *position)
+int ArmWrist::updateGyroscope(IMUBase *position)
 {
   return ArmPart::updateGyroscope(position->gyroscope);
 }
 
-int ArmWrist::updateAccelerometer(BasePosition *position)
+int ArmWrist::updateAccelerometer(IMUBase *position)
 {
   return ArmPart::updateAccelerometer(position->accelerometer);
 }
 
-int ArmWrist::updateAccuracy(BasePosition *position)
+int ArmWrist::updateAccuracy(IMUBase *position)
 {
   return ArmPart::updateAccuracy(position->accuracy);
 }

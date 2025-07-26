@@ -7,6 +7,6 @@
 
 class ArmPlatform {
   public:
-    RemoteBNO bno;
+    RemoteBNO imu;
     void dispatchMessage(can2040_msg frame);
 };

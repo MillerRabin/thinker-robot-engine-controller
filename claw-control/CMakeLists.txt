@@ -11,10 +11,9 @@ add_executable(${APP_CLAW_NAME}
   ${APP_CLAW_SRC_DIRECTORY}/armClaw/armClaw.cpp
   ${APP_COMMON_DIRECTORY}/canBus/src/can2040.c
   ${APP_COMMON_DIRECTORY}/witmotion/wit_c_sdk.c
-  ${APP_COMMON_DIRECTORY}/witmotion/WitMotion.cpp
+  ${APP_COMMON_DIRECTORY}/localWitmotion/localWitmotion.cpp
   ${APP_COMMON_DIRECTORY}/remoteBNO/remoteBNO.cpp    
   ${APP_COMMON_DIRECTORY}/servo/servo.cpp
-  ${APP_COMMON_DIRECTORY}/position/positionWitmotion.cpp
   ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
   ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp  
   ${APP_COMMON_DIRECTORY}/structureBase/structureBase.cpp

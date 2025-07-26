@@ -1,14 +1,16 @@
 #include "armShoulder.h"
 
-void ArmShoulder::engineTask(void *instance) {
-  auto* shoulder = static_cast<ArmShoulder*>(instance);
+void ArmShoulder::engineTask(void *instance)
+{
+  auto *shoulder = static_cast<ArmShoulder *>(instance);
   TickType_t lastWakeTime = xTaskGetTickCount();
-  while (true) {    
+  while (true)
+  {
     shoulder->shoulderY.tick();
     shoulder->shoulderZ.tick();
-    
-    Euler rEuler = shoulder->platform.bno.quaternion.getEuler();
-    Euler sEuler = shoulder->bno.quaternion.getEuler();
+
+    Euler rEuler = shoulder->platform.imu.quaternion.getEuler();
+    Euler sEuler = shoulder->imu.quaternion.getEuler();
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
     printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
     printf("Dropped frames %d\n", Bus::getDroppedFrames());
@@ -29,16 +31,19 @@ ArmShoulder::ArmShoulder(
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
                            shoulderZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, 100),
                            shoulderY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
-                           bno(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
+                           imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
-  if (!xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL)) {
+  if (!xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL))
+  {
     setEngineTaskStatus(false);
-  } else {
+  }
+  else
+  {
     setEngineTaskStatus(true);
   }
 }
 
-int ArmShoulder::updateQuaternion(BasePosition *position)
+int ArmShoulder::updateQuaternion(IMUBase *position)
 {
   Euler euler = position->quaternion.getEuler();
   // printf("Euler get pitch angle: %f\n", euler.getPitchAngle());
@@ -47,17 +52,17 @@ int ArmShoulder::updateQuaternion(BasePosition *position)
   return ArmPart::updateQuaternion(position->quaternion);
 }
 
-int ArmShoulder::updateGyroscope(BasePosition *position)
+int ArmShoulder::updateGyroscope(IMUBase *position)
 {
   return ArmPart::updateGyroscope(position->gyroscope);
 }
 
-int ArmShoulder::updateAccelerometer(BasePosition *position)
+int ArmShoulder::updateAccelerometer(IMUBase *position)
 {
   return ArmPart::updateAccelerometer(position->accelerometer);
 }
 
-int ArmShoulder::updateAccuracy(BasePosition *position)
+int ArmShoulder::updateAccuracy(IMUBase *position)
 {
   return ArmPart::updateAccuracy(position->accuracy);
 }
@@ -72,14 +77,17 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame)
     float angleY = angleYS / 100.0f;
     float angleZ = angleZS / 100.0f;
 
-    if (!isnan(angleY)) {
+    if (!isnan(angleY))
+    {
       shoulderY.setTargetAngle(angleY);
     }
-    if (!isnan(angleZ)) {
+    if (!isnan(angleZ))
+    {
       shoulderZ.setTargetAngle(angleZ);
     }
   }
-  if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE) {
+  if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE)
+  {
     rebootInBootMode();
   }
 }
