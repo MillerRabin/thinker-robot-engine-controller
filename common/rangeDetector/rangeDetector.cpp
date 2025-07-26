@@ -69,19 +69,19 @@ void RangeDetector::activateSensor(bool shortSensor)
 void RangeDetector::setupAddresses() {
   gpio_put(shortDetectorShutPin, 0);
   gpio_put(longDetectorShutPin, 0);
-  vTaskDelay(pdMS_TO_TICKS(10));
+  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
 
   gpio_put(shortDetectorShutPin, 1);
-  vTaskDelay(pdMS_TO_TICKS(10));
+  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
   shortDistanceDetector.VL6180xInit();
   shortDistanceDetector.changeAddress(VL618_DEFAULT_ADDR, VL618_NEW_ADDR);
-  vTaskDelay(pdMS_TO_TICKS(10));
+  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
 
   gpio_put(longDetectorShutPin, 1);
-  vTaskDelay(pdMS_TO_TICKS(10));
+  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
   longDistanceDetector.begin(i2c);
   longDistanceDetector.setAddress(VL53_NEW_ADDR);
-  vTaskDelay(pdMS_TO_TICKS(10));
+  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
 
   printf("I2C addresses set: VL6180X -> 0x%X, VL53L0X -> 0x%X\n", VL618_NEW_ADDR, VL53_NEW_ADDR);
 }
