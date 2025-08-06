@@ -30,13 +30,14 @@ typedef void (* CanCallback)( void* armPart, can2040_msg frame );
 
 
 typedef std::map<uint32_t, can2040_msg> CanMap;
+class ArmPart;
 
 class Bus {
   private:  
     const uint32_t pio_num = 0;
     const uint32_t sys_clock = 125000000;
     const uint32_t bitrate = 1000000;
-    void* armPart;  
+    ArmPart* armPart;  
     CanCallback busCallback;
     static void busReceiveTask(void* instance);
     static void busSendTask(void *instance);
@@ -44,10 +45,10 @@ class Bus {
     static struct can2040 cbus;
     static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);  
     static CanMap canSendMap;
-    static CanMap canReceiveMap;
-    static SemaphoreHandle_t sendMapSemaphore;
-    static SemaphoreHandle_t receiveMapSemaphore;
+    static can2040_msg canReceiveMap[256];
+    static can2040_msg localReceiveMap[256];
+    static SemaphoreHandle_t sendMapSemaphore;    
     public:
-      Bus(const uint rxPin, const uint txPin, void *instance, CanCallback callback);
+      Bus(const uint rxPin, const uint txPin, ArmPart* armPart, CanCallback callback);
       void send(uint32_t id, uint64_t data);
     };

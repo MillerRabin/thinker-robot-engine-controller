@@ -1,10 +1,20 @@
 #include "servo.h"
 
-Servo::Servo(const uint pin, Range degreeRange, Range imuRange, ImuUseAngle useAngle, const float freq, const float lowPeriod, const float highPeriod) :
+Servo::Servo(
+  const uint pin, 
+  Range degreeRange, 
+  Range imuRange, 
+  ImuUseAngle useAngle, 
+  const float homePosition,
+  const float freq, 
+  const float lowPeriod, 
+  const float highPeriod
+) :
   minDegree(degreeRange.from),
   maxDegree(degreeRange.to),
   lowPeriod(lowPeriod),
   highPeriod(highPeriod),
+  homePosition(homePosition),
   useAngle(useAngle),  
   imuMap(imuRange, degreeRange),
   euler(NAN, NAN, NAN) {     
@@ -69,9 +79,15 @@ float Servo::getImuAngle() {
   return imuMap.getDestValue(angle);
 }
 
-void Servo::tick() {  
-  const float current = getImuAngle();
-  const float diff = targetAngle - current;
-  printf("current: %f, target: %f, diff: %f\n", current, targetAngle, diff);
-  setDegreeDirect(targetAngle);
+void Servo::tick() {    
+  float path = targetAngle - currentAngle;
+  float dir = (path > 0) ? 1.0 : -1.0;
+  float apath = fabs(path);
+  if (fabs(path) < SERVO_MIN_DERGREE_CHANGE) {
+    currentAngle = targetAngle;
+    return;
+  }
+  float increment = apath > SERVO_MAX_DEGREE_CHANGE ? SERVO_MAX_DEGREE_CHANGE : apath;
+  float step = dir * increment;
+  setDegreeDirect(currentAngle + step);
 }

@@ -9,9 +9,9 @@
 
 #define ARM_POSITION_TASK_OK 1
 #define ARM_ENGINE_TASK_OK 2
+#define BUS_RECEIVING_TASK_OK 4
 
-class ArmPart
-{
+class ArmPart {
 private:
   Bus bus;
   static void canCallback(void *pArmPart, can2040_msg frame);
@@ -29,6 +29,14 @@ public:
   ArmPlatform platform;
   void setPositionTaskStatus(bool value);
   void setEngineTaskStatus(bool value);
+  void setBusReceivingTaskStatus(bool value);
+  Quaternion align(IMUQuaternion &quat);
+  Quaternion difference(IMUQuaternion &quat);
+  Quaternion homeQuaternion;
+  Quaternion platformHomeQuaternion;
+  Quaternion offsetQuaternion;
+  Quaternion alignedOffsetQuaternion;
+  void setHomeQuaternion(IMUQuaternion &homeQuaternion, IMUQuaternion &platformQuaternion);
   virtual uint32_t getQuaternionMessageId() { return 0; };
   virtual uint32_t getAccelerometerMessageId() { return 0; };
   virtual uint32_t getGyroscopeMessageId() { return 0; };

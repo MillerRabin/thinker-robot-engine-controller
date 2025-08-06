@@ -8,10 +8,10 @@ void ArmElbow::engineTask(void *instance)
   {
     elbow->elbowY.tick();
 
-    Euler rEuler = elbow->platform.imu.quaternion.getEuler();
+    /*Euler rEuler = elbow->platform.imu.quaternion.getEuler();
     Euler sEuler = elbow->imu.quaternion.getEuler();
     printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
-    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
+    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());*/
     elbow->setEngineTaskStatus(true);
     elbow->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
@@ -26,7 +26,7 @@ ArmElbow::ArmElbow(
     const uint engineYPin,
     const uint canRxPin,
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
-                           elbowY(engineYPin, Range(0, 270), Range(-90, 90), IMU_USE_PITCH, 100),
+                           elbowY(engineYPin, Range(0, 270), Range(-90, 90), IMU_USE_PITCH, ELBOW_Y_HOME_POSITION, 100),
                            imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
   if (!xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 1024, this, 5, NULL))
@@ -40,10 +40,7 @@ ArmElbow::ArmElbow(
 }
 
 int ArmElbow::updateQuaternion(IMUBase *position)
-{
-  Euler euler = position->quaternion.getEuler();
-  // printf("Euler get pitch angle: %f\n", euler.getPitchAngle());
-  elbowY.euler = euler;
+{  
   return ArmPart::updateQuaternion(position->quaternion);
 }
 

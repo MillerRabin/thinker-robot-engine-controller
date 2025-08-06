@@ -7,12 +7,7 @@ void ArmWrist::engineTask(void *instance)
   while (true)
   {
     wrist->wristY.tick();
-    wrist->wristZ.tick();
-
-    Euler rEuler = wrist->platform.imu.quaternion.getEuler();
-    Euler sEuler = wrist->imu.quaternion.getEuler();
-    printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
-    printf("wrist roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
+    wrist->wristZ.tick();    
     wrist->setEngineTaskStatus(true);
     wrist->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
@@ -28,8 +23,8 @@ ArmWrist::ArmWrist(
     const uint engineYPin,
     const uint canRxPin,
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
-                           wristZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, 100),
-                           wristY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
+                           wristZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, WRIST_Z_HOME_POSITION, 100),
+                           wristY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, WRIST_Y_HOME_POSITION, 100),
                            imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
   if (!xTaskCreate(ArmWrist::engineTask, "ArmWrist::engineTask", 1024, this, 5, NULL))
@@ -44,10 +39,6 @@ ArmWrist::ArmWrist(
 
 int ArmWrist::updateQuaternion(IMUBase *position)
 {
-  Euler euler = position->quaternion.getEuler();
-  // printf("Euler get pitch angle: %f\n", euler.getPitchAngle());
-  wristY.euler = euler;
-  wristZ.euler = euler;
   return ArmPart::updateQuaternion(position->quaternion);
 }
 

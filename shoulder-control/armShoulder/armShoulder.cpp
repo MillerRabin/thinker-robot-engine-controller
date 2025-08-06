@@ -9,10 +9,14 @@ void ArmShoulder::engineTask(void *instance)
     shoulder->shoulderY.tick();
     shoulder->shoulderZ.tick();
 
-    Euler rEuler = shoulder->platform.imu.quaternion.getEuler();
-    Euler sEuler = shoulder->imu.quaternion.getEuler();
-    printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
-    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
+    if (shoulder->shoulderY.atHomePosition() && shoulder->shoulderZ.atHomePosition()) {
+      shoulder->setHomeQuaternion(shoulder->imu.quaternion, shoulder->platform.imu.quaternion);
+      printf("Shoulder home position set\n");
+    }
+    
+    Quaternion diff = shoulder->difference(shoulder->imu.quaternion);
+    Euler euler = diff.getEuler();
+    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", euler.getRollAngle(), euler.getPitchAngle(), euler.getYawAngle());
     shoulder->setEngineTaskStatus(true);
     shoulder->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
@@ -28,26 +32,20 @@ ArmShoulder::ArmShoulder(
     const uint engineYPin,
     const uint canRxPin,
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
-                           shoulderZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, 100),
-                           shoulderY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
+                           shoulderZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, SHOULDER_Z_HOME_POSITION, 100),
+                           shoulderY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, SHOULDER_Y_HOME_POSITION, 100),
                            imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
-  if (!xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL))
-  {
+  if (!xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL)) {
     setEngineTaskStatus(false);
   }
-  else
-  {
+  else {
     setEngineTaskStatus(true);
   }
 }
 
 int ArmShoulder::updateQuaternion(IMUBase *position)
-{
-  Euler euler = position->quaternion.getEuler();
-  // printf("Euler get pitch angle: %f\n", euler.getPitchAngle());
-  shoulderY.euler = euler;
-  shoulderZ.euler = euler;
+{  
   return ArmPart::updateQuaternion(position->quaternion);
 }
 

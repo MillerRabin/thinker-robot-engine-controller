@@ -21,8 +21,6 @@ class LocalBNO : public IMUBase {
     static void compassCallback(uint gpio, uint32_t events);    
     static uint32_t notificationIndex;
     static TaskHandle_t compassTaskHandle;
-    static Quaternion lastQuaternion;
-    static Quaternion rotateQuatenion;
   protected:
     void initIMU();
     ArmPart *armPart;

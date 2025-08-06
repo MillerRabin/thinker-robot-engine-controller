@@ -24,6 +24,7 @@ class Servo {
     const float highPeriod;
     const float maxDegree;
     const float minDegree;
+    const float homePosition;
     uint16_t lowSlices;
     uint16_t highSlices;
     uint16_t delta;
@@ -33,12 +34,29 @@ class Servo {
     uint setFrequency(const uint freq);    
     ImuUseAngle useAngle;    
     RangeMap imuMap;
+    float currentAngle = homePosition;
     uint setDegreeDirect(const float degree);    
     volatile float targetAngle = NAN;
     float speed = 0;
   public:
-    Servo(const uint pin, Range degreeRange, Range imuRange, ImuUseAngle useAngle, const float freq = 50, const float lowPeriod = 0.0005, const float highPeriod = 0.0025);
+    Servo(
+      const uint pin, 
+      Range degreeRange, 
+      Range imuRange, 
+      ImuUseAngle useAngle, 
+      const float homePosition, 
+      const float freq = 50, 
+      const float lowPeriod = 0.0005, 
+      const float highPeriod = 0.0025
+    );
     bool setTargetAngle(const float angle);
+    bool isStopped() {
+      return fabs(currentAngle - targetAngle) < 0.01f;
+    }
+
+    bool atHomePosition() {
+      return isStopped() && (currentAngle == homePosition);
+    }
     float getSpeed();
     float getImuAngle();
     Euler euler;

@@ -1042,10 +1042,7 @@ uint8_t BNO080::resetReason()
 // See https://en.wikipedia.org/wiki/Q_(number_format)
 float BNO080::qToFloat(int16_t fixedPointValue, uint8_t qPoint)
 {
-
-  float qFloat = fixedPointValue;
-  qFloat *= pow(2, qPoint * -1);
-  return (qFloat);
+  return (float)fixedPointValue / (1 << qPoint);
 }
 
 // Sends the packet to enable the rotation vector

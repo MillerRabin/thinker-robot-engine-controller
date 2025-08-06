@@ -11,11 +11,6 @@ void ArmClaw::engineTask(void *instance)
   {
     claw->clawX.tick();
     claw->clawZ.tick();
-
-    Euler rEuler = claw->platform.imu.quaternion.getEuler();
-    Euler sEuler = claw->imu.quaternion.getEuler();
-    printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
-    printf("Claw roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());
     claw->setEngineTaskStatus(true);
     claw->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
@@ -36,9 +31,9 @@ ArmClaw::ArmClaw(
     const uint8_t memsIntPin,
     const uint8_t shortDetectorShutPin,
     const uint8_t longDetectorShutPin) : ArmPart(canRxPin, canTxPin),
-                                         clawX(engineXPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
-                                         clawZ(engineZPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
-                                         clawGripper(engineGripperPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, 100),
+                                         clawX(engineXPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, CLAW_X_HOME_POSITION, 100),
+                                         clawZ(engineZPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, CLAW_Z_HOME_POSITION, 100),
+                                         clawGripper(engineGripperPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, CLAW_GRIPPER_HOME_POSITION, 100),
                                          imu(this, memsRxPin, memsTxPin, memsRstPin),
                                          rangeDetector(this, i2c1, longDetectorShutPin, shortDetectorShutPin)
 {

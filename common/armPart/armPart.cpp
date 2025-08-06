@@ -1,11 +1,13 @@
 #include "armPart.h"
 
 ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) :
-  bus(canRxPin, canTxPin, (void*)this, canCallback)
+  bus(canRxPin, canTxPin, this, canCallback)
 {}
 
 int ArmPart::updateQuaternion(IMUQuaternion quat) {  
-  uint64_t data = quat.serialize();  
+  Quaternion alignedQuat = align(quat);
+  IMUQuaternion imuQuat = IMUQuaternion::FromQuaternion(alignedQuat);
+  uint64_t data = imuQuat.serialize();
   uint8_t id = getQuaternionMessageId();  
   if (id == 0) return -1;
   bus.send(id, data);
@@ -85,4 +87,30 @@ void ArmPart::setEngineTaskStatus(bool value) {
   } else {
     statuses &= ~ARM_ENGINE_TASK_OK;
   }
+}
+
+void ArmPart::setBusReceivingTaskStatus(bool value) {
+  if (value) {
+    statuses |= BUS_RECEIVING_TASK_OK;
+  }
+  else {
+    statuses &= ~BUS_RECEIVING_TASK_OK;
+  }
+}
+
+void ArmPart::setHomeQuaternion(IMUQuaternion &homeQuaternion, IMUQuaternion &platformQuaternion) {
+  this->homeQuaternion = Quaternion(homeQuaternion);
+  this->platformHomeQuaternion = Quaternion(platformQuaternion);
+  Quaternion homeInverted = Quaternion::Conjugate(homeQuaternion);
+  this->offsetQuaternion = Quaternion::Multiply(platformHomeQuaternion, homeInverted);
+  this->alignedOffsetQuaternion = align(homeQuaternion);
+}
+
+Quaternion ArmPart::align(IMUQuaternion &quat) {
+  return Quaternion::Multiply(offsetQuaternion, quat);
+}
+
+Quaternion ArmPart::difference(IMUQuaternion &quat) {
+  Quaternion qt = Quaternion(quat);
+  return Quaternion::Difference(qt, homeQuaternion);
 }

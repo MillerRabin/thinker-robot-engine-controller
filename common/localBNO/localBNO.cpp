@@ -2,14 +2,6 @@
 
 uint32_t LocalBNO::notificationIndex = 1;
 TaskHandle_t LocalBNO::compassTaskHandle;
-Quaternion LocalBNO::lastQuaternion;
-
-float rollOffset = 0.9f * (M_PI / 180.0f);
-float pitchOffset = -1.680f * (M_PI / 180.0f);
-
-Quaternion errorQuat = Quaternion::FromEuler(rollOffset, pitchOffset, 0.0f);
-Quaternion correctionQuat = Quaternion::Conjugate(errorQuat);
-Quaternion LocalBNO::rotateQuatenion = Quaternion::Multiply(correctionQuat, {-0.7071f, 0.7071f, 0.0f, 0.0f});
 
 void LocalBNO::compassCallback(uint gpio, uint32_t events)
 {
@@ -18,50 +10,70 @@ void LocalBNO::compassCallback(uint gpio, uint32_t events)
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-void LocalBNO::compassTask(void *instance)
-{
+void LocalBNO::compassTask(void *instance) {  
   LocalBNO *bno = (LocalBNO *)instance;
   bool needCalibration = false;
+  TickType_t lastCalibrationCheck = 0;
   BNO080 *imu = &(bno->imu);
+  const TickType_t calibrationCheckInterval = pdMS_TO_TICKS(500);
+  TickType_t lastSendTime = 0;
+  const TickType_t minSendInterval = pdMS_TO_TICKS(10);
+
+  taskENTER_CRITICAL();
   imu->getReadings();
-  while (true)
-  {
-    if (imu->hasReset())
-    {
+  taskEXIT_CRITICAL();
+
+  while (true) {
+    if (imu->hasReset()) {
       printf("IMU was reset. Re-enabling sensor...\n");
       bno->initIMU();
     }
+
     bno->armPart->setPositionTaskStatus(true);
+    
     uint32_t notificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(IMU_WAIT_TIMEOUT));
     if (notificationValue == 0) {
       vTaskDelay(pdMS_TO_TICKS(IMU_NO_DATA_TIMEOUT));
       printf("No data from IMU\n");
       continue;
     }
+    
+    uint16_t datatype;
+    taskENTER_CRITICAL();
+    datatype = imu->getReadings();
+    taskEXIT_CRITICAL();
 
-    uint16_t datatype = imu->getReadings();
-    if ((datatype == SENSOR_REPORTID_ROTATION_VECTOR) ||
-        (datatype == SENSOR_REPORTID_GAME_ROTATION_VECTOR))
-    {
-      bno->quaternion.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);
-      bno->quaternion.multiplyFirst(rotateQuatenion);
-      if (bno->armPart->updateQuaternion(bno) != 0) {
-        printf("quat sending error\n");
-      }
-    }
+    TickType_t now = xTaskGetTickCount();
+    /*if ((now - lastSendTime) < minSendInterval) {
+      continue;
+    }*/
+    lastSendTime = now;
 
-    if (datatype == SENSOR_REPORTID_GYROSCOPE) {
-      bno->updateGyroscopeData(imu->rawGyroX, imu->rawGyroY, imu->rawGyroZ);
-      if (bno->armPart->updateGyroscope(bno) != 0) {
-        printf("Gyro sending error\n");
+    switch (datatype) {
+      case SENSOR_REPORTID_ROTATION_VECTOR:
+      case SENSOR_REPORTID_GAME_ROTATION_VECTOR: {
+        bno->quaternion.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);
+        if (bno->armPart->updateQuaternion(bno) != 0) {
+          printf("quat sending error\n");
+        }
+        break;
       }
-    }
-
-    if (datatype == SENSOR_REPORTID_LINEAR_ACCELERATION) {
-      bno->updateAccelerometerData(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
-      if (bno->armPart->updateAccelerometer(bno) != 0) {
-        printf("Accelerometer sending error\n");
+      case SENSOR_REPORTID_GYROSCOPE: {
+        bno->updateGyroscopeData(imu->rawGyroX, imu->rawGyroY, imu->rawGyroZ);
+        if (bno->armPart->updateGyroscope(bno) != 0) {
+          printf("Gyro sending error\n");
+        }
+        break;
       }
+      case SENSOR_REPORTID_LINEAR_ACCELERATION: {
+        bno->updateAccelerometerData(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
+        if (bno->armPart->updateAccelerometer(bno) != 0) {
+          printf("Accelerometer sending error\n");
+        }
+        break;
+      }
+      default:
+        break;
     }
 
     bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->quatAccuracy, imu->gyroAccuracy, imu->accelLinAccuracy);
@@ -69,18 +81,23 @@ void LocalBNO::compassTask(void *instance)
       printf("Quaternion accuracy sending error\n");
     }
 
-    if (!needCalibration && imu->quatAccuracy < 3) {
-      needCalibration = true;
-      imu->calibrateAll();
-      printf("BNO needs calibration. Starting...\n");
-    }
+    if ((now - lastCalibrationCheck) >= calibrationCheckInterval) {
+      lastCalibrationCheck = now;
+      uint8_t quatAcc = imu->getQuatAccuracy();
+      
+      if (!needCalibration && quatAcc < 3) {
+        needCalibration = true;
+        imu->calibrateAll();      
+        printf("BNO needs calibration. Starting...\n");
+      }
 
-    if (needCalibration && imu->getQuatAccuracy() == 3) {
-      imu->endCalibration();
-      vTaskDelay(pdMS_TO_TICKS(200));
-      imu->saveCalibration();
-      printf("BNO is calibrated. Saving...\n");
-      needCalibration = false;
+      if (needCalibration && quatAcc == 3) {
+        imu->endCalibration();
+        vTaskDelay(pdMS_TO_TICKS(200));
+        imu->saveCalibration();
+        printf("BNO is calibrated. Saving...\n");
+        needCalibration = false;
+      }
     }
   }
 }

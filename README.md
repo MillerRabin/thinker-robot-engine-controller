@@ -2,10 +2,6 @@
 
 Engine control code
 
-## Prerequisites
-
-To use the code in this repo, your system must be set up for RP2040 C/C++ development. See [this blog post of mine](https://blog.smittytone.net/2021/02/02/program-raspberry-pi-pico-c-mac/) for setup details.
-
 ## Usage
 
 1. Clone the repo: `git clone https://github.com/smittytone/RP2040-FreeRTOS`.
