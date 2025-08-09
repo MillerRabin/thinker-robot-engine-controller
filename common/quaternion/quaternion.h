@@ -27,8 +27,7 @@ public:
   static IMUQuaternion FromQuaternion(Quaternion &quat);
 };
 
-  class Quaternion
-  {
+  class Quaternion {
   public:
     float i;
     float j;

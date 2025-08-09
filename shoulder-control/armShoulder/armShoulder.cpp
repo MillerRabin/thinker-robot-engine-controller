@@ -6,18 +6,26 @@ void ArmShoulder::engineTask(void *instance)
   TickType_t lastWakeTime = xTaskGetTickCount();
   while (true)
   {
+    Quaternion diff = shoulder->difference(shoulder->imu.quaternion);
+    Euler euler = diff.getEuler();
+    shoulder->shoulderY.setIMUAngle(SHOULDER_Y_HOME_POSITION - euler.getYawAngle());
+    shoulder->shoulderZ.setIMUAngle(SHOULDER_Z_HOME_POSITION - euler.getPitchAngle());
     shoulder->shoulderY.tick();
     shoulder->shoulderZ.tick();
 
-    if (shoulder->shoulderY.atHomePosition() && shoulder->shoulderZ.atHomePosition()) {
-      shoulder->setHomeQuaternion(shoulder->imu.quaternion, shoulder->platform.imu.quaternion);
-      printf("Shoulder home position set\n");
-    }
+    shoulder->setYCalibrating(shoulder->shoulderY.isCalibrating());
+    shoulder->setZCalibrating(shoulder->shoulderZ.isCalibrating());
     
-    Quaternion diff = shoulder->difference(shoulder->imu.quaternion);
-    Euler euler = diff.getEuler();
-    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", euler.getRollAngle(), euler.getPitchAngle(), euler.getYawAngle());
+    if (shoulder->shoulderY.isCalibrating() && shoulder->shoulderZ.isCalibrating()) {      
+      shoulder->setHomeQuaternion(shoulder->imu.quaternion, shoulder->platform.imu.quaternion);
+      //printf("Shoulder home quaternion set\n");
+    }
+    //printf("Shoulder Y target: %f, current: %f, IMU: %f\n", shoulder->shoulderY.getTargetAngle(), shoulder->shoulderY.getCurrentAngle(), shoulder->shoulderY.getIMUAngle());
+    //printf("Shoulder Z target: %f, current: %f, IMU: %f\n", shoulder->shoulderZ.getTargetAngle(), shoulder->shoulderZ.getCurrentAngle(), shoulder->shoulderZ.getIMUAngle());
+
+    //printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", euler.getRollAngle(), euler.getPitchAngle(), euler.getYawAngle());
     shoulder->setEngineTaskStatus(true);
+    
     shoulder->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
   }
@@ -32,10 +40,11 @@ ArmShoulder::ArmShoulder(
     const uint engineYPin,
     const uint canRxPin,
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
-                           shoulderZ(engineZPin, Range(0, 270), Range(-180, 180), IMU_USE_YAW, SHOULDER_Z_HOME_POSITION, 100),
-                           shoulderY(engineYPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, SHOULDER_Y_HOME_POSITION, 100),
-                           imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
+                           shoulderZ(engineZPin, Range(0, 270), SHOULDER_Z_HOME_POSITION, 100),
+                           shoulderY(engineYPin, Range(0, 180), SHOULDER_Y_HOME_POSITION, 100),
+                           imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)                           
 {
+  offsetQuaternion = getRotationQuaternion();
   if (!xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL)) {
     setEngineTaskStatus(false);
   }
@@ -85,6 +94,19 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame)
   }
   if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE)
   {
+    ArmPart::sendFirmwareUpgradeMessage();
+    setUpgrading(true);
+    updateStatuses();
+    vTaskDelay(pdMS_TO_TICKS(1000));
     rebootInBootMode();
   }
 }
+
+Quaternion ArmShoulder::getRotationQuaternion() {
+  float rollOffset = -90.0f * (M_PI / 180.0f);
+  float pitchOffset = 90.0f * (M_PI / 180.0f);
+  float yawOffset = 0.0f * (M_PI / 180.0f);
+  Quaternion errorQuat = Quaternion::FromEuler(rollOffset, pitchOffset, yawOffset);
+  Quaternion correctionQuat = Quaternion::Conjugate(errorQuat);
+  return Quaternion::Multiply(correctionQuat, {0, 0, 0, 1});
+};

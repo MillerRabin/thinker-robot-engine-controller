@@ -46,8 +46,7 @@ int ArmPart::updateHeight(uint32_t height) {
   return 0;
 }
 
-int ArmPart::updateStatuses()
-{  
+int ArmPart::updateStatuses() {  
   uint8_t id = getStatusesMessageId();
   if (id == 0)
     return -1;
@@ -98,6 +97,40 @@ void ArmPart::setBusReceivingTaskStatus(bool value) {
   }
 }
 
+void ArmPart::setYCalibrating(bool value) {
+  if (value) {
+    statuses |= ARM_Y_CALIBRATING;
+  } else {
+    statuses &= ~ARM_Y_CALIBRATING;
+  }
+}
+
+void ArmPart::setZCalibrating(bool value) {
+  if (value) {
+    statuses |= ARM_Z_CALIBRATING;
+  }
+  else {
+    statuses &= ~ARM_Z_CALIBRATING;
+  }
+}
+
+void ArmPart::setXCalibrating(bool value) {
+  if (value) {
+    statuses |= ARM_X_CALIBRATING;
+  } else {
+    statuses &= ~ARM_X_CALIBRATING;
+  }
+}
+
+void ArmPart::setUpgrading(bool value) {
+  if (value) {
+    statuses |= ARM_UPGRADING;
+  }
+  else {
+    statuses &= ~ARM_UPGRADING;
+  }
+}
+
 void ArmPart::setHomeQuaternion(IMUQuaternion &homeQuaternion, IMUQuaternion &platformQuaternion) {
   this->homeQuaternion = Quaternion(homeQuaternion);
   this->platformHomeQuaternion = Quaternion(platformQuaternion);
@@ -113,4 +146,11 @@ Quaternion ArmPart::align(IMUQuaternion &quat) {
 Quaternion ArmPart::difference(IMUQuaternion &quat) {
   Quaternion qt = Quaternion(quat);
   return Quaternion::Difference(qt, homeQuaternion);
+}
+
+int ArmPart::sendFirmwareUpgradeMessage() {
+  uint8_t id = getFirmwareUpgradeMessageId();
+  if (id == 0) return -1;
+  bus.send(id, 0);
+  return 0;
 }

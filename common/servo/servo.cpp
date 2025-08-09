@@ -2,9 +2,7 @@
 
 Servo::Servo(
   const uint pin, 
-  Range degreeRange, 
-  Range imuRange, 
-  ImuUseAngle useAngle, 
+  Range degreeRange,
   const float homePosition,
   const float freq, 
   const float lowPeriod, 
@@ -14,10 +12,7 @@ Servo::Servo(
   maxDegree(degreeRange.to),
   lowPeriod(lowPeriod),
   highPeriod(highPeriod),
-  homePosition(homePosition),
-  useAngle(useAngle),  
-  imuMap(imuRange, degreeRange),
-  euler(NAN, NAN, NAN) {     
+  homePosition(homePosition) {     
     gpio_set_function(pin, GPIO_FUNC_PWM);  
     slice = pwm_gpio_to_slice_num(pin);
     channel = pwm_gpio_to_channel(pin);    
@@ -70,24 +65,66 @@ uint Servo::setDegreeDirect(const float degree) {
 bool Servo::setTargetAngle(const float angle) {
   if (isnan(angle)) 
     return false;
+
+  if (angle < minDegree) {
+    targetAngle = minDegree;
+    return true;
+  }
+  
+  if (angle > maxDegree) {
+    targetAngle = maxDegree;
+    return true;
+  }
+    
   targetAngle = angle;
   return true;
 }
 
-float Servo::getImuAngle() {
-  const float angle = euler.getAngle(useAngle);
-  return imuMap.getDestValue(angle);
-}
-
-void Servo::tick() {    
-  float path = targetAngle - currentAngle;
-  float dir = (path > 0) ? 1.0 : -1.0;
-  float apath = fabs(path);
-  if (fabs(path) < SERVO_MIN_DERGREE_CHANGE) {
-    currentAngle = targetAngle;
+void Servo::tick() {
+  if (isnan(targetAngle)) {
     return;
   }
-  float increment = apath > SERVO_MAX_DEGREE_CHANGE ? SERVO_MAX_DEGREE_CHANGE : apath;
+  float ca = currentAngle;  
+  if (!isCalibrating()) {
+    /*filteredImuAngle = (isnan(filteredImuAngle)) ? imuAngle : 
+                                IMU_ANGLE_FILTER * imuAngle + (1.0f - IMU_ANGLE_FILTER) * filteredImuAngle;
+    ca = filteredImuAngle;*/
+    ca = imuAngle;
+  }
+    
+  float path = targetAngle - ca;
+  float dir = (path > 0) ? 1.0 : -1.0;
+  float apath = fabs(path);
+  if (!isCalibrating() && (apath < SERVO_DEAD_ZONE)) {
+    return;
+  }
+
+  float increment = apath > SERVO_MAX_DEGREE_CHANGE ? SERVO_MAX_DEGREE_CHANGE : 
+                    apath < SERVO_MIN_DEGREE_CHANGE ? SERVO_MIN_DEGREE_CHANGE :
+                    apath;  
   float step = dir * increment;
-  setDegreeDirect(currentAngle + step);
+  currentAngle += step;  
+  setDegreeDirect(currentAngle);
+}
+
+bool Servo::isStopped() {
+  return fabs(imuAngle - targetAngle) <= SERVO_MIN_DEGREE_CHANGE;
+}
+
+bool Servo::atHomePosition() {  
+  return (targetAngle == homePosition);
+}
+
+bool Servo::equalAngles(float a, float b) {
+  return fabs(a - b) <= SERVO_MIN_DEGREE_CHANGE;
+} 
+
+bool Servo::isCalibrating() {
+  return equalAngles(targetAngle, homePosition) &&
+         !equalAngles(currentAngle, imuAngle) &&
+         !equalAngles(targetAngle, imuAngle);
+}
+
+void Servo::setIMUAngle(float value) {  
+  imuAngle = value;
 }

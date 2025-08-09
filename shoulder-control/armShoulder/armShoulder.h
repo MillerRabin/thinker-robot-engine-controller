@@ -33,6 +33,8 @@ public:
   uint32_t getGyroscopeMessageId() { return CAN_SHOULDER_GYROSCOPE; };
   uint32_t getAccuracyMessageId() { return CAN_SHOULDER_ACCURACY; };
   uint32_t getStatusesMessageId() { return CAN_SHOULDER_STATUSES; };
+  uint32_t getUpgradeConfimedMessageId() { return CAN_SHOULDER_FIRMWARE_UPGRADE_CONFIRMED; };
+  Quaternion getRotationQuaternion();
   int updateAccelerometer(IMUBase *position);
   int updateGyroscope(IMUBase *position);
   int updateAccuracy(IMUBase *position);

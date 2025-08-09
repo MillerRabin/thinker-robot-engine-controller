@@ -16,8 +16,7 @@ void LocalBNO::compassTask(void *instance) {
   TickType_t lastCalibrationCheck = 0;
   BNO080 *imu = &(bno->imu);
   const TickType_t calibrationCheckInterval = pdMS_TO_TICKS(500);
-  TickType_t lastSendTime = 0;
-  const TickType_t minSendInterval = pdMS_TO_TICKS(10);
+  TickType_t lastSendTime = 0;  
 
   taskENTER_CRITICAL();
   imu->getReadings();
@@ -44,15 +43,13 @@ void LocalBNO::compassTask(void *instance) {
     taskEXIT_CRITICAL();
 
     TickType_t now = xTaskGetTickCount();
-    /*if ((now - lastSendTime) < minSendInterval) {
-      continue;
-    }*/
     lastSendTime = now;
 
     switch (datatype) {
       case SENSOR_REPORTID_ROTATION_VECTOR:
       case SENSOR_REPORTID_GAME_ROTATION_VECTOR: {
         bno->quaternion.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);
+        //bno->quaternion.multiplyFirst(bno->armPart->rotationQuaternion);
         if (bno->armPart->updateQuaternion(bno) != 0) {
           printf("quat sending error\n");
         }
@@ -76,14 +73,14 @@ void LocalBNO::compassTask(void *instance) {
         break;
     }
 
-    bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->quatAccuracy, imu->gyroAccuracy, imu->accelLinAccuracy);
+    bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->getQuatAccuracy(), imu->gyroAccuracy, imu->accelLinAccuracy);
     if (bno->armPart->updateAccuracy(bno) != 0) {
       printf("Quaternion accuracy sending error\n");
     }
 
     if ((now - lastCalibrationCheck) >= calibrationCheckInterval) {
       lastCalibrationCheck = now;
-      uint8_t quatAcc = imu->getQuatAccuracy();
+      uint8_t quatAcc = bno->accuracy.quaternionAccuracy;
       
       if (!needCalibration && quatAcc < 3) {
         needCalibration = true;

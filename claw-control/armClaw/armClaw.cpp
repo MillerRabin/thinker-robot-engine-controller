@@ -31,9 +31,9 @@ ArmClaw::ArmClaw(
     const uint8_t memsIntPin,
     const uint8_t shortDetectorShutPin,
     const uint8_t longDetectorShutPin) : ArmPart(canRxPin, canTxPin),
-                                         clawX(engineXPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, CLAW_X_HOME_POSITION, 100),
-                                         clawZ(engineZPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, CLAW_Z_HOME_POSITION, 100),
-                                         clawGripper(engineGripperPin, Range(0, 180), Range(-90, 90), IMU_USE_PITCH, CLAW_GRIPPER_HOME_POSITION, 100),
+                                         clawX(engineXPin, Range(0, 180), CLAW_X_HOME_POSITION, 100),
+                                         clawZ(engineZPin, Range(0, 180), CLAW_Z_HOME_POSITION, 100),
+                                         clawGripper(engineGripperPin, Range(0, 180), CLAW_GRIPPER_HOME_POSITION, 100),
                                          imu(this, memsRxPin, memsTxPin, memsRstPin),
                                          rangeDetector(this, i2c1, longDetectorShutPin, shortDetectorShutPin)
 {

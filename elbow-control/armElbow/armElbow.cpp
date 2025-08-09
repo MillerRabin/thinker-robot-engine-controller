@@ -26,7 +26,7 @@ ArmElbow::ArmElbow(
     const uint engineYPin,
     const uint canRxPin,
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
-                           elbowY(engineYPin, Range(0, 270), Range(-90, 90), IMU_USE_PITCH, ELBOW_Y_HOME_POSITION, 100),
+                           elbowY(engineYPin, Range(0, 270), ELBOW_Y_HOME_POSITION, 100),
                            imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
 {
   if (!xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 1024, this, 5, NULL))
