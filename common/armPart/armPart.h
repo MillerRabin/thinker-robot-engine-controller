@@ -1,11 +1,14 @@
 #pragma once
 
 #include "pico/stdlib.h"
+#include "hardware/flash.h"
+#include "hardware/sync.h"
 #include "../servo/servo.h"
 #include "../bus/bus.h"
 #include "../config/config.h"
 #include "../armPlatform/armPlatform.h"
 #include "../imuBase/imuBase.h"
+#include "../flashSettings/flashSettings.h"
 
 #define ARM_POSITION_TASK_OK 1
 #define ARM_ENGINE_TASK_OK 2
@@ -15,12 +18,31 @@
 #define ARM_Z_CALIBRATING 32
 #define ARM_UPGRADING 64
 
+struct __attribute__((packed, aligned(4))) EEPROMPositionData : public FlashSettingsData
+{
+  float homeI, homeJ, homeK, homeReal;
+  float platformHomeI, platformHomeJ, platformHomeK, platformHomeReal;
+
+  EEPROMPositionData() : 
+    FlashSettingsData(sizeof(homeI) * 8, HOME_POSITIONS_EEPROM_OFFSET) {    
+    homeI = homeJ = homeK = homeReal = 0.0f;
+    platformHomeI = platformHomeJ = platformHomeK = platformHomeReal = 0.0f;
+  }
+
+  uint8_t *getBuffer() override {
+    return reinterpret_cast<uint8_t *>(&homeI);
+  }
+
+  const uint8_t *getBuffer() const override {
+    return reinterpret_cast<const uint8_t *>(&homeI);
+  }
+};
+
 class ArmPart {
 private:
   Bus bus;
   static void canCallback(void *pArmPart, can2040_msg frame);
-  volatile uint64_t statuses;
-
+  volatile uint64_t statuses;      
 protected:
   virtual void busReceiveCallback(can2040_msg frame) {};
   int updateQuaternion(IMUQuaternion quat);
@@ -38,13 +60,15 @@ public:
   void setZCalibrating(bool value);
   void setXCalibrating(bool value);
   void setUpgrading(bool value);
-  Quaternion align(IMUQuaternion &quat);
+  Quaternion align(Quaternion quat);
   Quaternion difference(IMUQuaternion &quat);
   Quaternion homeQuaternion;
   Quaternion platformHomeQuaternion;
   Quaternion offsetQuaternion = getRotationQuaternion();
   Quaternion alignedOffsetQuaternion;
-  void setHomeQuaternion(IMUQuaternion &homeQuaternion, IMUQuaternion &platformQuaternion);
+  void setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQuaternion);
+  void saveHomeQuaternionsToEEPROM();
+  bool loadHomeQuaternionsFromEEPROM();
   virtual uint32_t getQuaternionMessageId() { return 0; };
   virtual uint32_t getAccelerometerMessageId() { return 0; };
   virtual uint32_t getGyroscopeMessageId() { return 0; };

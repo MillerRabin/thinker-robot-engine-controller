@@ -1,8 +1,8 @@
 #include "armPart.h"
 
-ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) :
-  bus(canRxPin, canTxPin, this, canCallback)
-{}
+ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) : bus(canRxPin, canTxPin, this, canCallback) {
+  FlashSettings::init();
+}
 
 int ArmPart::updateQuaternion(IMUQuaternion quat) {  
   Quaternion alignedQuat = align(quat);
@@ -131,15 +131,15 @@ void ArmPart::setUpgrading(bool value) {
   }
 }
 
-void ArmPart::setHomeQuaternion(IMUQuaternion &homeQuaternion, IMUQuaternion &platformQuaternion) {
-  this->homeQuaternion = Quaternion(homeQuaternion);
-  this->platformHomeQuaternion = Quaternion(platformQuaternion);
+void ArmPart::setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQuaternion) {
+  this->homeQuaternion = homeQuaternion;
+  this->platformHomeQuaternion = platformQuaternion;
   Quaternion homeInverted = Quaternion::Conjugate(homeQuaternion);
   this->offsetQuaternion = Quaternion::Multiply(platformHomeQuaternion, homeInverted);
   this->alignedOffsetQuaternion = align(homeQuaternion);
 }
 
-Quaternion ArmPart::align(IMUQuaternion &quat) {
+Quaternion ArmPart::align(Quaternion quat) {
   return Quaternion::Multiply(offsetQuaternion, quat);
 }
 
@@ -153,4 +153,36 @@ int ArmPart::sendFirmwareUpgradeMessage() {
   if (id == 0) return -1;
   bus.send(id, 0);
   return 0;
+}
+
+void ArmPart::saveHomeQuaternionsToEEPROM() {
+  EEPROMPositionData quaternionData;
+  
+  quaternionData.homeI = homeQuaternion.i;
+  quaternionData.homeJ = homeQuaternion.j;
+  quaternionData.homeK = homeQuaternion.k;
+  quaternionData.homeReal = homeQuaternion.real;
+  quaternionData.platformHomeI = platformHomeQuaternion.i;
+  quaternionData.platformHomeJ = platformHomeQuaternion.j;
+  quaternionData.platformHomeK = platformHomeQuaternion.k;
+  quaternionData.platformHomeReal = platformHomeQuaternion.real;
+  FlashSettings::save(quaternionData);
+}
+
+bool ArmPart::loadHomeQuaternionsFromEEPROM() {
+  EEPROMPositionData quaternionData;  
+  if (!FlashSettings::load(quaternionData)) {    
+    return false;
+  }
+  printf("Loaded home quaternions from EEPROM...\n");
+
+  Quaternion home(
+    quaternionData.homeI, quaternionData.homeJ, quaternionData.homeK, quaternionData.homeReal
+  );
+  Quaternion platform(
+    quaternionData.platformHomeI, quaternionData.platformHomeJ, quaternionData.platformHomeK, quaternionData.platformHomeReal
+  );
+
+  setHomeQuaternion(home, platform);
+  return true;
 }

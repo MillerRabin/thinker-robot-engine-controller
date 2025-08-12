@@ -13,6 +13,7 @@ add_executable(${APP_WRIST_NAME}
   ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp
   ${APP_COMMON_DIRECTORY}/remoteBNO/remoteBNO.cpp    
   ${APP_COMMON_DIRECTORY}/servo/servo.cpp
+  ${APP_COMMON_DIRECTORY}/flashSettings/flashSettings.cpp
   ${APP_COMMON_DIRECTORY}/localBNO/localBNO.cpp
   ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
   ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp  
@@ -30,6 +31,8 @@ target_link_libraries(${APP_WRIST_NAME} LINK_PUBLIC
   pico_stdlib
   hardware_i2c
   hardware_pwm
+  hardware_flash
+  hardware_sync
   FreeRTOS
 )
 

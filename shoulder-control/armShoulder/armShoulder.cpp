@@ -1,9 +1,9 @@
 #include "armShoulder.h"
 
-void ArmShoulder::engineTask(void *instance)
-{
+void ArmShoulder::engineTask(void *instance) {
   auto *shoulder = static_cast<ArmShoulder *>(instance);
   TickType_t lastWakeTime = xTaskGetTickCount();
+  
   while (true)
   {
     Quaternion diff = shoulder->difference(shoulder->imu.quaternion);
@@ -18,7 +18,8 @@ void ArmShoulder::engineTask(void *instance)
     
     if (shoulder->shoulderY.isCalibrating() && shoulder->shoulderZ.isCalibrating()) {      
       shoulder->setHomeQuaternion(shoulder->imu.quaternion, shoulder->platform.imu.quaternion);
-      //printf("Shoulder home quaternion set\n");
+      shoulder->saveHomeQuaternionsToEEPROM();
+      printf("Shoulder home quaternion set and saved to EEPROM\n");
     }
     //printf("Shoulder Y target: %f, current: %f, IMU: %f\n", shoulder->shoulderY.getTargetAngle(), shoulder->shoulderY.getCurrentAngle(), shoulder->shoulderY.getIMUAngle());
     //printf("Shoulder Z target: %f, current: %f, IMU: %f\n", shoulder->shoulderZ.getTargetAngle(), shoulder->shoulderZ.getCurrentAngle(), shoulder->shoulderZ.getIMUAngle());
@@ -43,8 +44,14 @@ ArmShoulder::ArmShoulder(
                            shoulderZ(engineZPin, Range(0, 270), SHOULDER_Z_HOME_POSITION, 100),
                            shoulderY(engineYPin, Range(0, 180), SHOULDER_Y_HOME_POSITION, 100),
                            imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)                           
-{
-  offsetQuaternion = getRotationQuaternion();
+{  
+  if (loadHomeQuaternionsFromEEPROM()) {
+    printf("Shoulder home quaternions loaded from EEPROM\n");
+  }
+  else {
+    printf("No valid quaternion data found in EEPROM, using defaults\n");
+    offsetQuaternion = getRotationQuaternion();
+  }
   if (!xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL)) {
     setEngineTaskStatus(false);
   }
@@ -92,8 +99,7 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame)
       shoulderZ.setTargetAngle(angleZ);
     }
   }
-  if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE)
-  {
+  if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE) {
     ArmPart::sendFirmwareUpgradeMessage();
     setUpgrading(true);
     updateStatuses();

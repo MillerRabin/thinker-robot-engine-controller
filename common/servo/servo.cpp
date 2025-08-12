@@ -76,7 +76,7 @@ bool Servo::setTargetAngle(const float angle) {
     return true;
   }
     
-  targetAngle = angle;
+  targetAngle = angle;  
   return true;
 }
 
