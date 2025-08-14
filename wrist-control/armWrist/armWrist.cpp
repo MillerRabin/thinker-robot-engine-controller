@@ -66,18 +66,17 @@ void ArmWrist::busReceiveCallback(can2040_msg frame)
     uint16_t angleZS = (raw >> 16) & 0xFFFF;
     float angleY = angleYS / 100.0f;
     float angleZ = angleZS / 100.0f;
+    uint32_t raw1 = frame.data32[1];
+    uint16_t timeMS = raw1 & 0xFFFF;
 
-    if (!isnan(angleY))
-    {
-      wristY.setTargetAngle(angleY);
+    if (!isnan(angleY)) {
+      wristY.setTargetAngle(angleY, timeMS, WRIST_DEAD_ZONE);
     }
-    if (!isnan(angleZ))
-    {
-      wristZ.setTargetAngle(angleZ);
+    if (!isnan(angleZ)) {
+      wristZ.setTargetAngle(angleZ, timeMS, WRIST_DEAD_ZONE);
     }
   }
-  if (frame.id == CAN_WRIST_FIRMWARE_UPGRADE)
-  {
+  if (frame.id == CAN_WRIST_FIRMWARE_UPGRADE) {
     rebootInBootMode();
   }
 }

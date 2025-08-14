@@ -1,6 +1,17 @@
 # Thinker Robot Engine Control
 
-Engine control code
+Engine control code for every manipulator part. Every part contain CPU RP2040, IMU BNO085, CAN BUS, and 1-4 engines depending on functionality.
+
+Parts
+* Shoulder. RP2040, 2 servo engines Y and Z. IMU BNO085.
+* Elbow. RP2040, 1 servo engine Y. IMU BNO085.
+* Wrist. RP2040, 2 servo engines Y and Z. IMU BNO085.
+* Claw. RP2040 3 servo engines X, Y and Gripper. IMU Witmotion WT901B. Two laser range detectors
+
+
+FreeRTOS is used.
+All parts saving their IMU Callibration in flash memory. 
+
 
 ## Usage
 

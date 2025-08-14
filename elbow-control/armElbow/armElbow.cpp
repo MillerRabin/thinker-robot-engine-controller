@@ -61,19 +61,18 @@ int ArmElbow::updateAccuracy(IMUBase *position)
 
 void ArmElbow::busReceiveCallback(can2040_msg frame)
 {
-  if (frame.id == CAN_ELBOW_SET_Y_DEGREE)
-  {
+  if (frame.id == CAN_ELBOW_SET_Y_DEGREE) {
     uint32_t raw = frame.data32[0];
     uint16_t angleYS = raw & 0xFFFF;
     float angleY = angleYS / 100.0f;
 
-    if (!isnan(angleY))
-    {
-      elbowY.setTargetAngle(angleY);
+    uint16_t timeMS = (raw >> 16) & 0xFFFF;
+    
+    if (!isnan(angleY)) {
+      elbowY.setTargetAngle(angleY, timeMS, ELBOW_DEAD_ZONE);
     }
   }
-  if (frame.id == CAN_ELBOW_FIRMWARE_UPGRADE)
-  {
+  if (frame.id == CAN_ELBOW_FIRMWARE_UPGRADE) {
     rebootInBootMode();
   }
 }

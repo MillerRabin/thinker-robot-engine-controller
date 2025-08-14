@@ -19,13 +19,13 @@ private:
 
 public:
   Servo clawX;
-  Servo clawZ;
+  Servo clawY;
   Servo clawGripper;
   ArmClaw(
       const uint8_t detectorsSdaPin,
       const uint8_t detectorsSclPin,
       const uint8_t engineXPin,
-      const uint8_t engineZPin,
+      const uint8_t engineYPin,
       const uint8_t engineGripperPin,
       const uint8_t canRxPin,
       const uint8_t canTxPin,

@@ -89,14 +89,14 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame)
     uint16_t angleZS = (raw >> 16) & 0xFFFF;
     float angleY = angleYS / 100.0f;
     float angleZ = angleZS / 100.0f;
+    uint32_t raw1 = frame.data32[1];
+    uint16_t timeMS = raw1 & 0xFFFF;
 
-    if (!isnan(angleY))
-    {
-      shoulderY.setTargetAngle(angleY);
+    if (!isnan(angleY)) {
+      shoulderY.setTargetAngle(angleY, timeMS, SHOULDER_DEAD_ZONE);
     }
-    if (!isnan(angleZ))
-    {
-      shoulderZ.setTargetAngle(angleZ);
+    if (!isnan(angleZ)) {
+      shoulderZ.setTargetAngle(angleZ, timeMS, SHOULDER_DEAD_ZONE);
     }
   }
   if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE) {

@@ -62,7 +62,7 @@ uint Servo::setDegreeDirect(const float degree) {
   return 0;
 }
 
-bool Servo::setTargetAngle(const float angle) {
+bool Servo::setTargetAngle(const float angle, uint16_t timeMS, float deadZone) {
   if (isnan(angle)) 
     return false;
 
@@ -76,7 +76,9 @@ bool Servo::setTargetAngle(const float angle) {
     return true;
   }
     
-  targetAngle = angle;  
+  targetAngle = angle;
+  setTimeMS(timeMS);
+  setDeadZone(deadZone);
   return true;
 }
 
@@ -85,30 +87,29 @@ void Servo::tick() {
     return;
   }
   float ca = currentAngle;  
-  if (!isCalibrating()) {
-    /*filteredImuAngle = (isnan(filteredImuAngle)) ? imuAngle : 
-                                IMU_ANGLE_FILTER * imuAngle + (1.0f - IMU_ANGLE_FILTER) * filteredImuAngle;
-    ca = filteredImuAngle;*/
+  if (!isCalibrating()) {    
     ca = imuAngle;
   }
     
   float path = targetAngle - ca;
   float dir = (path > 0) ? 1.0 : -1.0;
   float apath = fabs(path);
-  if (!isCalibrating() && (apath < SERVO_DEAD_ZONE)) {
+  if (!isCalibrating() && isStopped() && apath < deadZone) {
     return;
   }
 
-  float increment = apath > SERVO_MAX_DEGREE_CHANGE ? SERVO_MAX_DEGREE_CHANGE : 
-                    apath < SERVO_MIN_DEGREE_CHANGE ? SERVO_MIN_DEGREE_CHANGE :
-                    apath;  
+  float increment = apath > angleStep ? angleStep : apath;
+  increment = increment > SERVO_MAX_DEGREE_CHANGE ? SERVO_MAX_DEGREE_CHANGE :
+              increment;
+              
   float step = dir * increment;
-  currentAngle += step;  
+  currentAngle += step;
+  //printf("isCalibrating: %d, targetAngle %f, currentAngle: %f, imuAngle: %f, angleStep: %f, step: %f, path: %f, timeMS: %d\n", isCalibrating(), targetAngle, currentAngle, imuAngle, angleStep, step, path, timeMS);
   setDegreeDirect(currentAngle);
 }
 
 bool Servo::isStopped() {
-  return fabs(imuAngle - targetAngle) <= SERVO_MIN_DEGREE_CHANGE;
+  return fabs(currentAngle - targetAngle) <= SERVO_MIN_DEGREE_CHANGE;
 }
 
 bool Servo::atHomePosition() {  
@@ -127,4 +128,21 @@ bool Servo::isCalibrating() {
 
 void Servo::setIMUAngle(float value) {  
   imuAngle = value;
+}
+
+void Servo::setTimeMS(uint16_t timeMS) {  
+  if (timeMS < 1 || timeMS > 10000) {
+    timeMS = 1000;
+  }
+  this->timeMS = timeMS;
+  float iter = float(timeMS) / ENGINE_TASK_LOOP_TIMEOUT;
+  float diff = fabs(targetAngle - currentAngle);  
+  this->angleStep = diff / iter;  
+}
+
+void Servo::setDeadZone(float dz) {
+  if (dz < 0.0f || dz > 5.0f) {
+    return;
+  }
+  deadZone = dz;
 }
