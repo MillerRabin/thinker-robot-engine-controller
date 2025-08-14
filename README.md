@@ -8,6 +8,8 @@ Parts
 * Wrist. RP2040, 2 servo engines Y and Z. IMU BNO085.
 * Claw. RP2040 3 servo engines X, Y and Gripper. IMU Witmotion WT901B. Two laser range detectors
 
+Manipulator is installed on host platform. Host platform code can be found here https://github.com/MillerRabin/thinker-robot-host
+
 
 FreeRTOS is used.
 All parts saving their IMU Callibration in flash memory. 
