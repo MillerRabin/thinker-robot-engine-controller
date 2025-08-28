@@ -28,10 +28,10 @@ private:
   static void gpio_callback(uint gpio, uint32_t events);
   static void init(void *pvParameters);
   static void readDetectorTask(void *pvParameters);
-  static void AutoScanSensor(void);
+  static uint32_t AutoScanSensor(void);
   static volatile bool dataAvailable;
   static uint32_t c_uiBaud[10];
-  static volatile uint8_t uartRxBuffer[256];
+  static volatile uint8_t uartRxBuffer[512];
   static volatile uint16_t uartHead;
   static volatile uint16_t uartTail;
   static void Usart1Init(uint32_t baud_rate);

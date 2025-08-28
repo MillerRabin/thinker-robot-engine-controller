@@ -15,7 +15,7 @@ private:
   LocalBNO imu;  
   static void engineTask(void *instance);
   void busReceiveCallback(can2040_msg frame);
-  static volatile QueueHandle_t angleQueue;  
+  static volatile QueueHandle_t angleQueue;
 public:
   Servo shoulderZ;
   Servo shoulderY;
@@ -38,5 +38,8 @@ public:
   int updateAccelerometer(IMUBase *position);
   int updateGyroscope(IMUBase *position);
   int updateAccuracy(IMUBase *position);
-  int updateQuaternion(IMUBase *position);  
+  int updateQuaternion(IMUBase *position);
+  float getYawAngle(Euler euler);
+  float getPhysicalZ(Quaternion& diff);
+
 };

@@ -127,6 +127,7 @@ bool LocalBNO::updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quatern
 
 void LocalBNO::initIMU() {
   imu.enableRotationVector(50);
+  //imu.enableGameRotationVector(50);
   imu.enableLinearAccelerometer(50);
   imu.enableGyro(50);
 }

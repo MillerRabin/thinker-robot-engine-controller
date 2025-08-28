@@ -19,7 +19,7 @@ bool IMUQuaternion::fromBNO(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQu
   return true;
 }
 
-bool IMUQuaternion::fromWitmotion(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal, float divisor) {
+bool IMUQuaternion::fromWitmotion(uint16_t rawQuatI, uint16_t rawQuatJ, uint16_t rawQuatK, uint16_t rawQuatReal, double divisor) {
   this->i = rawQuatI / divisor;
   this->j = rawQuatJ / divisor;
   this->k = rawQuatK / divisor;
@@ -48,10 +48,10 @@ void IMUQuaternion::deserialize(uint8_t data[8]) {
 }
 
 void IMUQuaternion::multiplyFirst(const Quaternion &b) {
-  float r = real;
-  float x = i;
-  float y = j;
-  float z = k;
+  double r = real;
+  double x = i;
+  double y = j;
+  double z = k;
 
   real = b.real * r - b.i * x - b.j * y - b.k * z;
   i = b.real * x + b.i * r + b.j * z - b.k * y;
@@ -66,13 +66,13 @@ Quaternion::Quaternion(IMUQuaternion &q) {
   real = q.real;
 }
 
-Quaternion Quaternion::FromEuler(float roll, float pitch, float yaw) {
-  float cr = cos(roll / 2.0f);
-  float sr = sin(roll / 2.0f);
-  float cp = cos(pitch / 2.0f);
-  float sp = sin(pitch / 2.0f);
-  float cy = cos(yaw / 2.0f);
-  float sy = sin(yaw / 2.0f);
+Quaternion Quaternion::FromEuler(double roll, double pitch, double yaw) {
+  double cr = cos(roll / 2.0f);
+  double sr = sin(roll / 2.0f);
+  double cp = cos(pitch / 2.0f);
+  double sp = sin(pitch / 2.0f);
+  double cy = cos(yaw / 2.0f);
+  double sy = sin(yaw / 2.0f);
 
   Quaternion q;
   q.real = cr * cp * cy + sr * sp * sy;
@@ -100,26 +100,37 @@ Quaternion Quaternion::Difference(Quaternion &start, Quaternion &end) {
   Quaternion startNorm = Normalize(start);
   Quaternion endNorm = Normalize(end);
   Quaternion startInv = Conjugate(startNorm);
-  Quaternion res = Multiply(endNorm, startInv);
-  return Normalize(res);
+  Quaternion res = Multiply(startInv, endNorm);
+  Quaternion qn = Normalize(res);
+
+  if (qn.real < 0.0f) {
+    qn.real = -qn.real;
+    qn.i = -qn.i;
+    qn.j = -qn.j;
+    qn.k = -qn.k;
+  }
+
+  return qn;
 }
 
-Quaternion Quaternion::Normalize(Quaternion &q) {
-  float norm = std::sqrt(q.real * q.real + q.i * q.i + q.j * q.j + q.k * q.k);
+Quaternion Quaternion::Normalize(const Quaternion &q) {
+  double norm = std::sqrt(q.real * q.real + q.i * q.i + q.j * q.j + q.k * q.k);
   return {
       q.real / norm,
       q.i / norm,
       q.j / norm,
-      q.k / norm};
+      q.k / norm
+  };
 }
 
-Euler Quaternion::getEuler() {
-  float dqw = real;
-  float dqx = i;
-  float dqy = j;
-  float dqz = k;
+Euler Quaternion::getEuler()
+{
+  double dqw = real;
+  double dqx = i;
+  double dqy = j;
+  double dqz = k;
 
-  float norm = sqrt(dqw * dqw + dqx * dqx + dqy * dqy + dqz * dqz);
+  double norm = sqrt(dqw * dqw + dqx * dqx + dqy * dqy + dqz * dqz);
   if (norm < 1e-6f)
     return Euler(0.0f, 0.0f, 0.0f);
   dqw /= norm;
@@ -127,22 +138,55 @@ Euler Quaternion::getEuler() {
   dqy /= norm;
   dqz /= norm;
 
-  float ysqr = dqy * dqy;
+  double ysqr = dqy * dqy;
 
   // Yaw (Z)
-  float t3 = +2.0f * (dqw * dqz + dqx * dqy);
-  float t4 = +1.0f - 2.0f * (ysqr + dqz * dqz);
-  float yaw = atan2(t3, t4);
+  double t3 = +2.0f * (dqw * dqz + dqx * dqy);
+  double t4 = +1.0f - 2.0f * (ysqr + dqz * dqz);
+  double yaw = atan2(t3, t4);
 
   // Pitch (Y)
-  float t2 = +2.0f * (dqw * dqy - dqz * dqx);
+  double t2 = +2.0f * (dqw * dqy - dqz * dqx);
   t2 = t2 > 1.0f ? 1.0f : t2;
   t2 = t2 < -1.0f ? -1.0f : t2;
-  float pitch = asin(t2);
+  double pitch = asin(t2);
 
   // Roll (X)
-  float t0 = +2.0f * (dqw * dqx + dqy * dqz);
-  float t1 = +1.0f - 2.0f * (dqx * dqx + ysqr);
-  float roll = atan2(t0, t1);
+  double t0 = +2.0f * (dqw * dqx + dqy * dqz);
+  double t1 = +1.0f - 2.0f * (dqx * dqx + ysqr);
+  double roll = atan2(t0, t1);
   return Euler(roll, pitch, yaw);
+}
+
+Matrix3 Quaternion::toRotationMatrix() const {
+  Matrix3 R;
+
+  double w = real;
+  double x = i;
+  double y = j;
+  double z = k;
+
+  double xx = x * x;
+  double yy = y * y;
+  double zz = z * z;
+  double xy = x * y;
+  double xz = x * z;
+  double yz = y * z;
+  double wx = w * x;
+  double wy = w * y;
+  double wz = w * z;
+
+  R.m00 = 1.0f - 2.0f * (yy + zz);
+  R.m01 = 2.0f * (xy - wz);
+  R.m02 = 2.0f * (xz + wy);
+
+  R.m10 = 2.0f * (xy + wz);
+  R.m11 = 1.0f - 2.0f * (xx + zz);
+  R.m12 = 2.0f * (yz - wx);
+
+  R.m20 = 2.0f * (xz - wy);
+  R.m21 = 2.0f * (yz + wx);
+  R.m22 = 1.0f - 2.0f * (xx + yy);
+
+  return R;
 }

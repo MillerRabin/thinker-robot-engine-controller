@@ -15,7 +15,7 @@ private:
   static void engineTask(void *instance);
   void busReceiveCallback(can2040_msg frame);
   static volatile QueueHandle_t queue;
-  RangeDetector rangeDetector;
+  //RangeDetector rangeDetector;
 
 public:
   Servo clawX;

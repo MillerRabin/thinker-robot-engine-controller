@@ -5,9 +5,9 @@ ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) : bus(canRxPin, canTx
 }
 
 int ArmPart::updateQuaternion(IMUQuaternion quat) {  
-  Quaternion alignedQuat = align(quat);
-  IMUQuaternion imuQuat = IMUQuaternion::FromQuaternion(alignedQuat);
-  uint64_t data = imuQuat.serialize();
+  //Quaternion alignedQuat = align(this->offsetQuaternion, quat);
+  //IMUQuaternion imuQuat = IMUQuaternion::FromQuaternion(alignedQuat);
+  uint64_t data = quat.serialize();
   uint8_t id = getQuaternionMessageId();  
   if (id == 0) return -1;
   bus.send(id, data);
@@ -135,17 +135,25 @@ void ArmPart::setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQu
   this->homeQuaternion = homeQuaternion;
   this->platformHomeQuaternion = platformQuaternion;
   Quaternion homeInverted = Quaternion::Conjugate(homeQuaternion);
-  this->offsetQuaternion = Quaternion::Multiply(platformHomeQuaternion, homeInverted);
-  this->alignedOffsetQuaternion = align(homeQuaternion);
+  this->offsetQuaternion = Quaternion::Multiply(platformQuaternion, homeInverted);
 }
 
-Quaternion ArmPart::align(Quaternion quat) {
-  return Quaternion::Multiply(offsetQuaternion, quat);
+Quaternion ArmPart::align(const Quaternion& dest, const Quaternion& source) {  
+  return Quaternion::Multiply(dest, source);
 }
 
-Quaternion ArmPart::difference(IMUQuaternion &quat) {
-  Quaternion qt = Quaternion(quat);
-  return Quaternion::Difference(qt, homeQuaternion);
+Quaternion ArmPart::difference(const Quaternion& a, const Quaternion& b) {
+  Quaternion pInv = Quaternion::Conjugate(b);
+  Quaternion qn = Quaternion::Multiply(pInv, a);
+  if (qn.real < 0.0f) {
+    qn.real = -qn.real;
+    qn.i = -qn.i;
+    qn.j = -qn.j;
+    qn.k = -qn.k;
+  }
+
+  // return Quaternion::Normalize(qn);
+  return qn;
 }
 
 int ArmPart::sendFirmwareUpgradeMessage() {

@@ -4,29 +4,32 @@ bool RangeDetector::isEnabled = true;
 
 RangeDetector::RangeDetector(ArmPart *armPart, i2c_inst_t *i2c,
                              const uint8_t longDetectorShutPin,
-                             const uint8_t shortDetectorShutPin)
-    : armPart(armPart),
-      i2c(i2c),
-      longDistanceDetector(),
-      shortDistanceDetector(i2c, VL6180X_ADDRESS),
-      longDetectorShutPin(longDetectorShutPin),
-      shortDetectorShutPin(shortDetectorShutPin),
-      useShortDistance(true),
-      range(0)
+                             const uint8_t shortDetectorShutPin) : 
+  armPart(armPart),
+  i2c(i2c),
+  longDistanceDetector(),
+  shortDistanceDetector(i2c, VL6180X_ADDRESS),
+  longDetectorShutPin(longDetectorShutPin),
+  shortDetectorShutPin(shortDetectorShutPin),
+  useShortDistance(true),
+  range(0)
 {
   printf("Init detectors\n");
   gpio_init(shortDetectorShutPin);
   gpio_set_dir(shortDetectorShutPin, GPIO_OUT);
   gpio_init(longDetectorShutPin);
   gpio_set_dir(longDetectorShutPin, GPIO_OUT);
+  printf("Try activate sensor\n");
+  /*activateSensor(true);
 
-  activateSensor(true);
-
-  xTaskCreate(RangeDetector::detectorTask, "RangeDetector::detectorTask", 1024, this, 5, NULL);
+  if (xTaskCreate(RangeDetector::detectorTask, "RangeDetector::detectorTask", 1024, this, 5, NULL)) {
+    printf("RangeDetect::detector task created\n");
+  } else {
+    printf("RangeDetect::detector task failed\n");
+  } */ 
 }
 
-void RangeDetector::activateSensor(bool shortSensor)
-{
+void RangeDetector::activateSensor(bool shortSensor) {
   gpio_put(shortDetectorShutPin, 0);
   gpio_put(longDetectorShutPin, 0);
   vTaskDelay(pdMS_TO_TICKS(10));
@@ -86,8 +89,7 @@ void RangeDetector::setupAddresses() {
   printf("I2C addresses set: VL6180X -> 0x%X, VL53L0X -> 0x%X\n", VL618_NEW_ADDR, VL53_NEW_ADDR);
 }
 
-void RangeDetector::printIdentification(struct VL6180xIdentification *temp)
-{
+void RangeDetector::printIdentification(struct VL6180xIdentification *temp) {
   printf("Model ID = %d\n", temp->idModel);
   printf("Model Rev = %d.%d\n", temp->idModelRevMajor, temp->idModelRevMinor);
   printf("Module Rev = %d.%d\n", temp->idModuleRevMajor, temp->idModuleRevMinor);

@@ -5,14 +5,21 @@ void ArmElbow::engineTask(void *instance)
   auto *elbow = static_cast<ArmElbow *>(instance);
   TickType_t lastWakeTime = xTaskGetTickCount();
   while (true)
-  {
+  {   
+    elbow->elbowY.setIMUAngle(elbow->elbowY.getPhysicalAngle());    
     elbow->elbowY.tick();
 
-    /*Euler rEuler = elbow->platform.imu.quaternion.getEuler();
-    Euler sEuler = elbow->imu.quaternion.getEuler();
-    printf("Platform roll: %f, pitch: %f, yaw: %f\n", rEuler.getRollAngle(), rEuler.getPitchAngle(), rEuler.getYawAngle());
-    printf("Shoulder roll: %f, pitch: %f, yaw: %f\n", sEuler.getRollAngle(), sEuler.getPitchAngle(), sEuler.getYawAngle());*/
+    elbow->setYCalibrating(elbow->elbowY.isCalibrating());
+    
+    if (elbow->elbowY.isCalibrating())
+    {
+      elbow->setHomeQuaternion(elbow->imu.quaternion, elbow->platform.imu.quaternion);
+      elbow->saveHomeQuaternionsToEEPROM();
+      printf("Shoulder home quaternion set and saved to EEPROM\n");
+    }
+
     elbow->setEngineTaskStatus(true);
+
     elbow->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
   }

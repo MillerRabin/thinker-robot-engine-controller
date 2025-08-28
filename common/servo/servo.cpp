@@ -63,6 +63,7 @@ uint Servo::setDegreeDirect(const float degree) {
 }
 
 bool Servo::setTargetAngle(const float angle, uint16_t timeMS, float deadZone) {
+  //printf("Set angle angle: %f, timeMS: %d, deadZone: %f\n", angle, timeMS, deadZone);
   if (isnan(angle)) 
     return false;
 
@@ -82,34 +83,69 @@ bool Servo::setTargetAngle(const float angle, uint16_t timeMS, float deadZone) {
   return true;
 }
 
+float Servo::getDir(float path) {  
+  prevPhysicalAngle = isnan(prevPhysicalAngle) ? physicalAngle : prevPhysicalAngle;
+  prevImuAngle = isnan(prevImuAngle) ? imuAngle : prevImuAngle;
+  float physDelta = physicalAngle - prevPhysicalAngle;
+  float imuDelta = imuAngle - prevImuAngle;
+  imuDelta = (fabs(imuDelta) < IMU_DEGREE_CHANGE_IGNORE) ? 0 : imuDelta;
+  //printf("isCalibrating: %d, path %f, physicalAngle: %f, prevPhysicalAngle %f, imuAngle: %f, prevImuAngle: %f, physDelta: %f, imuDelta: %f\n",
+//         isCalibrating(), path, physicalAngle, prevPhysicalAngle, imuAngle, prevImuAngle, physDelta, imuDelta);
+
+  return  (path > 0) ? (physDelta >= 0) ? (imuDelta >= 0) ? 1.0f : -1.0f :
+                                          (imuDelta >= 0) ? -1.0f : 1.0f :
+          (path < 0) ? (physDelta >= 0) ? (imuDelta >= 0) ? -1.0f : -1.0f :
+                                          (imuDelta >= 0) ? -1.0f : -1.0f :
+          0;      
+}
+
 void Servo::tick() {
   if (isnan(targetAngle)) {
     return;
   }
-  float ca = currentAngle;  
-  if (!isCalibrating()) {    
+
+  float ca = physicalAngle;
+  bool calibrating = isCalibrating();
+  if (calibrating) {
+    wasCalibrated = true;
+    ca = physicalAngle;
+    prevImuAngle = imuAngle;
+  }
+  else {
+    if (wasCalibrated) {
+      wasCalibrated = false;
+      physicalAngle = imuAngle;
+      prevImuAngle = imuAngle;
+    }
     ca = imuAngle;
   }
-    
+
   float path = targetAngle - ca;
-  float dir = (path > 0) ? 1.0 : -1.0;
+  float dir = getDir(path);
   float apath = fabs(path);
   if (!isCalibrating() && isStopped() && apath < deadZone) {
     return;
   }
 
-  float increment = apath > angleStep ? angleStep : apath;
-  increment = increment > SERVO_MAX_DEGREE_CHANGE ? SERVO_MAX_DEGREE_CHANGE :
-              increment;
-              
+  float increment = fmin(apath, angleStep);
+  increment = fmin(increment, SERVO_MAX_DEGREE_CHANGE);
+  //increment = fmax(increment, SERVO_MIN_DEGREE_CHANGE);
+
   float step = dir * increment;
-  currentAngle += step;
-  //printf("isCalibrating: %d, targetAngle %f, currentAngle: %f, imuAngle: %f, angleStep: %f, step: %f, path: %f, timeMS: %d\n", isCalibrating(), targetAngle, currentAngle, imuAngle, angleStep, step, path, timeMS);
-  setDegreeDirect(currentAngle);
+  //printf("targetAngle: %f, dir: %f, increment: %f\n",targetAngle, dir, increment);
+
+  prevPhysicalAngle = physicalAngle;  
+  physicalAngle += step;
+  if (physicalAngle > maxDegree)
+    physicalAngle = maxDegree;
+  if (physicalAngle < minDegree)
+    physicalAngle = minDegree;
+
+  setDegreeDirect(physicalAngle);
 }
 
 bool Servo::isStopped() {
-  return fabs(currentAngle - targetAngle) <= SERVO_MIN_DEGREE_CHANGE;
+  return fabs(physicalAngle - targetAngle) <= deadZone;
 }
 
 bool Servo::atHomePosition() {  
@@ -121,12 +157,11 @@ bool Servo::equalAngles(float a, float b) {
 } 
 
 bool Servo::isCalibrating() {
-  return equalAngles(targetAngle, homePosition) &&
-         !equalAngles(currentAngle, imuAngle) &&
-         !equalAngles(targetAngle, imuAngle);
+  return equalAngles(targetAngle, homePosition);
 }
 
-void Servo::setIMUAngle(float value) {  
+void Servo::setIMUAngle(float value) {
+  prevImuAngle = imuAngle;
   imuAngle = value;
 }
 
@@ -135,9 +170,9 @@ void Servo::setTimeMS(uint16_t timeMS) {
     timeMS = 1000;
   }
   this->timeMS = timeMS;
-  float iter = float(timeMS) / ENGINE_TASK_LOOP_TIMEOUT;
-  float diff = fabs(targetAngle - currentAngle);  
-  this->angleStep = diff / iter;  
+  float iter = float(timeMS) / 50;
+  float diff = fabs(targetAngle - physicalAngle);  
+  this->angleStep = fabs(diff / iter);
 }
 
 void Servo::setDeadZone(float dz) {

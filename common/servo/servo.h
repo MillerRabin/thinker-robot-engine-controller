@@ -20,9 +20,7 @@ class Servo {
     uint32_t wrap = 0;
     float period = 0;
     const float lowPeriod;
-    const float highPeriod;
-    const float maxDegree;
-    const float minDegree;
+    const float highPeriod;    
     const float homePosition;
     float deadZone = 0.01f;
     uint16_t timeMS = 1000;
@@ -34,29 +32,35 @@ class Servo {
     float angleStep;
     uint16_t getSlices(float targetPeriod);
     uint setFrequency(const uint freq);    
-    float currentAngle = homePosition;
+    float physicalAngle = homePosition;
+    float prevPhysicalAngle = NAN;
     float imuAngle = NAN;
     uint setDegreeDirect(const float degree);    
     volatile float targetAngle = NAN;    
     float filteredImuAngle = NAN;
+    bool wasCalibrated = false;
+    float prevImuAngle = NAN;
     static bool equalAngles(float a, float b);
-  public:
-    Servo(
-        const uint pin, 
-        Range degreeRange,
-        const float homePosition,
-        const float freq = 50,
-        const float lowPeriod = 0.0005,
-        const float highPeriod = 0.0025);
-    bool setTargetAngle(const float angle, uint16_t timeMS, float deadZone);
-    float getTargetAngle() { return targetAngle; };
-    bool isStopped();
-    bool atHomePosition();    
-    void setIMUAngle(float value);
-    float getCurrentAngle() { return currentAngle; }; 
-    float getIMUAngle() { return imuAngle; }
-    void setTimeMS(uint16_t timeMS);
-    void setDeadZone(float dz);
-    bool isCalibrating();    
-    void tick();
-};
+    float getDir(float path);
+    public:
+      Servo(
+          const uint pin,
+          Range degreeRange,
+          const float homePosition,
+          const float freq = 50,
+          const float lowPeriod = 0.0005,
+          const float highPeriod = 0.0025);
+      const float maxDegree;
+      const float minDegree;
+      bool setTargetAngle(const float angle, uint16_t timeMS, float deadZone);
+      float getTargetAngle() { return targetAngle; };
+      bool isStopped();
+      bool atHomePosition();
+      void setIMUAngle(float value);
+      float getPhysicalAngle() { return physicalAngle; };
+      float getIMUAngle() { return imuAngle; }
+      void setTimeMS(uint16_t timeMS);
+      void setDeadZone(float dz);
+      bool isCalibrating();
+      void tick();
+    };

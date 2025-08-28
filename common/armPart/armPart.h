@@ -60,8 +60,8 @@ public:
   void setZCalibrating(bool value);
   void setXCalibrating(bool value);
   void setUpgrading(bool value);
-  Quaternion align(Quaternion quat);
-  Quaternion difference(IMUQuaternion &quat);
+  Quaternion align(const Quaternion& dest, const Quaternion& source);
+  Quaternion difference(const Quaternion& a, const Quaternion& b);
   Quaternion homeQuaternion;
   Quaternion platformHomeQuaternion;
   Quaternion offsetQuaternion = getRotationQuaternion();
