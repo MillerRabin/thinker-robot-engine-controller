@@ -166,10 +166,7 @@ void Servo::setIMUAngle(float value) {
 }
 
 void Servo::setTimeMS(uint16_t timeMS) {  
-  if (timeMS < 1 || timeMS > 10000) {
-    timeMS = 1000;
-  }
-  this->timeMS = timeMS;
+  this->timeMS = (timeMS < 1 || timeMS > 10000) ? this->timeMS : timeMS;
   float iter = float(timeMS) / 50;
   float diff = fabs(targetAngle - physicalAngle);  
   this->angleStep = fabs(diff / iter);

@@ -97,10 +97,11 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     uint16_t angleXS = (raw1 >> 16) & 0xFFFF;
     uint16_t angleGS = raw2 & 0xFFFF;
     uint16_t timeMS = (raw2 >> 16) & 0xFFFF;
+    timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
 
-    float angleX = angleXS / 100.0f;
-    float angleY = angleYS / 100.0f;
-    float angleG = angleGS / 100.0f;
+    float angleX = (angleXS == PARAMETER_IS_NAN) ? NAN : angleXS / 100.0f;
+    float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
+    float angleG = (angleGS == PARAMETER_IS_NAN) ? NAN : angleGS / 100.0f;
 
     if (!isnan(angleX)) {
       clawX.setTargetAngle(angleX, timeMS, CLAW_DEAD_ZONE);

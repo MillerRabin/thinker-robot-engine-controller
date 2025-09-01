@@ -71,10 +71,11 @@ void ArmElbow::busReceiveCallback(can2040_msg frame)
   if (frame.id == CAN_ELBOW_SET_Y_DEGREE) {
     uint32_t raw = frame.data32[0];
     uint16_t angleYS = raw & 0xFFFF;
-    float angleY = angleYS / 100.0f;
+    float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
 
     uint16_t timeMS = (raw >> 16) & 0xFFFF;
-    
+    timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
+
     if (!isnan(angleY)) {
       elbowY.setTargetAngle(angleY, timeMS, ELBOW_DEAD_ZONE);
     }

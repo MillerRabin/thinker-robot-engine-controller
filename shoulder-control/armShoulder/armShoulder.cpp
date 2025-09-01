@@ -154,10 +154,11 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame)
     uint32_t raw = frame.data32[0];
     uint16_t angleYS = raw & 0xFFFF;
     uint16_t angleZS = (raw >> 16) & 0xFFFF;
-    float angleY = angleYS / 100.0f;
-    float angleZ = angleZS / 100.0f;
+    float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
+    float angleZ = (angleZS == PARAMETER_IS_NAN) ? NAN : angleZS / 100.0f;
     uint32_t raw1 = frame.data32[1];
     uint16_t timeMS = raw1 & 0xFFFF;
+    timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
 
     if (!isnan(angleY)) {
       shoulderY.setTargetAngle(angleY, timeMS, SHOULDER_DEAD_ZONE);
