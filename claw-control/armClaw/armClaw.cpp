@@ -10,6 +10,7 @@ void ArmClaw::engineTask(void *instance) {
   while (true) {    
     claw->clawX.setIMUAngle(claw->clawX.getPhysicalAngle());
     claw->clawY.setIMUAngle(claw->clawY.getPhysicalAngle());
+    claw->clawGripper.setIMUAngle(claw->clawGripper.getPhysicalAngle());
 
     claw->setXCalibrating(claw->clawX.isCalibrating());
     claw->setYCalibrating(claw->clawY.isCalibrating());
@@ -47,9 +48,9 @@ ArmClaw::ArmClaw(
                                          clawX(engineXPin, Range(0, 180), CLAW_X_HOME_POSITION, 100),
                                          clawY(engineYPin, Range(0, 180), CLAW_Y_HOME_POSITION, 100),
                                          clawGripper(engineGripperPin, Range(0, 180), CLAW_GRIPPER_HOME_POSITION, 100),
-                                         imu(this, memsRxPin, memsTxPin, memsRstPin)
-                                         //rangeDetector(this, i2c1, longDetectorShutPin, shortDetectorShutPin) 
-                                         {  
+                                         imu(this, memsRxPin, memsTxPin, memsRstPin),
+                                        rangeDetector(this, i2c1, longDetectorShutPin, shortDetectorShutPin) 
+{  
   i2c_init(i2c1, 400 * 1000);
   gpio_set_function(detectorsSdaPin, GPIO_FUNC_I2C);
   gpio_set_function(detectorsSclPin, GPIO_FUNC_I2C);
@@ -102,7 +103,8 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     float angleX = (angleXS == PARAMETER_IS_NAN) ? NAN : angleXS / 100.0f;
     float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
     float angleG = (angleGS == PARAMETER_IS_NAN) ? NAN : angleGS / 100.0f;
-
+    
+    printf("Received CAN_CLAW_SET_XYG_DEGREE: angleX=%.2f, angleY=%.2f, angleG=%.2f, timeMS=%d\n", angleX, angleY, angleG, timeMS);
     if (!isnan(angleX)) {
       clawX.setTargetAngle(angleX, timeMS, CLAW_DEAD_ZONE);
     }

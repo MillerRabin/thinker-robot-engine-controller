@@ -30,8 +30,8 @@ class RangeDetector {
     static bool reserved_addr(uint8_t addr);        
     uint dCounter = 0;
     void printIdentification(struct VL6180xIdentification *temp);
-    void initShortDistanceSensor();
-    void initLongDistanceSensor();
+    bool initShortDistanceSensor();
+    bool initLongDistanceSensor();
     void setupAddresses();
     void activateSensor(bool shortSensor);
   public:

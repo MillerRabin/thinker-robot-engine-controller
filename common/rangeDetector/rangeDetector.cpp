@@ -14,19 +14,16 @@ RangeDetector::RangeDetector(ArmPart *armPart, i2c_inst_t *i2c,
   useShortDistance(true),
   range(0)
 {
-  printf("Init detectors\n");
   gpio_init(shortDetectorShutPin);
   gpio_set_dir(shortDetectorShutPin, GPIO_OUT);
   gpio_init(longDetectorShutPin);
   gpio_set_dir(longDetectorShutPin, GPIO_OUT);
-  printf("Try activate sensor\n");
-  /*activateSensor(true);
 
   if (xTaskCreate(RangeDetector::detectorTask, "RangeDetector::detectorTask", 1024, this, 5, NULL)) {
     printf("RangeDetect::detector task created\n");
   } else {
     printf("RangeDetect::detector task failed\n");
-  } */ 
+  }
 }
 
 void RangeDetector::activateSensor(bool shortSensor) {
@@ -34,20 +31,15 @@ void RangeDetector::activateSensor(bool shortSensor) {
   gpio_put(longDetectorShutPin, 0);
   vTaskDelay(pdMS_TO_TICKS(10));
 
-  bool initSuccess = false;
-
+  bool initSuccess = false;  
   if (shortSensor){
     gpio_put(shortDetectorShutPin, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
-    if (shortDistanceDetector.VL6180xInit() == 0) {
-      shortDistanceDetector.changeAddress(VL618_DEFAULT_ADDR, VL618_NEW_ADDR);
-      shortDistanceDetector.VL6180xDefautSettings();
-      printf("Short distance sensor activated (0x%X)\n", VL618_NEW_ADDR);
+    if (initShortDistanceSensor()) {
       initSuccess = true;
-    }
-    else {
-      printf("FAILED TO INITIALIZE SHORT DISTANCE SENSOR\n");
-    }
+      // shortDistanceDetector.changeAddress(VL618_DEFAULT_ADDR, VL618_NEW_ADDR);
+      // printf("Short distance sensor activated (0x%X)\n", VL618_NEW_ADDR);
+    }      
   }
   else {
     gpio_put(longDetectorShutPin, 1);
@@ -55,8 +47,7 @@ void RangeDetector::activateSensor(bool shortSensor) {
     if (longDistanceDetector.begin(i2c))
     {
       longDistanceDetector.setAddress(VL53_NEW_ADDR);
-      longDistanceDetector.startRangeContinuous();
-      printf("Long distance sensor activated (0x%X)\n", VL53_NEW_ADDR);
+      longDistanceDetector.startRangeContinuous();      
       initSuccess = true;
     }
     else {
@@ -75,18 +66,24 @@ void RangeDetector::setupAddresses() {
   vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
 
   gpio_put(shortDetectorShutPin, 1);
-  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
-  shortDistanceDetector.VL6180xInit();
-  shortDistanceDetector.changeAddress(VL618_DEFAULT_ADDR, VL618_NEW_ADDR);
-  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
-
+  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));    
+  if (initShortDistanceSensor()) {
+    shortDistanceDetector.changeAddress(VL618_DEFAULT_ADDR, VL618_NEW_ADDR);
+    vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
+  } else {
+    printf("FAILED TO INITIALIZE SHORT DISTANCE SENSOR\n");
+  }
+    
   gpio_put(longDetectorShutPin, 1);
   vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
-  longDistanceDetector.begin(i2c);
-  longDistanceDetector.setAddress(VL53_NEW_ADDR);
-  vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
+  if (initLongDistanceSensor()) {
+    longDistanceDetector.setAddress(VL53_NEW_ADDR);
+    vTaskDelay(pdMS_TO_TICKS(RANGE_SENSOR_STABILIZE_DELAY));
+  } else {
+    printf("FAILED TO INITIALIZE LONG DISTANCE SENSOR\n");
+  }
 
-  printf("I2C addresses set: VL6180X -> 0x%X, VL53L0X -> 0x%X\n", VL618_NEW_ADDR, VL53_NEW_ADDR);
+  gpio_put(longDetectorShutPin, 0);
 }
 
 void RangeDetector::printIdentification(struct VL6180xIdentification *temp) {
@@ -101,44 +98,51 @@ void RangeDetector::printIdentification(struct VL6180xIdentification *temp) {
   printf("Manufacture Time (s)= %d\n\n", (temp->idTime * 2));
 }
 
-void RangeDetector::initShortDistanceSensor() {
-  VL6180xIdentification identification;
-  shortDistanceDetector.getIdentification(&identification);
-  printIdentification(&identification);
+bool RangeDetector::initShortDistanceSensor() {
+  //VL6180xIdentification identification;
+  //shortDistanceDetector.getIdentification(&identification);
+  //printIdentification(&identification);
 
   if (shortDistanceDetector.VL6180xInit() != 0) {
-    printf("FAILED TO INITALIZE VL6180X\n");
+    return false;
   }
-  shortDistanceDetector.VL6180xDefautSettings();
+  shortDistanceDetector.VL6180xDefautSettings();  
+  return true;
 }
 
-void RangeDetector::initLongDistanceSensor() {
+bool RangeDetector::initLongDistanceSensor() {
   if (longDistanceDetector.begin(i2c)) {
     longDistanceDetector.startRangeContinuous();
+    return true;
   }
   else {
     printf("FAILED TO INITIALIZE VL53L0X\n");
   }
+  return false;
 }
 
 void RangeDetector::detectorTask(void *instance) {
-  RangeDetector *detector = (RangeDetector *)instance;
-  while (true) {
+  //vTaskDelay(pdMS_TO_TICKS(5000));
+  RangeDetector *detector = (RangeDetector *)instance;    
+  detector->activateSensor(true);
+  while (true) {    
     if (detector->useShortDistance) {
       detector->range = detector->shortDistanceDetector.getDistance();
-    }
-    else {
-      if (detector->longDistanceDetector.isRangeComplete()) {
+    } else {
+      if (detector->longDistanceDetector.isRangeComplete()) {        
         detector->range = detector->longDistanceDetector.readRange();
       }
     }
 
-    if (detector->useShortDistance && detector->range > RANGE_SHORT_TO_LONG_THRESHOLD) {
+    if (detector->useShortDistance && detector->range > RANGE_SHORT_TO_LONG_THRESHOLD) {      
       detector->activateSensor(false);
     }
-    else if (!detector->useShortDistance && detector->range < RANGE_LONG_TO_SHORT_THRESHOLD) {
+    else if (!detector->useShortDistance && detector->range < RANGE_LONG_TO_SHORT_THRESHOLD) {      
       detector->activateSensor(true);
     }
+
+    /*printf("Range: %d mm (%s)\n", detector->range,
+           detector->useShortDistance ? "Short" : "Long");*/
 
     const int res = detector->armPart->updateRange(detector->range,
                                                    detector->useShortDistance ? 0 : 1);
@@ -147,6 +151,7 @@ void RangeDetector::detectorTask(void *instance) {
     }
 
     vTaskDelay(pdMS_TO_TICKS(RANGE_LOOP_TIMEOUT));
+    //vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
