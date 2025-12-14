@@ -49,7 +49,7 @@ protected:
   int updateAccelerometer(Accelerometer acc);
   int updateGyroscope(Gyroscope gyro);
   int updateAccuracy(Accuracy acc);
-  int updateHeight(uint16_t height, uint16_t pressure, uint8_t temperature);
+  int updateHeight(uint32_t height, uint16_t temperature);
 public:
   ArmPlatform platform;
   void setPositionTaskStatus(bool value);

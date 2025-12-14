@@ -91,7 +91,7 @@ int ArmClaw::updateAccuracy(IMUBase *position) {
 }
 
 int ArmClaw::updateHeight(IMUBase *position) {
-  return ArmPart::updateHeight(position->height, position->pressure, position->temperature);
+  return ArmPart::updateHeight(position->height, position->temperature);
 }
 
 void ArmClaw::busReceiveCallback(can2040_msg frame) {

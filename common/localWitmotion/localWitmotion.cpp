@@ -107,10 +107,9 @@ void LocalWitmotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum) {
         }
         break;
       case Yaw:
-        break;        
+        break;
       case HeightH:        
-        instance->pressure = ((uint16_t)sReg[PressureH] << 8 | sReg[PressureL]);
-        instance->height = (int16_t)((sReg[HeightH] << 8) | sReg[HeightL]);
+        instance->height = (int32_t)((sReg[HeightH] << 16) | sReg[HeightL]);
         instance->temperature = sReg[TEMP];
         if (instance->armPart->updateHeight(instance) != 0) {
           printf("Height sending error\n");
