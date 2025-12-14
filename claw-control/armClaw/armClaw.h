@@ -46,4 +46,5 @@ public:
   int updateAccelerometer(IMUBase *position);
   int updateGyroscope(IMUBase *position);
   int updateAccuracy(IMUBase *position);
+  int updateHeight(IMUBase *position);
 };

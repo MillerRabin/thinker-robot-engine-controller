@@ -90,6 +90,10 @@ int ArmClaw::updateAccuracy(IMUBase *position) {
   return ArmPart::updateAccuracy(position->accuracy);
 }
 
+int ArmClaw::updateHeight(IMUBase *position) {
+  return ArmPart::updateHeight(position->height, position->pressure, position->temperature);
+}
+
 void ArmClaw::busReceiveCallback(can2040_msg frame) {
   if (frame.id == CAN_CLAW_SET_XYG_DEGREE) {
     uint32_t raw1 = frame.data32[0];

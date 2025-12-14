@@ -10,5 +10,7 @@ class IMUBase {
     Accuracy accuracy;
     Gyroscope gyroscope;
     Accelerometer accelerometer;
-    uint32_t height;
+    uint16_t height;
+    uint16_t pressure;
+    uint8_t temperature;
 };

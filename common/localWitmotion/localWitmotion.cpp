@@ -83,8 +83,8 @@ void LocalWitmotion::init(void *pvParameters) {
 }
 
 void LocalWitmotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum) {
-  dataAvailable = true;
-  for (int i = 0; i < uiRegNum; i++) {
+  dataAvailable = true;  
+  for (int i = 0; i < uiRegNum; i++){
     switch (uiReg) {
       case AZ:
         if (instance == NULL) 
@@ -107,9 +107,11 @@ void LocalWitmotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum) {
         }
         break;
       case Yaw:
-        break;
-      case PressureH:
-        instance->height = ((uint32_t)sReg[PressureH] << 16 | sReg[PressureL]) / 100.0f;
+        break;        
+      case HeightH:        
+        instance->pressure = ((uint16_t)sReg[PressureH] << 8 | sReg[PressureL]);
+        instance->height = (int16_t)((sReg[HeightH] << 8) | sReg[HeightL]);
+        instance->temperature = sReg[TEMP];
         if (instance->armPart->updateHeight(instance) != 0) {
           printf("Height sending error\n");
         }

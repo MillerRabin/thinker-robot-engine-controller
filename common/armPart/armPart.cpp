@@ -38,8 +38,8 @@ int ArmPart::updateAccuracy(Accuracy acc) {
   return 0;
 }
 
-int ArmPart::updateHeight(uint32_t height) {
-  uint64_t data = (uint64_t)height;
+int ArmPart::updateHeight(uint16_t height, uint16_t pressure, uint8_t temperature) {
+  uint64_t data = (uint64_t)temperature << 56 | (uint64_t)pressure << 32 | (uint64_t)height;
   uint8_t id = getHeightMessageId();
   if (id == 0) return -1;
   bus.send(id, data);
