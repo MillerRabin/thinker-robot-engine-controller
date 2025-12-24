@@ -69,6 +69,13 @@ void LocalBNO::compassTask(void *instance) {
         }
         break;
       }
+      case SENSOR_REPORTID_ACCELEROMETER: {
+        bno->updateAccelerometerData(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);
+        if (bno->armPart->updateAccelerometer(bno) != 0) {
+          printf("Accelerometer sending error\n");
+        }
+        break;
+      }
       default:
         break;
     }
@@ -126,9 +133,8 @@ bool LocalBNO::updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quatern
 }
 
 void LocalBNO::initIMU() {
-  imu.enableRotationVector(50);
-  //imu.enableGameRotationVector(50);
-  imu.enableLinearAccelerometer(50);
+  imu.enableRotationVector(50);  
+  imu.enableAccelerometer(50);
   imu.enableGyro(50);
 }
 

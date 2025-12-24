@@ -89,9 +89,11 @@ void LocalWitmotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum) {
       case AZ:
         if (instance == NULL) 
           break;
-        instance->accelerometer.x = sReg[AX] / 32768.0f * 16.0f * 9.80665f;
-        instance->accelerometer.y = sReg[AY] / 32768.0f * 16.0f * 9.80665f;
-        instance->accelerometer.z = sReg[AZ] / 32768.0f * 16.0f * 9.80665f;
+        
+        instance->accelerometer.x = sReg[AX];
+        instance->accelerometer.y = sReg[AY];
+        instance->accelerometer.z = sReg[AZ];
+
         if (instance->armPart->updateAccelerometer(instance) != 0) {
           printf("Accelerometer sending error\n");
         }
@@ -99,9 +101,9 @@ void LocalWitmotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum) {
       case GZ:
         if (instance == NULL)
           break;
-        instance->gyroscope.x = sReg[GX] / 32768.0f * 2000.0f;
-        instance->gyroscope.y = sReg[GY] / 32768.0f * 2000.0f;
-        instance->gyroscope.z = sReg[GZ] / 32768.0f * 2000.0f;
+        instance->gyroscope.x = sReg[GX];
+        instance->gyroscope.y = sReg[GY];
+        instance->gyroscope.z = sReg[GZ];
         if (instance->armPart->updateGyroscope(instance) != 0) {
           printf("Gyro sending error\n");
         }
@@ -111,6 +113,7 @@ void LocalWitmotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum) {
       case HeightH:        
         instance->height = (int32_t)((sReg[HeightH] << 16) | sReg[HeightL]);
         instance->temperature = sReg[TEMP];
+
         if (instance->armPart->updateHeight(instance) != 0) {
           printf("Height sending error\n");
         }

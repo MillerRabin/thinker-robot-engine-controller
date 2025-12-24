@@ -3,6 +3,7 @@
 #include "../detectors/detectors.h"
 #include "../measureRange/measureRange.h"
 #include "../quaternion/quaternion.h"
+#include "../accelerometer/accelerometer.h"
 
 class IMUBase {
   public:

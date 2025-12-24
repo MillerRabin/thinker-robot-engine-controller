@@ -5,7 +5,7 @@
 #include "../config/config.h"
 #include <iostream>
 
-#include "../structureBase/structureBase.h"
+#include "../qBase/qBase.h"
 
 class Range {
   public:
@@ -33,7 +33,7 @@ class RangeMap {
 };
 
 
-class Accuracy : public StructureBase {
+class Accuracy : public QBase {
 public:
   uint16_t quaternionRadAccuracy;
   uint8_t quaternionAccuracy;
@@ -43,19 +43,7 @@ public:
   void deserialize(uint8_t data[8]);
 };
 
-class Accelerometer : public StructureBase {
-public:
-  uint16_t x;
-  uint16_t y;
-  uint16_t z;
-  uint8_t Q1;
-  uint8_t Q2;
-  uint8_t Q3;
-  uint64_t serialize();
-  void deserialize(uint8_t data[8]);
-};
-
-class Gyroscope : public StructureBase {
+class Gyroscope : public QBase {
 public:
   uint16_t x;
   uint16_t y;

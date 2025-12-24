@@ -16,8 +16,10 @@ add_executable(${APP_SHOULDER_NAME}
   ${APP_COMMON_DIRECTORY}/flashSettings/flashSettings.cpp
   ${APP_COMMON_DIRECTORY}/localBNO/localBNO.cpp
   ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
-  ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp  
-  ${APP_COMMON_DIRECTORY}/structureBase/structureBase.cpp
+  ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp
+  ${APP_COMMON_DIRECTORY}/qBase/qBase.cpp
+  ${APP_COMMON_DIRECTORY}/accelerometer/accelerometer.cpp
+  ${APP_COMMON_DIRECTORY}/gyroscope/gyroscope.cpp
   ${APP_COMMON_DIRECTORY}/euler/euler.cpp
   ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp
   ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp

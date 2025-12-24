@@ -5,7 +5,7 @@
 #include <iostream>
 
 #include "../config/config.h"
-#include "../structureBase/structureBase.h"
+#include "../qBase/qBase.h"
 #include "../euler/euler.h"
 
 class Quaternion;
@@ -23,7 +23,7 @@ struct Matrix3 {
   double m20, m21, m22;
 };
 
-class IMUQuaternion : public StructureBase {
+class IMUQuaternion : public QBase {
 public:
   double i;
   double j;

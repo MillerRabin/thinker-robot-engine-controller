@@ -228,7 +228,8 @@ public:
 	uint16_t rawQuatI, rawQuatJ, rawQuatK, rawQuatReal, rawQuatRadianAccuracy;
 	uint16_t rawLinAccelX, rawLinAccelY, rawLinAccelZ, accelLinAccuracy;
 	uint16_t rawGyroX, rawGyroY, rawGyroZ, gyroAccuracy;
-	
+	uint16_t rawAccelX, rawAccelY, rawAccelZ, accelAccuracy;
+
 	float getRoll();
 	float getPitch();
 	float getYaw();
@@ -282,8 +283,7 @@ private:
 
 	bool _hasReset = false;		// Keeps track of any Reset Complete packets we receive. 
 
-	//These are the raw sensor values (without Q applied) pulled from the user requested Input Report
-	uint16_t rawAccelX, rawAccelY, rawAccelZ, accelAccuracy;	
+	//These are the raw sensor values (without Q applied) pulled from the user requested Input Report	
 	uint16_t rawUncalibGyroX, rawUncalibGyroY, rawUncalibGyroZ, rawBiasX, rawBiasY, rawBiasZ, UncalibGyroAccuracy;
 	uint16_t rawMagX, rawMagY, rawMagZ, magAccuracy;	
 	uint16_t rawFastGyroX, rawFastGyroY, rawFastGyroZ;	

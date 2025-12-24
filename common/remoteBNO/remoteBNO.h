@@ -2,6 +2,7 @@
 
 #include "../detectors/detectors.h"
 #include "../quaternion/quaternion.h"
+#include "../accelerometer/accelerometer.h"
 
 class RemoteBNO {
   private:

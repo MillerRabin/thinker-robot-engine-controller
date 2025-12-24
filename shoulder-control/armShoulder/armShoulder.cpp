@@ -92,9 +92,8 @@ void ArmShoulder::engineTask(void *instance) {
       printf("Shoulder home quaternion set and saved to EEPROM\n");      
     }
 
-    shoulder->setEngineTaskStatus(true);
-    
-    shoulder->updateStatuses();
+    //shoulder->setEngineTaskStatus(true);    
+    //shoulder->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
   }
 }
