@@ -1,16 +1,16 @@
 #include "measureRange.h"
 
-uint64_t MeasureRange::serialize() {
-  return (uint64_t)range |
-         (uint64_t)measureType << 16;
+uint64_t MeasureRange::serialize() {    
+  return (uint64_t)this->longRange |
+         (uint64_t)this->shortRange << 16;
 }
 
 void MeasureRange::deserialize(uint8_t data[8]) {  
-  this->range = (uint16_t)data[1] << 8 | data[0];
-  this->measureType = (uint16_t)data[3] << 8 | data[2];
+  memcpy(&this->longRange, data, 2);
+  memcpy(&this->shortRange, &data[2], 2);
 }
 
-void MeasureRange::set(uint16_t range, uint8_t measureType) {
-  this->range = range;
-  this->measureType = measureType;
+void MeasureRange::set(uint16_t longRange, uint16_t shortRange) {
+  this->longRange = longRange;
+  this->shortRange = shortRange;
 }

@@ -104,29 +104,14 @@ void Servo::tick() {
     return;
   }
 
-  float ca = physicalAngle;
-  bool calibrating = isCalibrating();
-  if (calibrating) {
-    wasCalibrated = true;
-    ca = physicalAngle;
-    prevImuAngle = imuAngle;
+  if (isnan(physicalAngle)) {
+    return;
   }
-  else {
-    if (wasCalibrated) {
-      wasCalibrated = false;
-      physicalAngle = imuAngle;
-      prevImuAngle = imuAngle;
-    }
-    ca = imuAngle;
-  }
-
+  const float ca = imuAngle;  
   float path = targetAngle - ca;
   float dir = getDir(path);
   float apath = fabs(path);
-  if (!isCalibrating() && isStopped() && apath < deadZone) {
-    return;
-  }
-
+  
   float increment = fmin(apath, angleStep);
   increment = fmin(increment, SERVO_MAX_DEGREE_CHANGE);
   //increment = fmax(increment, SERVO_MIN_DEGREE_CHANGE);
@@ -140,7 +125,7 @@ void Servo::tick() {
   if (physicalAngle < minDegree)
     physicalAngle = minDegree;
 
-  //printf("targetAngle: %f, physicalAngle: %f, imuAngle: %f, dir: %f, increment: %f\n", targetAngle, physicalAngle, imuAngle, dir, increment);
+  //printf("targetAngle: %f, physicalAngle: %f, imuAngle: %f, dir: %f\n", targetAngle, physicalAngle, imuAngle, dir);
   setDegreeDirect(physicalAngle);
 }
 
@@ -163,13 +148,16 @@ bool Servo::isCalibrating() {
 void Servo::setIMUAngle(float value) {
   prevImuAngle = imuAngle;
   imuAngle = value;
+  if (isnan(physicalAngle)) {
+    physicalAngle = imuAngle;
+  }
 }
 
 void Servo::setTimeMS(uint16_t timeMS) {  
   this->timeMS = (timeMS < 1 || timeMS > 10000) ? this->timeMS : timeMS;
   float iter = float(timeMS) / ENGINE_TASK_LOOP_DIVIDER;
   float diff = fabs(targetAngle - physicalAngle);  
-  this->angleStep = fabs(diff / iter);
+  this->angleStep = fabs(diff / iter);  
 }
 
 void Servo::setDeadZone(float dz) {

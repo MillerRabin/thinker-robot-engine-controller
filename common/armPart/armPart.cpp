@@ -4,9 +4,7 @@ ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) : bus(canRxPin, canTx
   FlashSettings::init();
 }
 
-int ArmPart::updateQuaternion(IMUQuaternion quat) {  
-  //Quaternion alignedQuat = align(this->offsetQuaternion, quat);
-  //IMUQuaternion imuQuat = IMUQuaternion::FromQuaternion(alignedQuat);
+int ArmPart::updateQuaternion(Quaternion quat) {    
   uint64_t data = quat.serialize();
   uint8_t id = getQuaternionMessageId();  
   if (id == 0) return -1;
@@ -55,9 +53,9 @@ int ArmPart::updateStatuses() {
   return 0;
 }
 
-int ArmPart::updateRange(uint16_t range, uint16_t measureType) {
+int ArmPart::updateRange(float longRange, float shortRange) {
   MeasureRange mRange;  
-  mRange.set(range, measureType);  
+  mRange.set(longRange, shortRange);  
   uint64_t data = mRange.serialize();
   uint8_t id = getRangeMessageId();
   if (id == 0) return -1;
@@ -135,7 +133,7 @@ void ArmPart::setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQu
   this->homeQuaternion = homeQuaternion;
   this->platformHomeQuaternion = platformQuaternion;
   Quaternion homeInverted = Quaternion::Conjugate(homeQuaternion);
-  this->offsetQuaternion = Quaternion::Multiply(platformQuaternion, homeInverted);
+  //this->offsetQuaternion = Quaternion::Multiply(platformQuaternion, homeInverted);
 }
 
 Quaternion ArmPart::align(const Quaternion& dest, const Quaternion& source) {  

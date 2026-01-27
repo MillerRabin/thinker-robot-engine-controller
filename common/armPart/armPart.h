@@ -45,7 +45,7 @@ private:
   volatile uint64_t statuses;      
 protected:
   virtual void busReceiveCallback(can2040_msg frame) {};
-  int updateQuaternion(IMUQuaternion quat);
+  int updateQuaternion(Quaternion quat);
   int updateAccelerometer(Accelerometer acc);
   int updateGyroscope(Gyroscope gyro);
   int updateAccuracy(Accuracy acc);
@@ -62,8 +62,7 @@ public:
   Quaternion align(const Quaternion& dest, const Quaternion& source);
   Quaternion difference(const Quaternion& a, const Quaternion& b);
   Quaternion homeQuaternion;
-  Quaternion platformHomeQuaternion;
-  Quaternion offsetQuaternion = getRotationQuaternion();
+  Quaternion platformHomeQuaternion;  
   Quaternion alignedOffsetQuaternion;
   void setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQuaternion);
   void saveHomeQuaternionsToEEPROM();
@@ -81,15 +80,7 @@ public:
   virtual int updateGyroscope(IMUBase *position) { return 0; };
   virtual int updateAccuracy(IMUBase *position) { return 0; };
   virtual int updateHeight(IMUBase *position) { return 0; };
-  virtual int updateRange(uint16_t range, uint16_t measureType);
-  virtual Quaternion getRotationQuaternion() {
-    float rollOffset = 0.0f * (M_PI / 180.0f);
-    float pitchOffset = 0.0f * (M_PI / 180.0f);
-    float yawOffset = 0.0f * (M_PI / 180.0f);
-    Quaternion errorQuat = Quaternion::FromEuler(rollOffset, pitchOffset, yawOffset);
-    Quaternion correctionQuat = Quaternion::Conjugate(errorQuat);
-    return Quaternion::Multiply(correctionQuat, {0, 0, 0, 1});
-  };
+  virtual int updateRange(float longRange, float shortRange);
   virtual int sendFirmwareUpgradeMessage();
   virtual int updateStatuses();  
   ArmPart(const uint canRxPin, const uint canTxPin);

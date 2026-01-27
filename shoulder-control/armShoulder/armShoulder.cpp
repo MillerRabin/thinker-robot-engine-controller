@@ -1,90 +1,90 @@
 #include "armShoulder.h"
 
-float ArmShoulder::getYawAngle(Euler euler) {
-  float yaw = euler.getYawAngle();
-  if (yaw > 90) yaw = yaw - 180;
-  if (yaw < -90) yaw = yaw + 180;  
-  return yaw;
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, -1.0f / 2.0f, -1.0f / 2.0f, -1.0f / 2.0f); // North Down West
+
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0f) / 2.0f, -sqrt(2.0f) / 2.0f, 0.0f, 0.0f); // North East Down
+
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, 0.0f, 1.0f, 0.0f); // West South Up
+
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, 1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f);    // South Down East
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, -sqrt(2.0f) / 2.0f, 0.0f, -sqrt(2.0f) / 2.0f); // East Down North
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0f) / 2.0f, 0.0f, -sqrt(2.0) / 2.0f, 0.0f); // West Down South
+
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, 0.0f, sqrt(2.0) / 2.0f, sqrt(2.0f) / 2.0f);         // North West Up
+
+
+
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f, 1.0f / 2.0f);    // North Up East
+
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, -sqrt(2.0f) / 2.0f, -sqrt(2.0f) / 2.0f, 0.0f);      // Down South West
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0f) / 2.0f, 0.0f, 0.0f, -sqrt(2.0f) / 2.0);       // Up North West
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(1.0f / 2.0f, -1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f);    // South Up West
+
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f, 0.0f, 0.0f, 0.0f); // West North Down
+
+Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, 0.0f, 0.0f, 1.0f);                                  // East North Up
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, 0.0f, sqrt(2.0) / 2.0f, sqrt(2.0f) / 2.0f);         // North West Up
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, 0.0f, 1.0f, 0.0f);                                  // West South Up
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, 0.0f, -sqrt(2.0f) / 2.0f, sqrt(2.0f) / 2.0f);       // South East Up
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, -1.0f, 0.0f, 0.0f);                                 // East South Down
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0f) / 2.0f, -sqrt(2.0f) / 2.0f, 0.0f, 0.0f);      // North East Down
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f, 0.0f, 0.0f, 0.0f);                                 // West North Down
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0) / 2.0f, sqrt(2.0) / 2.0f, 0.0f, 0);            // South West Down
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, -sqrt(2.0) / 2.0f, sqrt(2.0) / 2.0f, 0);            // Up South East
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f, 1.0f / 2.0f);    // North Up East
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0f) / 2.0f, 0.0f, 0.0f, sqrt(2.0f) / 2.0f);       // Down North East
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, 1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f);    // South Down East
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0f) / 2.0f, 0.0f, 0.0f, -sqrt(2.0f) / 2.0);       // Up North West
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, -1.0f / 2.0f, -1.0f / 2.0f, -1.0f / 2.0f);  // North Down West
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, -sqrt(2.0f) / 2.0f, -sqrt(2.0f) / 2.0f, 0.0f);      // Down South West
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(1.0f / 2.0f, -1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f);    // South Up West
+ //Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f, -1.0f / 2.0f);   // Up East North
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0f) / 2.0f, 0.0f, sqrt(2.0f) / 2.0f, 0.0f);       // West Up North
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, 1.0f / 2.0f, 1.0f / 2.0f, 1.0f / 2.0f);     // Down West North
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, -sqrt(2.0f) / 2.0f, 0.0f, -sqrt(2.0f) / 2.0f);      // East Down North
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f, 1.0f / 2.0f);     // Up West South
+// Quaternion ArmShoulder::rotationQuaternion = Quaternion(-sqrt(2.0f) / 2.0f, 0.0f, -sqrt(2.0) / 2.0f, 0.0f);       // West Down South
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(-1.0f / 2.0f, -1.0f / 2.0f, -1.0f / 2.0f, 1.0f / 2.0f);   // Down East South
+//Quaternion ArmShoulder::rotationQuaternion = Quaternion(0.0f, -sqrt(2.0f) / 2.0f, 0.0f, sqrt(2.0f) / 2.0f);       // East Up South
+
+float ArmShoulder::tiltAngle(Accelerometer acc) {
+  //const float g = 9.80665;
+  const float g = 9.5f;
+  
+  const float sign = acc.bnoY() >= -1 ? 1 : -1;
+
+  float x = acc.bnoX();
+  float det = x / g;
+  if (det > 1.0f)
+    det = 1.0f;
+  if (det < -1.0f)
+    det = -1.0f;
+  const float angleRad = acos(det);
+  if (!isfinite(angleRad))
+    return 0;  
+  return sign * angleRad * 180 / M_PI;
 }
 
-struct Vec3
-{
-  double x, y, z;
-};
+float ArmShoulder::getAccelerometerAngleY() {
+  Accelerometer sAcc = this->imu.accelerometer;
+  Accelerometer pAcc = this->platform.imu.accelerometer;
 
-static inline Vec3 cross(const Vec3 &a, const Vec3 &b)
-{
-  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-static inline double dot(const Vec3 &a, const Vec3 &b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-static inline double norm(const Vec3 &v) { return std::sqrt(dot(v, v)); }
-static inline Vec3 normalize(Vec3 v)
-{
-  double n = norm(v);
-  return (n > 1e-12) ? Vec3{v.x / n, v.y / n, v.z / n} : Vec3{0, 0, 0};
-}
-
-// Поворот вектора кватернионом (q — единичный)
-static inline Vec3 rotateByQuat(const Quaternion &q, const Vec3 &v)
-{
-  Quaternion p{0, v.x, v.y, v.z};
-  Quaternion qi = Quaternion::Conjugate(q);
-  Quaternion r = Quaternion::Multiply(Quaternion::Multiply(q, p), qi);
-  return {r.i, r.j, r.k};
-}
-
-// Строим базис (a, b, c), где b ⟂ a
-static inline void buildBasis(const Vec3 &a_unit, Vec3 &b, Vec3 &c)
-{
-  Vec3 t = (std::fabs(a_unit.x) < 0.9) ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
-  b = normalize(cross(a_unit, t));
-  c = cross(a_unit, b);
-}
-
-// Подписанный угол вокруг оси a (ось в той же СК, что и qRel)
-double signedAngleAroundAxis(const Quaternion &qHome, const Quaternion &qNow, double ax, double ay, double az)
-{
-  Vec3 a = normalize({ax, ay, az});
-  Quaternion qRel = Quaternion::Normalize(Quaternion::Multiply(Quaternion::Conjugate(qHome), qNow));
-
-  // опорный вектор в плоскости ⟂ a
-  Vec3 b, c;
-  buildBasis(a, b, c);
-
-  // повернули b кватернионом qRel
-  Vec3 b2 = rotateByQuat(qRel, b);
-
-  // синус и косинус угла в плоскости ⟂ a
-  double s = dot(a, cross(b, b2)); // подписанный «синус» (вдоль оси)
-  double coss = dot(b, b2);        // косинус
-  return std::atan2(s, coss);      // угол в (-π, π]
+  float sAngle = ArmShoulder::tiltAngle(sAcc);
+  float pAngle = 90 - ArmShoulder::tiltAngle(pAcc);
+  return sAngle + pAngle;
 }
 
 void ArmShoulder::engineTask(void *instance) {
   auto *shoulder = static_cast<ArmShoulder *>(instance);
   TickType_t lastWakeTime = xTaskGetTickCount();
 
-  //Quaternion baseQuat = Quaternion::FromEuler(0, 0, 0);
   while (true) {
-    /*Quaternion imuQuat = Quaternion(shoulder->imu.quaternion);
-    Quaternion homeInv = Quaternion::Conjugate(shoulder->homeQuaternion);
-    Quaternion homeQuat1 = Quaternion::Multiply(baseQuat, homeInv);
-
-    Quaternion diff = shoulder->difference(imuQuat, shoulder->homeQuaternion);
-    Euler euler = diff.getEuler();    
-    printf("Diff: real: %f, i: %f, j: %f, k: %f\n", diff.real, diff.i, diff.j, diff.k);
-    printf("Diff: roll: %f, pitch: %f, yaw: %f\n", euler.getRollAngle(), euler.getPitchAngle(), euler.getYawAngle());
-
-    double angle = signedAngleAroundAxis(baseQuat, diff, 0, 0, 1);
-    printf("zAngle: %f\n", angle * RAD_TO_DEG);*/
-    //shoulder->shoulderY.maxDegree - shoulder->getYawAngle(euler) - SHOULDER_Y_HOME_POSITION
-    shoulder->shoulderY.setIMUAngle(shoulder->shoulderY.getPhysicalAngle());
+    float sAngle = shoulder->getAccelerometerAngleY();
+        
+    shoulder->shoulderY.setIMUAngle(sAngle);    
     shoulder->shoulderZ.setIMUAngle(shoulder->shoulderZ.getPhysicalAngle());
     shoulder->shoulderY.tick();
     shoulder->shoulderZ.tick();
-
-    shoulder->setYCalibrating(shoulder->shoulderY.isCalibrating());
-    shoulder->setZCalibrating(shoulder->shoulderZ.isCalibrating());
 
     if (shoulder->shoulderY.isCalibrating() && shoulder->shoulderZ.isCalibrating()) {
       shoulder->setHomeQuaternion(shoulder->imu.quaternion, shoulder->platform.imu.quaternion);
@@ -92,8 +92,9 @@ void ArmShoulder::engineTask(void *instance) {
       printf("Shoulder home quaternion set and saved to EEPROM\n");      
     }
 
-    //shoulder->setEngineTaskStatus(true);    
+    shoulder->setEngineTaskStatus(true);    
     //shoulder->updateStatuses();
+    //vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1000));
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
   }
 }
@@ -108,7 +109,7 @@ ArmShoulder::ArmShoulder(
     const uint canRxPin,
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
                            shoulderZ(engineZPin, Range(0, 270), SHOULDER_Z_HOME_POSITION, 100),
-                           shoulderY(engineYPin, Range(0, 180), SHOULDER_Y_HOME_POSITION, 100),
+                           shoulderY(engineYPin, Range(0, 180), NAN, 100),
                            imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)                           
 {  
   if (loadHomeQuaternionsFromEEPROM()) {
@@ -116,7 +117,7 @@ ArmShoulder::ArmShoulder(
   }
   else {
     printf("No valid quaternion data found in EEPROM, using defaults\n");
-    offsetQuaternion = getRotationQuaternion();
+    //offsetQuaternion = getRotationQuaternion();
   }
   if (!xTaskCreate(ArmShoulder::engineTask, "ArmShoulder::engineTask", 1024, this, 5, NULL)) {
     setEngineTaskStatus(false);
@@ -126,9 +127,10 @@ ArmShoulder::ArmShoulder(
   }
 }
 
-int ArmShoulder::updateQuaternion(IMUBase *position)
-{  
-  return ArmPart::updateQuaternion(position->quaternion);
+int ArmShoulder::updateQuaternion(IMUBase *position) {
+  auto resQuat = ArmShoulder::rotationQuaternion * position->quaternion;
+  return ArmPart::updateQuaternion(resQuat);
+  //return ArmPart::updateQuaternion(position->quaternion);
 }
 
 int ArmShoulder::updateGyroscope(IMUBase *position)
@@ -148,8 +150,9 @@ int ArmShoulder::updateAccuracy(IMUBase *position)
 
 void ArmShoulder::busReceiveCallback(can2040_msg frame)
 {
-  if (frame.id == CAN_SHOULDER_SET_YZ_DEGREE)
-  {    
+  if (frame.id == CAN_SHOULDER_SET_YZ_DEGREE) {
+    this->imu.tare(TARE_AXIS_X + TARE_AXIS_Y + TARE_AXIS_Z);
+    this->imu.saveTare();
     uint32_t raw = frame.data32[0];
     uint16_t angleYS = raw & 0xFFFF;
     uint16_t angleZS = (raw >> 16) & 0xFFFF;
@@ -166,6 +169,21 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame)
       shoulderZ.setTargetAngle(angleZ, timeMS, SHOULDER_DEAD_ZONE);
     }
   }
+  if (frame.id == CAN_TARE) {
+    uint32_t raw = frame.data32[0];
+    uint16_t clearMask = raw & 0xFFFF;
+    uint16_t tareMask = (raw >> 16) & 0xFFFF;
+      
+    if (clearMask & ARM_SHOULDER) {
+      this->imu.clearTare();
+    }
+    if (tareMask & ARM_SHOULDER) {
+      this->imu.tare(TARE_AXIS_ALL);
+      this->imu.saveTare();
+    }    
+  }
+
+
   if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE) {
     ArmPart::sendFirmwareUpgradeMessage();
     setUpgrading(true);
@@ -174,12 +192,3 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame)
     rebootInBootMode();
   }
 }
-
-Quaternion ArmShoulder::getRotationQuaternion() {
-  float rollOffset = -90.0f * (M_PI / 180.0f);
-  float pitchOffset = 90.0f * (M_PI / 180.0f);
-  float yawOffset = 0.0f * (M_PI / 180.0f);
-  Quaternion errorQuat = Quaternion::FromEuler(rollOffset, pitchOffset, yawOffset);
-  Quaternion correctionQuat = Quaternion::Conjugate(errorQuat);
-  return Quaternion::Multiply(correctionQuat, {0, 0, 0, 1});
-};

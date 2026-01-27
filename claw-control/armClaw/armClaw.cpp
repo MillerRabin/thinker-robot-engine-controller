@@ -62,7 +62,7 @@ ArmClaw::ArmClaw(
     printf("Claw home quaternions loaded from EEPROM\n");
   } else {
     printf("No valid quaternion data found in EEPROM, using defaults\n");
-    offsetQuaternion = getRotationQuaternion();
+    //offsetQuaternion = getRotationQuaternion();
   }
 
   if (!xTaskCreate(ArmClaw::engineTask, "ArmClaw::engineTask", 2048, this, 5, NULL)) {
@@ -119,6 +119,22 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
       clawGripper.setTargetAngle(angleG, timeMS, CLAW_DEAD_ZONE);
     }
   }
+
+  if (frame.id == CAN_TARE) {
+    uint32_t raw = frame.data32[0];
+    uint16_t clearMask = raw & 0xFFFF;
+    uint16_t tareMask = (raw >> 16) & 0xFFFF;
+
+    if (clearMask & ARM_CLAW) {
+      //this->imu.clearTare();
+    }
+    if (tareMask & ARM_CLAW) {
+      printf("Taring claw IMU\n");
+      this->imu.tare();
+      //this->imu.saveTare();
+    }
+  }
+
   if (frame.id == CAN_CLAW_FIRMWARE_UPGRADE) {
     rebootInBootMode();
   }

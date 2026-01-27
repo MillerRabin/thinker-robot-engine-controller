@@ -41,4 +41,5 @@ public:
   ArmPart *armPart;
   static SemaphoreHandle_t dataReadySemaphore;
   LocalWitmotion(ArmPart *armPart, const uint memsRXPin, const uint memsTxPin, const uint memsRstPin);
+  static void tare();  
 };

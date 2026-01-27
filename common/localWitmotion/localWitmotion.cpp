@@ -197,3 +197,11 @@ LocalWitmotion::LocalWitmotion(ArmPart *armPart, const uint memsRxPin, const uin
   BaseType_t readTaskStatus = xTaskCreate(readDetectorTask, "LocalWitmotion::readDetectorTask", 1024, NULL, 5, NULL);
   BaseType_t initTaskStatus = xTaskCreate(init, "LocalWitmotion::init", 1024, NULL, 5, NULL);
 }
+
+void LocalWitmotion::tare() {
+  WitWriteReg(CALSW, 0x03);
+  Delayms(200);
+  WitWriteReg(CALSW, 0x00);
+  /*WitWriteReg(SAVE, 0x00);
+  Delayms(200);*/
+}

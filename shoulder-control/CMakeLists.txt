@@ -14,6 +14,7 @@ add_executable(${APP_SHOULDER_NAME}
   ${APP_COMMON_DIRECTORY}/remoteBNO/remoteBNO.cpp    
   ${APP_COMMON_DIRECTORY}/servo/servo.cpp
   ${APP_COMMON_DIRECTORY}/flashSettings/flashSettings.cpp
+  ${APP_COMMON_DIRECTORY}/imuBase/imuBase.cpp
   ${APP_COMMON_DIRECTORY}/localBNO/localBNO.cpp
   ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
   ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp

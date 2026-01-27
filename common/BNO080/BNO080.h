@@ -9,6 +9,7 @@
 #include "pico/stdlib.h"
 #include <FreeRTOS.h>
 #include <task.h>
+#include "../quaternion/quaternion.h"
 
 #define BNO080_DEFAULT_ADDRESS 0x4B
 
@@ -30,6 +31,9 @@ const uint8_t CHANNEL_GYRO = 5;
 #define SHTP_REPORT_PRODUCT_ID_REQUEST 0xF9
 #define SHTP_REPORT_BASE_TIMESTAMP 0xFB
 #define SHTP_REPORT_SET_FEATURE_COMMAND 0xFD
+
+
+#define SH2_CMD_WRITE_FRS 0x06
 
 //All the different sensors and features we can get reports from
 //These are used when enabling a given sensor
@@ -60,6 +64,8 @@ const uint8_t CHANNEL_GYRO = 5;
 #define FRS_RECORDID_MAGNETIC_FIELD_CALIBRATED 0xE309
 #define FRS_RECORDID_ROTATION_VECTOR 0xE30B
 
+#define FRS_RECORDID_SYSTEM_ORIENTATION 0x2D3E
+
 // Reset complete packet (BNO08X Datasheet p.24 Figure 1-27)
 #define EXECUTABLE_RESET_COMPLETE 0x1
 
@@ -87,6 +93,8 @@ const uint8_t CHANNEL_GYRO = 5;
 #define TARE_SET_REORIENTATION 2
 
 #define TARE_AXIS_ALL 0x07
+#define TARE_AXIS_X   0x01
+#define TARE_AXIS_Y 	0x02
 #define TARE_AXIS_Z   0x04
 
 #define TARE_ROTATION_VECTOR 0
@@ -99,8 +107,7 @@ const uint8_t CHANNEL_GYRO = 5;
 #define MAX_PACKET_SIZE 1024 //Packets can be up to 32k but we don't have that much RAM.
 #define MAX_METADATA_SIZE 9 //This is in words. There can be many but we mostly only care about the first 9 (Qs, range, etc)
 
-class BNO080
-{
+class BNO080 {
 public:
 	bool begin(uint8_t deviceAddress = BNO080_DEFAULT_ADDRESS, i2c_inst_t *i2c = i2c_default, uint8_t intPin = 255);
 	void softReset();	  //Try to reset the IMU via software
@@ -204,6 +211,8 @@ public:
 	bool calibrationComplete();   //Checks ME Cal response for uint8_t 5, R0 - Status
 
 	void tareNow(bool zAxis=false, uint8_t rotationVectorBasis=TARE_ROTATION_VECTOR);
+	void tare(uint8_t axisMask, uint8_t rotationVectorBasis);
+
 	void saveTare();
 	void clearTare();
 	
@@ -249,6 +258,8 @@ public:
 	uint32_t readFRSword(uint16_t recordID, uint8_t wordNumber);
 	void frsReadRequest(uint16_t recordID, uint16_t readOffset, uint16_t blockSize);
 	bool readFRSdata(uint16_t recordID, uint8_t startLocation, uint8_t wordsToRead);
+	uint writeSystemOrientationQuaternion(float w, float x, float y, float z);
+	uint readSystemOrientationQuaternion(Quaternion &quat);
 
 	//Global Variables
 	uint8_t shtpHeader[4]; //Each packet has a header of 4 uint8_ts

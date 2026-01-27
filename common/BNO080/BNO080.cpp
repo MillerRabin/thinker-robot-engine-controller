@@ -1,12 +1,11 @@
 #include "BNO080.h"
 
 
-bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin)
-{
+bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin) {
   _deviceAddress = deviceAddress; // If provided, store the I2C address from user
   _i2cPort = i2c;                 // Grab which port the user wants us to use
   _int = intPin;                  // Get the pin that the user wants to use for interrupts. By default, it's 255 and we'll not use it in dataAvailable() function.
-  
+
   softReset();
 
   // Check communication with device
@@ -1207,6 +1206,10 @@ void BNO080::tareNow(bool zAxis, uint8_t rotationVectorBasis)
   sendTareCommand(TARE_NOW, zAxis ? TARE_AXIS_Z : TARE_AXIS_ALL, rotationVectorBasis);
 }
 
+void BNO080::tare(uint8_t axisMask, uint8_t rotationVectorBasis) {
+  sendTareCommand(TARE_NOW, axisMask, rotationVectorBasis);
+}
+
 void BNO080::saveTare()
 {
   sendTareCommand(TARE_PERSIST);
@@ -1249,6 +1252,95 @@ void BNO080::setFeatureCommand(uint8_t reportID, uint16_t timeBetweenReports, ui
 
   // Transmit packet on channel 2, 17 bytes
   sendPacket(CHANNEL_CONTROL, 17);
+}
+
+uint BNO080::writeSystemOrientationQuaternion(float w, float x, float y, float z) {
+  // normalize
+  float n = sqrtf(w * w + x * x + y * y + z * z);
+  w /= n;
+  x /= n;
+  y /= n;
+  z /= n;
+
+  int32_t q[4];
+  const float scale = (float)(1LL << 30);
+
+  q[0] = (int32_t)(w * scale);
+  q[1] = (int32_t)(x * scale);
+  q[2] = (int32_t)(y * scale);
+  q[3] = (int32_t)(z * scale);
+
+  for (uint8_t i = 0; i < 4; i++) {
+    memset(shtpData, 0, sizeof(shtpData));
+    shtpData[0] = SHTP_REPORT_COMMAND_REQUEST;
+    shtpData[1] = commandSequenceNumber++;
+    shtpData[2] = SH2_CMD_WRITE_FRS;
+
+    shtpData[3] = FRS_RECORDID_SYSTEM_ORIENTATION & 0xFF;
+    shtpData[4] = FRS_RECORDID_SYSTEM_ORIENTATION >> 8;
+    shtpData[5] = i;
+    shtpData[6] = 0;
+
+    memcpy(&shtpData[7], &q[i], 4);
+
+    if (!sendPacket(CHANNEL_COMMAND, 11))
+      return 1;
+
+    if (!receivePacket())
+      return 2;
+
+    if (shtpData[4] != 0) // status
+      return shtpData[4];
+  }
+
+  softReset();
+  vTaskDelay(pdMS_TO_TICKS(200));
+  return 0;
+}
+
+/*uint BNO080::readSystemOrientationQuaternion(Quaternion &quat) {
+  const uint8_t wordsToRead = 8;
+
+  if (!readFRSdata(FRS_RECORDID_SYSTEM_ORIENTATION, 0, wordsToRead))
+    return 1;
+
+  if (shtpData[0] != SHTP_REPORT_FRS_READ_RESPONSE)
+    return 2;
+
+  if (shtpData[2] != 0)
+    return 3;
+
+  uint8_t *p = &shtpData[5];
+
+  int32_t qw = (int32_t)(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24));
+  int32_t qx = (int32_t)(p[4] | (p[5] << 8) | (p[6] << 16) | (p[7] << 24));
+  int32_t qy = (int32_t)(p[8] | (p[9] << 8) | (p[10] << 16) | (p[11] << 24));
+  int32_t qz = (int32_t)(p[12] | (p[13] << 8) | (p[14] << 16) | (p[15] << 24));
+
+  const float invQ30 = 1.0f / (float)(1LL << 30);
+
+  quat.real = qw * invQ30;
+  quat.i = qx * invQ30;
+  quat.j = qy * invQ30;
+  quat.k = qz * invQ30;
+
+  return 0;
+}*/
+
+uint BNO080::readSystemOrientationQuaternion(Quaternion &quat) {
+  const uint8_t wordsToRead = 4;
+
+  if (!readFRSdata(FRS_RECORDID_SYSTEM_ORIENTATION, 0, wordsToRead))
+    return 1;
+
+  const float invQ30 = 1.0f / (float)(1LL << 30);
+
+  quat.real = (int32_t)metaData[0] * invQ30;
+  quat.i = (int32_t)metaData[1] * invQ30;
+  quat.j = (int32_t)metaData[2] * invQ30;
+  quat.k = (int32_t)metaData[3] * invQ30;
+
+  return 0;
 }
 
 // Tell the sensor to do a command

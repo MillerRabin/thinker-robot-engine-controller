@@ -7,6 +7,7 @@
 
 class QBase {
   public:
-    float qToFloat(int16_t fixedPointValue, uint8_t qPoint);
-    uint16_t floatToQ(float q, uint8_t qPoint);    
+    static float qToFloat(int16_t fixedPointValue, uint8_t qPoint);
+    static uint16_t floatToQ(float q, uint8_t qPoint);    
+    static uint32_t floatToQ32(float q, uint8_t qPoint);
 };

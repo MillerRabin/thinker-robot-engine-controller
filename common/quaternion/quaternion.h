@@ -46,6 +46,7 @@ public:
     double j;
     double k;
     double real;
+    uint8_t Q1 = 14;
     Quaternion(double i = 0, double j = 0, double k = 0, double real = 1.0f)
         : i(i), j(j), k(k), real(real) {}
     Quaternion(IMUQuaternion &q);
@@ -73,5 +74,6 @@ public:
     static Quaternion Normalize(const Quaternion &q);
     static Quaternion Difference(Quaternion &start, Quaternion &end);
     Matrix3 toRotationMatrix() const;
+    uint64_t serialize();
     Euler getEuler();
   };

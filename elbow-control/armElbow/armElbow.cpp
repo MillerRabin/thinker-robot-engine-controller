@@ -80,6 +80,21 @@ void ArmElbow::busReceiveCallback(can2040_msg frame)
       elbowY.setTargetAngle(angleY, timeMS, ELBOW_DEAD_ZONE);
     }
   }
+
+  if (frame.id == CAN_TARE) {
+    uint32_t raw = frame.data32[0];
+    uint16_t clearMask = raw & 0xFFFF;
+    uint16_t tareMask = (raw >> 16) & 0xFFFF;
+      
+    if (clearMask & ARM_ELBOW) {
+      this->imu.clearTare();
+    }
+    if (tareMask & ARM_ELBOW) {
+      this->imu.tare(TARE_AXIS_ALL);
+      this->imu.saveTare();
+    }    
+  }
+
   if (frame.id == CAN_ELBOW_FIRMWARE_UPGRADE) {
     rebootInBootMode();
   }

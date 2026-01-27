@@ -20,8 +20,9 @@
 #define VL6180X_ADDRESS 0x29
 
 class RangeDetector {
-  private:
-    static bool isEnabled;
+  private:    
+    bool longSensorAvailable = false;    
+    bool shortSensorAvailable = false;
     const uint8_t longDetectorShutPin;
     const uint8_t shortDetectorShutPin;
     Pico_VL53L0X longDistanceDetector;
@@ -32,14 +33,12 @@ class RangeDetector {
     void printIdentification(struct VL6180xIdentification *temp);
     bool initShortDistanceSensor();
     bool initLongDistanceSensor();
-    void setupAddresses();
-    void activateSensor(bool shortSensor);
+    void activateSensors(bool shortSensor, bool longSensor);
   public:
-    ArmPart *armPart;
-    bool enabled(bool value);
-    bool useShortDistance;
+    ArmPart *armPart;        
     i2c_inst_t *i2c;
     void scanI2cTask();
-    uint16_t range = 0;
+    float longRange = NAN;
+    float shortRange = NAN;
     RangeDetector(ArmPart * armPart, i2c_inst_t * i2c, const uint8_t longDetectorShutPin, const uint8_t shortDetectorShutPin);
 };
