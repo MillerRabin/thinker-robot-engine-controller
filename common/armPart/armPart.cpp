@@ -7,7 +7,7 @@ ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) : bus(canRxPin, canTx
 int ArmPart::updateQuaternion(Quaternion quat) {    
   uint64_t data = quat.serialize();
   uint8_t id = getQuaternionMessageId();  
-  if (id == 0) return -1;
+  if (id == 0) return -1;  
   bus.send(id, data);
   return 0;
 }
@@ -72,26 +72,26 @@ void ArmPart::canCallback(void* pArmPart, can2040_msg frame) {
 
 void ArmPart::setPositionTaskStatus(bool value) {
   if (value) {
-    statuses |= ARM_POSITION_TASK_OK;
+    statuses |= ARM_POSITION_OK;
   } else {
-    statuses &= ~ARM_POSITION_TASK_OK;
+    statuses &= ~ARM_POSITION_OK;
   }
 }
 
 void ArmPart::setEngineTaskStatus(bool value) {
   if (value) {
-    statuses |= ARM_ENGINE_TASK_OK;
+    statuses |= ARM_ENGINE_OK;
   } else {
-    statuses &= ~ARM_ENGINE_TASK_OK;
+    statuses &= ~ARM_ENGINE_OK;
   }
 }
 
 void ArmPart::setBusReceivingTaskStatus(bool value) {
   if (value) {
-    statuses |= BUS_RECEIVING_TASK_OK;
+    statuses |= BUS_RECEIVING_OK;
   }
   else {
-    statuses &= ~BUS_RECEIVING_TASK_OK;
+    statuses &= ~BUS_RECEIVING_OK;
   }
 }
 

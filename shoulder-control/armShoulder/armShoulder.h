@@ -20,8 +20,10 @@ public:
   Servo shoulderZ;
   Servo shoulderY;
   ArmShoulder(
-      uint memsSdaPin,
-      uint memsSclPin,
+      uint memsSCKPin,
+      uint memsMISOPin,
+      uint memsMOSIPin,
+      uint memsCSPin,
       uint memsIntPin,
       uint memsRstPin,
       uint engineZPin,
@@ -38,6 +40,5 @@ public:
   int updateGyroscope(IMUBase *position);
   int updateAccuracy(IMUBase *position);
   int updateQuaternion(IMUBase *position);
-  static float tiltAngle(Accelerometer acc);
-  float getAccelerometerAngleY();
+  int begin();
 };

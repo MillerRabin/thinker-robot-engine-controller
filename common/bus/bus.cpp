@@ -43,9 +43,9 @@ Bus::Bus(const uint rxPin, const uint txPin, ArmPart *armPart, CanCallback callb
     busCallback(callback) {
   can2040_setup(&Bus::cbus, pio_num);
   can2040_callback_config(&Bus::cbus, Bus::can2040_cb);
-  irq_set_exclusive_handler(PIO0_IRQ_0_IRQn, Bus::PIOx_IRQHandler);
-  NVIC_SetPriority(PIO0_IRQ_0_IRQn, 1);
-  NVIC_EnableIRQ(PIO0_IRQ_0_IRQn);
+  irq_set_exclusive_handler(PIO0_IRQ_0, Bus::PIOx_IRQHandler);
+  irq_set_priority(PIO0_IRQ_0, 1);
+  irq_set_enabled(PIO0_IRQ_0, 1);
 
   Bus::sendMapSemaphore = xSemaphoreCreateMutex();
   
@@ -91,7 +91,7 @@ void Bus::send(uint32_t id, uint64_t data) {
   msg.id = id;
   msg.dlc = 8;
   memcpy(&msg.data, &data, 8);
-
+  
   if (xSemaphoreTake(Bus::sendMapSemaphore, pdMS_TO_TICKS(CAN_SEND_WAIT_TIMEOUT)) == pdTRUE) {
     canSendMap[id] = msg;
     xSemaphoreGive(Bus::sendMapSemaphore);

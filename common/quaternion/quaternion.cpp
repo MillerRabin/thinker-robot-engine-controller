@@ -123,8 +123,7 @@ Quaternion Quaternion::Normalize(const Quaternion &q) {
   };
 }
 
-Euler Quaternion::getEuler()
-{
+Euler Quaternion::getEuler() {
   double dqw = real;
   double dqx = i;
   double dqy = j;

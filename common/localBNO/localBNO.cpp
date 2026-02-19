@@ -3,8 +3,7 @@
 uint32_t LocalBNO::notificationIndex = 1;
 TaskHandle_t LocalBNO::compassTaskHandle;
 
-void LocalBNO::compassCallback(uint gpio, uint32_t events)
-{
+void LocalBNO::compassCallback(uint gpio, uint32_t events) {
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
   vTaskNotifyGiveIndexedFromISR(LocalBNO::compassTaskHandle, LocalBNO::notificationIndex, &xHigherPriorityTaskWoken);
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -20,70 +19,71 @@ void LocalBNO::compassTask(void *instance) {
   TickType_t lastCalibrationCheck = 0;
   BNO080 *imu = &(bno->imu);
   const TickType_t calibrationCheckInterval = pdMS_TO_TICKS(500);
-  TickType_t lastSendTime = 0;  
-
-  taskENTER_CRITICAL();
-  imu->getReadings();
-  taskEXIT_CRITICAL();
-
+  TickType_t lastSendTime = 0;
+      
   while (true) {
     if (imu->hasReset()) {
       printf("IMU was reset. Re-enabling sensor...\n");
-      //bno->initIMU();
+      bno->initIMU();
     }
-
-    bno->armPart->setPositionTaskStatus(true);
     
     uint32_t notificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(IMU_WAIT_TIMEOUT));
     if (notificationValue == 0) {
-      vTaskDelay(pdMS_TO_TICKS(IMU_NO_DATA_TIMEOUT));
-      //printf("No data from IMU\n");
+      bno->armPart->setPositionTaskStatus(false);
+      vTaskDelay(pdMS_TO_TICKS(IMU_NO_DATA_TIMEOUT));      
       continue;
     }
-    
-    uint16_t datatype;
-    taskENTER_CRITICAL();
-    datatype = imu->getReadings();
-    taskEXIT_CRITICAL();
+        
+    bno->armPart->setPositionTaskStatus(true);
 
+    uint16_t datatype;
+    
+    datatype = imu->getReadings();
+        
     TickType_t now = xTaskGetTickCount();
     lastSendTime = now;
 
     switch (datatype) {
       case SENSOR_REPORTID_ROTATION_VECTOR:
       case SENSOR_REPORTID_GAME_ROTATION_VECTOR: {
+        //printf("Received rotation vector data\n");        
+        
         bno->quaternion.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);        
+        
+        /*Euler euler = Quaternion(bno->quaternion).getEuler();
+        printf("Euler angles: roll=%f, pitch=%f, yaw=%f\n", euler.roll * 180.0f / M_PI, euler.pitch * 180.0f / M_PI, euler.yaw * 180.0f / M_PI);*/
+        
         if (bno->armPart->updateQuaternion(bno) != 0) {
           printf("quat sending error\n");
         }
         break;
       }
       case SENSOR_REPORTID_GYROSCOPE: {
-        bno->updateGyroscopeData(imu->rawGyroX, imu->rawGyroY, imu->rawGyroZ);
+        /*bno->updateGyroscopeData(imu->rawGyroX, imu->rawGyroY, imu->rawGyroZ);
         if (bno->armPart->updateGyroscope(bno) != 0) {
           printf("Gyro sending error\n");
-        }
+        }*/
         break;
       }
       case SENSOR_REPORTID_LINEAR_ACCELERATION: {
-        bno->setAccelerometer(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
+        /*bno->setAccelerometer(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
         if (bno->armPart->updateAccelerometer(bno) != 0) {
           printf("Accelerometer sending error\n");
-        }
+        }*/
         break;
       }
       case SENSOR_REPORTID_ACCELEROMETER: {
-        bno->setAccelerometer(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);        
+        /*bno->setAccelerometer(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);        
         if (bno->armPart->updateAccelerometer(bno) != 0) {
           printf("Accelerometer sending error\n");
-        }
+        }*/
         break;
       }
       default:
         break;
     }
 
-    bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->getQuatAccuracy(), imu->gyroAccuracy, imu->accelLinAccuracy);
+    /*bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->getQuatAccuracy(), imu->gyroAccuracy, imu->accelLinAccuracy);
     if (bno->armPart->updateAccuracy(bno) != 0) {
       printf("Quaternion accuracy sending error\n");
     }
@@ -105,7 +105,7 @@ void LocalBNO::compassTask(void *instance) {
         printf("BNO is calibrated. Saving...\n");
         needCalibration = false;
       }
-    }
+    }*/
   }
 }
 
@@ -132,6 +132,7 @@ void LocalBNO::initIMU() {
   imu.enableRotationVector(50);  
   imu.enableAccelerometer(50);
   imu.enableGyro(50);
+  imu.clearTare();
 }
 
 uint LocalBNO::writeSystemOrientationQuaternion(float w, float x, float y, float z) {
@@ -154,7 +155,49 @@ LocalBNO::LocalBNO(ArmPart *armPart, const uint sdaPin, const uint sclPin, const
   sclPin(sclPin),
   intPin(intPin),
   rstPin(rstPin),
-  armPart(armPart) {
+  csPin(0xFF),
+  sckPin(0xFF),
+  misoPin(0xFF),
+  mosiPin(0xFF),
+  armPart(armPart),
+  useSPI(false) {}
+
+LocalBNO::LocalBNO(ArmPart *armPart, const uint sckPin, const uint misoPin, const uint mosiPin, const uint csPin, const uint rstPin, const uint intPin) : 
+  sckPin(sckPin),
+  misoPin(misoPin),
+  mosiPin(mosiPin),
+  rstPin(rstPin),
+  intPin(intPin),
+  csPin(csPin),
+  sdaPin(0xFF),
+  sclPin(0xFF),
+  armPart(armPart),
+  useSPI(true) {}
+
+
+bool LocalBNO::begin() {
+  if (useSPI) {
+    auto spires = beginSPI();
+    if (!spires) {
+      printf("Failed to initialize LocalBNO IMU in SPI mode\n");
+      return false;
+    }
+  } else {
+    auto i2cres = beginI2C();
+    if (!i2cres) {
+      printf("Failed to initialize LocalBNO IMU in I2C mode\n");
+      return false;
+    }
+  }  
+  printf("LocalBNO IMU init start\n");
+  initIMU();
+  printf("LocalBNO IMU initialized successfully\n");
+  xTaskCreate(LocalBNO::compassTask, "LocalBNO::compassTask", 4096, this, 4, &LocalBNO::compassTaskHandle);
+  
+  return true;
+} 
+
+bool LocalBNO::beginI2C() {
   i2c_init(i2c_default, 400 * 1000);
   gpio_set_function(sdaPin, GPIO_FUNC_I2C);
   gpio_set_function(sclPin, GPIO_FUNC_I2C);
@@ -163,16 +206,37 @@ LocalBNO::LocalBNO(ArmPart *armPart, const uint sdaPin, const uint sclPin, const
   gpio_init(rstPin);
   gpio_set_dir(rstPin, GPIO_OUT);
   gpio_put(rstPin, 1);
-
   gpio_init(intPin);
   gpio_set_dir(intPin, GPIO_IN);
   gpio_pull_up(intPin);
-  gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &LocalBNO::compassCallback);
-
-  xTaskCreate(LocalBNO::compassTask, "LocalBNO::compassTask", 1024, this, tskIDLE_PRIORITY, &LocalBNO::compassTaskHandle);
+  gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &LocalBNO::compassCallback);  
   bi_decl(bi_2pins_with_func(sdaPin, sclPin, GPIO_FUNC_I2C));
+  bi_decl(bi_2pins_with_func(intPin, rstPin, GPIO_FUNC_SIO));
+  return imu.begin(BNO080_DEFAULT_ADDRESS, i2c_default, intPin); 
+}
+
+bool LocalBNO::beginSPI() {
+  spi_init(spi0, 3 * 1000 * 1000);
+  spi_set_format(spi0, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
+
+  gpio_set_function(sckPin, GPIO_FUNC_SPI);
+  gpio_set_function(mosiPin, GPIO_FUNC_SPI);
+  gpio_set_function(misoPin, GPIO_FUNC_SPI);
   
-  imu.begin(BNO080_DEFAULT_ADDRESS, i2c_default, intPin);
-  
-  initIMU();
+  gpio_init(csPin);
+  gpio_set_dir(csPin, GPIO_OUT);
+  gpio_put(csPin, 1);
+
+  gpio_init(rstPin);
+  gpio_set_dir(rstPin, GPIO_OUT);
+    
+  gpio_init(intPin);
+  gpio_set_dir(intPin, GPIO_IN);
+  gpio_pull_up(intPin);
+
+  bi_decl(bi_3pins_with_func(misoPin, mosiPin, sckPin, GPIO_FUNC_SPI));
+  bi_decl(bi_1pin_with_func(csPin, GPIO_FUNC_SIO));
+  bi_decl(bi_2pins_with_func(intPin, rstPin, GPIO_FUNC_SIO));
+  gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &LocalBNO::compassCallback);
+  return imu.beginSPI(spi0, csPin, intPin, rstPin);  
 }

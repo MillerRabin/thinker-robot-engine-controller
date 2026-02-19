@@ -125,7 +125,7 @@ void Servo::tick() {
   if (physicalAngle < minDegree)
     physicalAngle = minDegree;
 
-  //printf("targetAngle: %f, physicalAngle: %f, imuAngle: %f, dir: %f\n", targetAngle, physicalAngle, imuAngle, dir);
+  //printf("targetAngle: %f, physicalAngle: %f, imuAngle: %f, dir: %f, angleStep: %f\n", targetAngle, physicalAngle, imuAngle, dir, angleStep);
   setDegreeDirect(physicalAngle);
 }
 
@@ -155,7 +155,7 @@ void Servo::setIMUAngle(float value) {
 
 void Servo::setTimeMS(uint16_t timeMS) {  
   this->timeMS = (timeMS < 1 || timeMS > 10000) ? this->timeMS : timeMS;
-  float iter = float(timeMS) / ENGINE_TASK_LOOP_DIVIDER;
+  float iter = float(timeMS) / ENGINE_TASK_LOOP_TIMEOUT;
   float diff = fabs(targetAngle - physicalAngle);  
   this->angleStep = fabs(diff / iter);  
 }

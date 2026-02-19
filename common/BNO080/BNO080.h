@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <hardware/i2c.h>
+#include <hardware/spi.h>
 #include <iostream>
 #include <cstring>
 #include <math.h>
@@ -110,6 +111,8 @@ const uint8_t CHANNEL_GYRO = 5;
 class BNO080 {
 public:
 	bool begin(uint8_t deviceAddress = BNO080_DEFAULT_ADDRESS, i2c_inst_t *i2c = i2c_default, uint8_t intPin = 255);
+	bool beginSPI(spi_inst_t *spiPort, uint csPin, uint intPin, uint rstPin);
+	bool waitForSPI(uint timeout_ms);
 	void softReset();	  //Try to reset the IMU via software
 	bool hasReset(); //Returns true if the sensor has reported a reset. Reading this will unflag the reset.
 	uint8_t resetReason(); //Query the IMU for the reason it last reset
@@ -121,7 +124,7 @@ public:
 	bool receivePacket(void);
 	bool getData(uint16_t uint8_tsRemaining); //Given a number of uint8_ts, send the requests in I2C_BUFFER_LENGTH chunks
 	bool sendPacket(uint8_t channelNumber, uint8_t dataLength);
-	void printPacket(void); //Prints the current shtp header and data packets
+	void printPacket(); //Prints the current shtp header and data packets
 	void printHeader(void); //Prints the current shtp header (only)
 	void enableDebugging();
 	void enableRotationVector(uint16_t timeBetweenReports);
@@ -214,7 +217,7 @@ public:
 	void tare(uint8_t axisMask, uint8_t rotationVectorBasis);
 
 	void saveTare();
-	void clearTare();
+	void clearTare();	
 	
 	uint8_t getTapDetector();
 	uint32_t getTimeStamp();
@@ -282,8 +285,9 @@ public:
 
 private:
 	//Variables
-	i2c_inst_t *_i2cPort;		//The generic connection to user's chosen I2C hardware
-	uint8_t _deviceAddress; //Keeps track of I2C address. setI2CAddress changes this.
+	i2c_inst_t* _i2cPort;
+	spi_inst_t* _spiPort;
+	uint8_t _deviceAddress; // Keeps track of I2C address. setI2CAddress changes this.
 
 	bool _printDebug = false; //Flag to print debugging variables
 		
@@ -309,4 +313,8 @@ private:
 	uint16_t memsRawAccelX, memsRawAccelY, memsRawAccelZ; //Raw readings from MEMS sensor
 	uint16_t memsRawGyroX, memsRawGyroY, memsRawGyroZ;	//Raw readings from MEMS sensor
 	uint16_t memsRawMagX, memsRawMagY, memsRawMagZ;		  //Raw readings from MEMS sensor
+	bool receivePacketI2C();
+	bool receivePacketSPI();
+	bool sendPacketI2C(uint8_t channelNumber, uint8_t dataLength);
+	bool sendPacketSPI(uint8_t channelNumber, uint8_t dataLength);
 };

@@ -33,6 +33,7 @@ add_executable(${APP_SHOULDER_NAME}
 target_link_libraries(${APP_SHOULDER_NAME} LINK_PUBLIC
   pico_stdlib
   hardware_i2c
+  hardware_spi
   hardware_pwm
   hardware_flash
   hardware_sync

@@ -10,16 +10,7 @@
 #include "../imuBase/imuBase.h"
 #include "../flashSettings/flashSettings.h"
 
-#define ARM_POSITION_TASK_OK 1
-#define ARM_ENGINE_TASK_OK 2
-#define BUS_RECEIVING_TASK_OK 4
-#define ARM_X_CALIBRATING 8
-#define ARM_Y_CALIBRATING 16
-#define ARM_Z_CALIBRATING 32
-#define ARM_UPGRADING 64
-
-struct __attribute__((packed, aligned(4))) EEPROMPositionData : public FlashSettingsData
-{
+struct __attribute__((packed, aligned(4))) EEPROMPositionData : public FlashSettingsData {
   float homeI, homeJ, homeK, homeReal;
   float platformHomeI, platformHomeJ, platformHomeK, platformHomeReal;
 

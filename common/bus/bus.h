@@ -4,8 +4,6 @@ extern "C" {
   #include "../common/canBus/src/can2040.h" 
 }
 
-#include <RP2040.h>
-
 #include <FreeRTOS.h>
 #include <task.h>
 #include <queue.h>

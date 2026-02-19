@@ -4,8 +4,8 @@ information on the can2040 code organization and objectives.
 
 # PIO state machines
 
-The can2040 code uses the rp2040 PIO (Programmable Input Output)
-hardware feature.  See the [rp2040
+The can2040 code uses the rp2040/rp2350 PIO (Programmable Input
+Output) hardware feature.  See the [rp2040
 datasheet](https://www.raspberrypi.com/documentation/microcontrollers/rp2040.html)
 for information on the hardware.
 
@@ -90,7 +90,8 @@ A secondary task of the PIO "tx" state machine is to inject an ack bit
 to acknowledge messages received from other CAN bus nodes.  To perform
 this task, the ARM core fills the tx fifo with a single dominant bit
 and arranges for the "tx" state machine to start after a "matched"
-irq.
+irq.  After the ack bit is transmitted the PIO "tx" state machine will
+raise an "ackdone" signal (PIO irq 3).
 
 # ARM core state tracking
 

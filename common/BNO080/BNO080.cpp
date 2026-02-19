@@ -37,6 +37,73 @@ bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin) {
   return false;
 }
 
+bool BNO080::beginSPI(spi_inst_t *spiPort, uint csPin, uint intPin, uint rstPin) {
+  _i2cPort = NULL;
+  _spiPort = spiPort;  
+  _int = intPin;
+  _cs = csPin;
+  _rst = rstPin;
+
+  _printDebug = true;
+
+  gpio_put(rstPin, 0);
+  vTaskDelay(pdMS_TO_TICKS(10));
+  gpio_put(rstPin, 1);
+  
+  if (!waitForSPI(200)) {
+    return false;
+  }
+      
+  receivePacket();
+  
+  if (!waitForSPI(200)) {
+    return false;
+  }
+    
+  receivePacket();
+
+  if(!waitForSPI(200)) {
+    printf("No response\n");
+    return false;
+  }
+      
+  shtpData[0] = SHTP_REPORT_PRODUCT_ID_REQUEST;
+  shtpData[1] = 0;
+  
+  sendPacket(CHANNEL_CONTROL, 2);
+  
+  for (int i = 0; i < 10; i++) {
+    if (!waitForSPI(200)) {      
+      break;
+    }
+      
+    if (!receivePacket()) {      
+      break;
+    }
+      
+    if (shtpData[0] == SHTP_REPORT_PRODUCT_ID_RESPONSE) {
+      printf("BNO085 detected OK\n");
+      printf("SW Version %d.%d\n", shtpData[2], shtpData[3]);
+      return true;
+    }
+  }
+  
+  printf("No product id found\n");      
+  return false;
+}
+
+bool BNO080::waitForSPI(uint timeout_ms) {  
+  absolute_time_t start = get_absolute_time();
+  gpio_put(_cs, 1);
+  while (gpio_get(_int) == 1) {
+    if (absolute_time_diff_us(start, get_absolute_time()) > timeout_ms * 1000) {
+      return false;
+    }
+    //vTaskDelay(pdMS_TO_TICKS(1));
+  }
+  return true;
+}
+
 // Calling this function with nothing sets the debug port to Serial
 // You can also call it with other streams like Serial1, SerialUSB, etc.
 void BNO080::enableDebugging() {
@@ -54,15 +121,14 @@ uint16_t BNO080::getReadings(void)
 {
   // If we have an interrupt pin connection available, check if data is available.
   // If int pin is not set, then we'll rely on receivePacket() to timeout
-  // See issue 13: https://github.com/sparkfun/SparkFun_BNO080_Arduino_Library/issues/13
-  if (_int != 255)
-  {    
-    if (gpio_get(_int) == 1)
+  // See issue 13: https://github.com/sparkfun/SparkFun_BNO080_Arduino_Library/issues/13  
+  if (_int != 255) {    
+    if (gpio_get(_int) == 1) {      
       return 0;
+    }
   }
 
-  if (receivePacket() == true)
-  {
+  if (receivePacket() == true) {        
     // Check to see if this packet is a sensor reporting its data to us
     if (shtpHeader[2] == CHANNEL_REPORTS && shtpData[0] == SHTP_REPORT_BASE_TIMESTAMP)
     {
@@ -76,7 +142,7 @@ uint16_t BNO080::getReadings(void)
     {
       return parseInputReport(); // This will update the rawAccelX, etc variables depending on which feature report is found
     }
-  }
+  }  
   return 0;
 }
 
@@ -1473,11 +1539,44 @@ void BNO080::saveCalibration()
 
 // Check to see if there is any new data available
 // Read the contents of the incoming packet into the shtpData array
-bool BNO080::receivePacket(void)
-{    
+
+bool BNO080::receivePacketSPI() {
+  if (gpio_get(_int) == 1) {    
+    printf("No packet available to read.\n");
+    return false;
+  }
+
+  uint8_t header[4];
+
+  gpio_put(_cs, 0);
+  spi_read_blocking(_spiPort, 0x00, header, 4);
+
+    uint16_t packetLength = ((uint16_t)header[1] << 8) | header[0];
+    packetLength &= 0x7FFF;
+
+    if (packetLength == 0) {
+      gpio_put(_cs, 1);
+      return false;
+    }
+
+    uint16_t dataLength = packetLength - 4;
+
+    if (dataLength > MAX_PACKET_SIZE)
+      dataLength = MAX_PACKET_SIZE;
+
+    spi_read_blocking(_spiPort, 0xFF, shtpData, dataLength);
+
+    gpio_put(_cs, 1);
+    memcpy(shtpHeader, header, 4);    
+    //printPacket();
+    return true;
+}
+
+bool BNO080::receivePacketI2C() {
   uint8_t pdata[4];
   int i2c_ret = i2c_read_blocking(_i2cPort, _deviceAddress, pdata, 4, false);
-  if (i2c_ret == PICO_ERROR_GENERIC) {          
+  if (i2c_ret == PICO_ERROR_GENERIC)
+  {
     return false;
   }
 
@@ -1495,7 +1594,7 @@ bool BNO080::receivePacket(void)
 
   // Calculate the number of data bytes in this packet
   uint16_t dataLength = (((uint16_t)packetMSB) << 8) | ((uint16_t)packetLSB);
-  dataLength &= ~(1 << 15); // Clear the MSbit.  
+  dataLength &= ~(1 << 15); // Clear the MSbit.
   // This bit indicates if this package is a continuation of the last. Ignore it for now.
   // TODO catch this as an error and exit
 
@@ -1505,22 +1604,31 @@ bool BNO080::receivePacket(void)
   // 	_debugPort->println(dataLength);
   // }
 
-  if (dataLength == 0) {    
+  if (dataLength == 0)
+  {
     return false;
   }
   dataLength -= 4; // Remove the header bytes from the data count
-    
+
   getData(dataLength);
-  
+
   // Quickly check for reset complete packet. No need for a seperate parser.
   // This function is also called after soft reset, so we need to catch this
   // packet here otherwise we need to check for the reset packet in multiple
   // places.
-  if (shtpHeader[2] == CHANNEL_EXECUTABLE && shtpData[0] == EXECUTABLE_RESET_COMPLETE) {  
+  if (shtpHeader[2] == CHANNEL_EXECUTABLE && shtpData[0] == EXECUTABLE_RESET_COMPLETE)
+  {
     _hasReset = true;
   }
 
   return true;
+}
+
+bool BNO080::receivePacket() {
+  if (_i2cPort == NULL)  {       
+    return receivePacketSPI();
+  }
+  return receivePacketI2C();  
 }
 
 bool BNO080::getData(uint16_t bytesRemaining)
@@ -1532,15 +1640,12 @@ bool BNO080::getData(uint16_t bytesRemaining)
     return 0;
   }
   
-  memcpy(shtpData, &pdata[4], bytesToRead - 4);
+  memcpy(shtpData, &pdata[4], bytesToRead - 4);  
   return true;
 }
 
-bool BNO080::sendPacket(uint8_t channelNumber, uint8_t dataLength)
-{  
-  uint8_t packetLength = dataLength + 4; // Add four bytes for the header
-
-  
+bool BNO080::sendPacketI2C(uint8_t channelNumber, uint8_t dataLength){  
+  uint8_t packetLength = dataLength + 4; // Add four bytes for the header  
   size_t count = dataLength + 4;
   uint8_t pdata[count];
   // Send the 4 byte packet header
@@ -1557,61 +1662,33 @@ bool BNO080::sendPacket(uint8_t channelNumber, uint8_t dataLength)
   return true;
 }
 
-// Pretty prints the contents of the current shtp header and data packets
-void BNO080::printPacket(void)
-{
-  if (_printDebug == true)
-  {
-    uint16_t packetLength = (uint16_t)shtpHeader[1] << 8 | shtpHeader[0];
-
-    // Print the four byte header
-    printf("Header: ");
-    for (uint8_t x = 0; x < 4; x++)
-    {
-      printf(" ");
-      if (shtpHeader[x] < 0x10)
-        printf("0");
-      printf("%x", shtpHeader[x]);
-    }
-
-    uint8_t printLength = packetLength - 4;
-    if (printLength > 40)
-      printLength = 40; // Artificial limit. We don't want the phone book.
-
-    printf(" Body:");
-    for (uint8_t x = 0; x < printLength; x++)
-    {
-      printf(" ");
-      if (shtpData[x] < 0x10)
-        printf("0");
-      printf("%x", shtpData[x]);
-    }
-
-    if (packetLength & 1 << 15)
-    {
-      printf(" [Continued packet] ");
-      packetLength &= ~(1 << 15);
-    }
-
-    printf(" Length: %d\n", packetLength);    
-    printf(" Channel: ");
-    if (shtpHeader[2] == 0)
-      printf("Command");
-    else if (shtpHeader[2] == 1)
-      printf("Executable");
-    else if (shtpHeader[2] == 2)
-      printf("Control");
-    else if (shtpHeader[2] == 3)
-      printf("Sensor-report");
-    else if (shtpHeader[2] == 4)
-      printf("Wake-report");
-    else if (shtpHeader[2] == 5)
-      printf("Gyro-vector");
-    else
-      printf("%x", shtpHeader[2]);
-
-    printf("\n");
+bool BNO080::sendPacketSPI(uint8_t channelNumber, uint8_t dataLength) {
+  if (!waitForSPI(200)) {
+    printf("SPI not ready to send packet.\n");
+    return false;
   }
+
+  uint16_t packetLength = dataLength + 4;
+  uint8_t buffer[MAX_PACKET_SIZE + 4];
+
+  buffer[0] = packetLength & 0xFF;
+  buffer[1] = packetLength >> 8;
+  buffer[2] = channelNumber;
+  buffer[3] = sequenceNumber[channelNumber]++;
+
+  memcpy(&buffer[4], shtpData, dataLength);
+
+  gpio_put(_cs, 0);
+  auto wr = spi_write_blocking(_spiPort, buffer, packetLength);  
+  gpio_put(_cs, 1);
+
+  return true;
+}
+
+bool BNO080::sendPacket(uint8_t channelNumber, uint8_t dataLength) {
+  if (_i2cPort == NULL) 
+    return sendPacketSPI(channelNumber, dataLength);
+  return sendPacketI2C(channelNumber, dataLength);
 }
 
 // Pretty prints the contents of the current shtp header (only)
@@ -1628,6 +1705,56 @@ void BNO080::printHeader(void)
         printf("0");
       printf("%x", shtpHeader[x]);
     }
+    printf("\n");
+  }
+}
+
+void BNO080::printPacket() {
+  if (_printDebug == true) {
+    uint16_t packetLength = ((uint16_t)shtpHeader[1] << 8) | shtpHeader[0];
+
+    // Печать заголовка (4 байта)
+    printf("Header:");
+    for (uint8_t x = 0; x < 4; x++) {
+      printf(" %02X", shtpHeader[x]);
+    }
+
+    uint8_t printLength = packetLength - 4;
+    if (printLength > 40)
+      printLength = 40; // Ограничение вывода
+
+    // Печать тела пакета
+    printf(" Body:");
+    for (uint8_t x = 0; x < printLength; x++) {
+      printf(" %02X", shtpData[x]);
+    }
+
+    // Проверка на continuation-бит
+    if (packetLength & (1 << 15)) {
+      printf(" [Continued packet]");
+      packetLength &= ~(1 << 15);
+    }
+
+    // Длина
+    printf(" Length:%u", packetLength);
+
+    // Канал
+    printf(" Channel:");
+    if (shtpHeader[2] == 0)
+      printf("Command");
+    else if (shtpHeader[2] == 1)
+      printf("Executable");
+    else if (shtpHeader[2] == 2)
+      printf("Control");
+    else if (shtpHeader[2] == 3)
+      printf("Sensor-report");
+    else if (shtpHeader[2] == 4)
+      printf("Wake-report");
+    else if (shtpHeader[2] == 5)
+      printf("Gyro-vector");
+    else
+      printf("%u", shtpHeader[2]);
+
     printf("\n");
   }
 }
