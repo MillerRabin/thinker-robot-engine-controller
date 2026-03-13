@@ -20,7 +20,8 @@ void LocalBNO::compassTask(void *instance) {
   BNO080 *imu = &(bno->imu);
   const TickType_t calibrationCheckInterval = pdMS_TO_TICKS(500);
   TickType_t lastSendTime = 0;
-      
+  uint noDataCount = 0;
+
   while (true) {
     if (imu->hasReset()) {
       printf("IMU was reset. Re-enabling sensor...\n");
@@ -28,12 +29,23 @@ void LocalBNO::compassTask(void *instance) {
     }
     
     uint32_t notificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(IMU_WAIT_TIMEOUT));
-    if (notificationValue == 0) {
+    if (notificationValue == 0) {      
       bno->armPart->setPositionTaskStatus(false);
-      vTaskDelay(pdMS_TO_TICKS(IMU_NO_DATA_TIMEOUT));      
+      noDataCount++;
+      if (noDataCount >= 5) {
+        printf("Restarting imu\n");
+        auto res = bno->begin();
+        if (res) {
+          printf("IMU initialized\n");
+        } else {
+          printf("IMU initialization failed\n");
+        }
+      }
+      vTaskDelay(pdMS_TO_TICKS(IMU_NO_DATA_TIMEOUT));
       continue;
     }
-        
+    
+    noDataCount = 0;        
     bno->armPart->setPositionTaskStatus(true);
 
     uint16_t datatype;
@@ -45,45 +57,39 @@ void LocalBNO::compassTask(void *instance) {
 
     switch (datatype) {
       case SENSOR_REPORTID_ROTATION_VECTOR:
-      case SENSOR_REPORTID_GAME_ROTATION_VECTOR: {
-        //printf("Received rotation vector data\n");        
-        
-        bno->quaternion.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);        
-        
-        /*Euler euler = Quaternion(bno->quaternion).getEuler();
-        printf("Euler angles: roll=%f, pitch=%f, yaw=%f\n", euler.roll * 180.0f / M_PI, euler.pitch * 180.0f / M_PI, euler.yaw * 180.0f / M_PI);*/
-        
+      case SENSOR_REPORTID_GAME_ROTATION_VECTOR: {        
+        bno->quaternion.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);                
         if (bno->armPart->updateQuaternion(bno) != 0) {
           printf("quat sending error\n");
         }
         break;
       }
       case SENSOR_REPORTID_GYROSCOPE: {
-        /*bno->updateGyroscopeData(imu->rawGyroX, imu->rawGyroY, imu->rawGyroZ);
+        bno->updateGyroscopeData(imu->rawGyroX, imu->rawGyroY, imu->rawGyroZ);
         if (bno->armPart->updateGyroscope(bno) != 0) {
           printf("Gyro sending error\n");
-        }*/
+        }
         break;
       }
       case SENSOR_REPORTID_LINEAR_ACCELERATION: {
-        /*bno->setAccelerometer(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
+        bno->setAccelerometer(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
         if (bno->armPart->updateAccelerometer(bno) != 0) {
           printf("Accelerometer sending error\n");
-        }*/
+        }
         break;
       }
       case SENSOR_REPORTID_ACCELEROMETER: {
-        /*bno->setAccelerometer(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);        
+        bno->setAccelerometer(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);        
         if (bno->armPart->updateAccelerometer(bno) != 0) {
           printf("Accelerometer sending error\n");
-        }*/
+        }
         break;
       }
       default:
         break;
     }
 
-    /*bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->getQuatAccuracy(), imu->gyroAccuracy, imu->accelLinAccuracy);
+    bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->getQuatAccuracy(), imu->gyroAccuracy, imu->accelLinAccuracy);
     if (bno->armPart->updateAccuracy(bno) != 0) {
       printf("Quaternion accuracy sending error\n");
     }
@@ -105,7 +111,7 @@ void LocalBNO::compassTask(void *instance) {
         printf("BNO is calibrated. Saving...\n");
         needCalibration = false;
       }
-    }*/
+    }
   }
 }
 
@@ -131,8 +137,7 @@ bool LocalBNO::updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quatern
 void LocalBNO::initIMU() {
   imu.enableRotationVector(50);  
   imu.enableAccelerometer(50);
-  imu.enableGyro(50);
-  imu.clearTare();
+  imu.enableGyro(50);  
 }
 
 uint LocalBNO::writeSystemOrientationQuaternion(float w, float x, float y, float z) {
@@ -192,8 +197,12 @@ bool LocalBNO::begin() {
   printf("LocalBNO IMU init start\n");
   initIMU();
   printf("LocalBNO IMU initialized successfully\n");
-  xTaskCreate(LocalBNO::compassTask, "LocalBNO::compassTask", 4096, this, 4, &LocalBNO::compassTaskHandle);
-  
+  if (LocalBNO::compassTaskHandle == NULL) {
+    if (xTaskCreate(LocalBNO::compassTask, "LocalBNO::compassTask", 4096, this, 6, &LocalBNO::compassTaskHandle) != pdPASS) {
+      printf("LocalBNO::compassTask creation failed\n");
+      return false;
+    }
+  }
   return true;
 } 
 
@@ -238,5 +247,5 @@ bool LocalBNO::beginSPI() {
   bi_decl(bi_1pin_with_func(csPin, GPIO_FUNC_SIO));
   bi_decl(bi_2pins_with_func(intPin, rstPin, GPIO_FUNC_SIO));
   gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &LocalBNO::compassCallback);
-  return imu.beginSPI(spi0, csPin, intPin, rstPin);  
+  return imu.beginSPI(spi0, csPin, intPin, rstPin);
 }

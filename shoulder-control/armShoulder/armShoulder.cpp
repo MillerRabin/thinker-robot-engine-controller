@@ -14,17 +14,16 @@ void ArmShoulder::engineTask(void *instance) {
   }
 
   while (true) {
-    /*auto sQuat = Quaternion(shoulder->imu.quaternion);
+    auto sQuat = Quaternion(shoulder->imu.quaternion);
     auto sEuler = sQuat.getEuler();
-    float yAngle = 90 - (sEuler.roll * 180.0f / M_PI);
-    printf("Shoulder IMU Y Angle: %f\n", yAngle);
-    shoulder->shoulderY.setIMUAngle(yAngle);
+    float yAngle = 90 + (sEuler.pitch * 180.0f / M_PI);    
+    shoulder->shoulderY.setIMUAngle(yAngle);    
     shoulder->shoulderZ.setIMUAngle(shoulder->shoulderZ.getPhysicalAngle());
     shoulder->shoulderY.tick();
     shoulder->shoulderZ.tick();
     
     shoulder->setEngineTaskStatus(true);    
-    shoulder->updateStatuses();*/
+    //shoulder->updateStatuses();
     //printf("Shoulder engine task tick\n");
     
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
@@ -47,10 +46,9 @@ ArmShoulder::ArmShoulder(
                      imu(this, memsSCKPin, memsMISOPin, memsMOSIPin, memsCSPin, memsRstPin, memsIntPin)
 {}
 
-int ArmShoulder::updateQuaternion(IMUBase *position) {
+int ArmShoulder::updateQuaternion(IMUBase *position) {  
   auto resQuat = ArmShoulder::rotationQuaternion * position->quaternion;
-  return ArmPart::updateQuaternion(resQuat);
-  //return ArmPart::updateQuaternion(position->quaternion);
+  return ArmPart::updateQuaternion(resQuat); 
 }
 
 int ArmShoulder::updateGyroscope(IMUBase *position)

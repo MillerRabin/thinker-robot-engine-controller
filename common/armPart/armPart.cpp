@@ -2,6 +2,10 @@
 
 ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) : bus(canRxPin, canTxPin, this, canCallback) {
   FlashSettings::init();
+  auto status = bus.begin();
+  if (status!= CAN_SUCCESS) { 
+    printf("Can error %d\n", status); 
+  }
 }
 
 int ArmPart::updateQuaternion(Quaternion quat) {    
