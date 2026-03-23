@@ -14,7 +14,6 @@ add_executable(${APP_SHOULDER_NAME}
   ${APP_COMMON_DIRECTORY}/remoteBNO/remoteBNO.cpp    
   ${APP_COMMON_DIRECTORY}/servo/servo.cpp
   ${APP_COMMON_DIRECTORY}/flashSettings/flashSettings.cpp
-  ${APP_COMMON_DIRECTORY}/imuBase/imuBase.cpp
   ${APP_COMMON_DIRECTORY}/localBNO/localBNO.cpp
   ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
   ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp
@@ -23,10 +22,10 @@ add_executable(${APP_SHOULDER_NAME}
   ${APP_COMMON_DIRECTORY}/gyroscope/gyroscope.cpp
   ${APP_COMMON_DIRECTORY}/euler/euler.cpp
   ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp
-  ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp
   ${APP_COMMON_DIRECTORY}/armPlatform/armPlatform.cpp
   ${APP_COMMON_DIRECTORY}/bootsel/bootsel.cpp
   ${APP_COMMON_DIRECTORY}/measureRange/measureRange.cpp
+  ${APP_COMMON_DIRECTORY}/accuracy/accuracy.cpp
 )
 
 # Link to built libraries

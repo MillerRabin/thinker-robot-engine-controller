@@ -27,13 +27,12 @@ class LocalBNO : public IMUBase {
     static uint32_t notificationIndex;
     static TaskHandle_t compassTaskHandle;
     bool beginI2C();
-    bool beginSPI();
+    bool beginSPI();    
   protected:
     void initIMU();
     ArmPart *armPart;
     BNO080 imu;
-    int16_t accelerometer_Q1;    
-    bool updateGyroscopeData(uint16_t rawGyroX, uint16_t rawGyroY, uint16_t rawGyroZ);
+    int16_t accelerometer_Q1;        
     bool updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quaternionAccuracy, uint8_t gyroscopeAccuracy, uint8_t accelerometerAccuracy);    
   public:
     LocalBNO(ArmPart* armPart, const uint sdaPin, const uint sclPin, const uint intPin, const uint rstPin);
@@ -56,5 +55,5 @@ class LocalBNO : public IMUBase {
         return;
       }
       printf("Failed to read System Orientation Quaternion %d\n", res);
-    }
+    }    
 };

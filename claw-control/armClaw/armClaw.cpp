@@ -12,19 +12,10 @@ void ArmClaw::engineTask(void *instance) {
     claw->clawY.setIMUAngle(claw->clawY.getPhysicalAngle());
     claw->clawGripper.setIMUAngle(claw->clawGripper.getPhysicalAngle());
 
-    claw->setXCalibrating(claw->clawX.isCalibrating());
-    claw->setYCalibrating(claw->clawY.isCalibrating());
-
     claw->clawX.tick();
     claw->clawY.tick();
     claw->clawGripper.tick();
-
-    if (claw->clawX.isCalibrating() && claw->clawY.isCalibrating()) {
-      claw->setHomeQuaternion(claw->imu.quaternion, claw->platform.imu.quaternion);
-      claw->saveHomeQuaternionsToEEPROM();
-      printf("Claw home quaternion set and saved to EEPROM\n");
-    }
-
+    
     claw->setEngineTaskStatus(true);
     claw->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
@@ -58,13 +49,6 @@ ArmClaw::ArmClaw(
   gpio_pull_up(detectorsSclPin);
   bi_decl(bi_2pins_with_func(DETECTORS_SDA_PIN, DETECTORS_SCL_PIN, GPIO_FUNC_I2C));
  
-  if (loadHomeQuaternionsFromEEPROM()) {
-    printf("Claw home quaternions loaded from EEPROM\n");
-  } else {
-    printf("No valid quaternion data found in EEPROM, using defaults\n");
-    //offsetQuaternion = getRotationQuaternion();
-  }
-
   if (!xTaskCreate(ArmClaw::engineTask, "ArmClaw::engineTask", 2048, this, 5, NULL)) {
     printf("Failed to create ArmClaw::engineTask\n");
     setEngineTaskStatus(false);

@@ -140,7 +140,7 @@ void Bus::busSendTask(void *pInstance) {
   while (true) {
     if (xSemaphoreTake(instance->sendMutex, pdMS_TO_TICKS(CAN_SEND_WAIT_TIMEOUT)) == pdTRUE) {
       memcpy(localFrames, instance->sendBuffer, sizeof(localFrames));
-      memset(instance->sendBuffer, 0, sizeof(instance->sendBuffer));                  
+      memset(instance->sendBuffer, 0, sizeof(instance->sendBuffer));
       xSemaphoreGive(instance->sendMutex);
       if (!instance->isBusAlive()) {
         vTaskDelay(pdMS_TO_TICKS(1000));

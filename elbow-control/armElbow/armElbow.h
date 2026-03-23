@@ -7,6 +7,7 @@
 #include "../../common/config/config.h"
 #include "../../common/armPart/armPart.h"
 #include "../../common/bootsel/bootsel.h"
+#include "../../common/remoteShoulder/remoteShoulder.h"
 
 class ArmElbowQueueParams
 {
@@ -14,15 +15,13 @@ public:
   float elbowY = NAN;
 };
 
-class ArmElbow : public ArmPart
-{
+class ArmElbow : public ArmPart {
 private:
-  LocalBNO imu;
-  static void busReceiverTask(void *instance);
+  RemoteShoulder shoulder;
+  LocalBNO imu;  
   static void engineTask(void *instance);
   void busReceiveCallback(can2040_msg frame);
   static volatile QueueHandle_t queue;
-
 public:
   Servo elbowY;
   ArmElbow(
@@ -42,4 +41,5 @@ public:
   int updateAccelerometer(IMUBase *position);
   int updateGyroscope(IMUBase *position);
   int updateAccuracy(IMUBase *position);
+  int begin();
 };

@@ -1,14 +1,13 @@
 #pragma once
 
-#include "../detectors/detectors.h"
-#include "../quaternion/quaternion.h"
 #include "../accelerometer/accelerometer.h"
+#include "../gyroscope/gyroscope.h"
+#include "../quaternion/quaternion.h"
+#include "../accuracy/accuracy.h"
 
 class RemoteBNO {
-  private:
-    int16_t rotationVector_Q1 = 14;
   public:
-    IMUQuaternion quaternion;
+    Quaternion quaternion{0, 0, 0, 0};
     Accuracy accuracy;
     Gyroscope gyroscope;
     Accelerometer accelerometer;

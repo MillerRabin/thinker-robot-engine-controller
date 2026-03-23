@@ -22,8 +22,7 @@ add_executable(${APP_CLAW_NAME}
   ${APP_COMMON_DIRECTORY}/accelerometer/accelerometer.cpp
   ${APP_COMMON_DIRECTORY}/gyroscope/gyroscope.cpp
   ${APP_COMMON_DIRECTORY}/euler/euler.cpp
-  ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp
-  ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp
+  ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp  
   ${APP_COMMON_DIRECTORY}/armPlatform/armPlatform.cpp
   ${APP_COMMON_DIRECTORY}/VL53L0X/Pico_VL53L0X.cpp
   ${APP_COMMON_DIRECTORY}/VL53L0X/core/src/vl53l0x_api_calibration.cpp
@@ -37,6 +36,7 @@ add_executable(${APP_CLAW_NAME}
   ${APP_COMMON_DIRECTORY}/rangeDetector/rangeDetector.cpp
   ${APP_COMMON_DIRECTORY}/measureRange/measureRange.cpp
   ${APP_COMMON_DIRECTORY}/bootsel/bootsel.cpp
+  ${APP_COMMON_DIRECTORY}/accuracy/accuracy.cpp
 )
 
 # Link to built libraries

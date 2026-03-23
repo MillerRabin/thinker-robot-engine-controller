@@ -3,24 +3,29 @@
 void ArmElbow::engineTask(void *instance)
 {
   auto *elbow = static_cast<ArmElbow *>(instance);
+  elbow->imu.begin();
   TickType_t lastWakeTime = xTaskGetTickCount();
   while (true)
-  {   
-    elbow->elbowY.setIMUAngle(elbow->elbowY.getPhysicalAngle());    
-    elbow->elbowY.tick();
-
-    elbow->setYCalibrating(elbow->elbowY.isCalibrating());
-    
-    if (elbow->elbowY.isCalibrating())
-    {
-      elbow->setHomeQuaternion(elbow->imu.quaternion, elbow->platform.imu.quaternion);
-      elbow->saveHomeQuaternionsToEEPROM();
-      printf("Shoulder home quaternion set and saved to EEPROM\n");
+  {
+    auto eQuat = elbow->imu.quaternion;
+    auto sQuat = elbow->shoulder.imu.quaternion;
+    if (eQuat.isZero() || sQuat.isZero()) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
     }
 
+    auto sRel = sQuat.invert() * eQuat;
+    auto sDiff = elbow->offset.invert() * sRel;
+    auto ea = sDiff.swingTwistToAngles();
+    printf("Angles is x: %f, y: %f, z: %f\n", ea.roll * 180 / M_PI, ea.pitch * 180 / M_PI, ea.yaw * 180 / M_PI);
+    elbow->tick(sQuat, eQuat);
+    
+    elbow->elbowY.setIMUAngle(elbow->elbowY.getPhysicalAngle());    
+    elbow->elbowY.tick();
+            
     elbow->setEngineTaskStatus(true);
 
-    elbow->updateStatuses();
+    elbow->updateStatuses();    
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));
   }
 }
@@ -35,15 +40,14 @@ ArmElbow::ArmElbow(
     const uint canTxPin) : ArmPart(canRxPin, canTxPin),
                            elbowY(engineYPin, Range(0, 270), ELBOW_Y_HOME_POSITION, 100),
                            imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin)
-{
-  if (!xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 1024, this, 5, NULL))
-  {
-    setEngineTaskStatus(false);
+{}
+
+int ArmElbow::begin() {
+  if (xTaskCreate(ArmElbow::engineTask, "ArmElbow::engineTask", 4096, this, 5, NULL) == pdFAIL) {
+    printf("Failed to create ArmElbow engine task\n");
+    return ERROR_ENGINE_TASK_CREATION_FAILED;
   }
-  else
-  {
-    setEngineTaskStatus(true);
-  }
+  return 0;
 }
 
 int ArmElbow::updateQuaternion(IMUBase *position)
@@ -68,11 +72,14 @@ int ArmElbow::updateAccuracy(IMUBase *position)
 
 void ArmElbow::busReceiveCallback(can2040_msg frame)
 {
+  shoulder.dispatchMessage(frame);
+  
   if (frame.id == CAN_ELBOW_SET_Y_DEGREE) {
+    
     uint32_t raw = frame.data32[0];
     uint16_t angleYS = raw & 0xFFFF;
     float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
-
+    printf("Can elbow %f\n", angleY);
     uint16_t timeMS = (raw >> 16) & 0xFFFF;
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
 
@@ -92,6 +99,7 @@ void ArmElbow::busReceiveCallback(can2040_msg frame)
     if (tareMask & ARM_ELBOW) {
       this->imu.tare(TARE_AXIS_ALL);
       this->imu.saveTare();
+      this->scheduleSave();
     }    
   }
 

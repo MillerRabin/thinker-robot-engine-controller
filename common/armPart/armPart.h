@@ -11,21 +11,22 @@
 #include "../flashSettings/flashSettings.h"
 
 struct __attribute__((packed, aligned(4))) EEPROMPositionData : public FlashSettingsData {
-  float homeI, homeJ, homeK, homeReal;
-  float platformHomeI, platformHomeJ, platformHomeK, platformHomeReal;
+  uint64_t homeData;
 
   EEPROMPositionData() : 
-    FlashSettingsData(sizeof(homeI) * 8, HOME_POSITIONS_EEPROM_OFFSET) {    
-    homeI = homeJ = homeK = homeReal = 0.0f;
-    platformHomeI = platformHomeJ = platformHomeK = platformHomeReal = 0.0f;
+    FlashSettingsData(sizeof(homeData), HOME_POSITIONS_EEPROM_OFFSET) {      
+  }
+
+  void set(const Quaternion& q) {
+    homeData = q.serialize();
   }
 
   uint8_t *getBuffer() override {
-    return reinterpret_cast<uint8_t *>(&homeI);
+    return reinterpret_cast<uint8_t *>(&homeData);
   }
 
   const uint8_t *getBuffer() const override {
-    return reinterpret_cast<const uint8_t *>(&homeI);
+    return reinterpret_cast<const uint8_t *>(&homeData);
   }
 };
 
@@ -33,7 +34,10 @@ class ArmPart {
 private:
   Bus bus;
   static void canCallback(void *pArmPart, can2040_msg frame);
-  volatile uint64_t statuses;      
+  volatile uint64_t statuses;
+  bool needSaveQuaternion = false;
+  TickType_t tareStart = 0;
+  const TickType_t tareDelay = pdMS_TO_TICKS(QUATERNION_SAVE_DELAY);  
 protected:
   virtual void busReceiveCallback(can2040_msg frame) {};
   int updateQuaternion(Quaternion quat);
@@ -41,23 +45,25 @@ protected:
   int updateGyroscope(Gyroscope gyro);
   int updateAccuracy(Accuracy acc);
   int updateHeight(uint32_t height, uint16_t temperature);
+  void scheduleSave();
+  void tick(const Quaternion& origin, const Quaternion& current);
 public:
   ArmPlatform platform;
-  void setPositionTaskStatus(bool value);
+  void setPositionStatus(bool value);
+  bool getPositionStatus();
   void setEngineTaskStatus(bool value);
   void setBusReceivingTaskStatus(bool value);
+  void setTareError(bool value);
+  bool getTareError();
   void setYCalibrating(bool value);
   void setZCalibrating(bool value);
   void setXCalibrating(bool value);
   void setUpgrading(bool value);
   Quaternion align(const Quaternion& dest, const Quaternion& source);
   Quaternion difference(const Quaternion& a, const Quaternion& b);
-  Quaternion homeQuaternion;
-  Quaternion platformHomeQuaternion;  
-  Quaternion alignedOffsetQuaternion;
-  void setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQuaternion);
-  void saveHomeQuaternionsToEEPROM();
-  bool loadHomeQuaternionsFromEEPROM();
+  Quaternion offset;
+  void setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQuaternion);  
+  bool loadHomeQuaternion();
   virtual uint32_t getQuaternionMessageId() { return 0; };
   virtual uint32_t getAccelerometerMessageId() { return 0; };
   virtual uint32_t getGyroscopeMessageId() { return 0; };

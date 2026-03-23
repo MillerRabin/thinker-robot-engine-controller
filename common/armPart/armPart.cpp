@@ -6,6 +6,8 @@ ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) : bus(canRxPin, canTx
   if (status!= CAN_SUCCESS) { 
     printf("Can error %d\n", status); 
   }
+  FlashSettings::init();
+  loadHomeQuaternion();
 }
 
 int ArmPart::updateQuaternion(Quaternion quat) {    
@@ -52,8 +54,7 @@ int ArmPart::updateStatuses() {
   uint8_t id = getStatusesMessageId();
   if (id == 0)
     return -1;
-  bus.send(id, statuses);
-  statuses = 0;
+  bus.send(id, statuses);  
   return 0;
 }
 
@@ -74,12 +75,16 @@ void ArmPart::canCallback(void* pArmPart, can2040_msg frame) {
   armPart->busReceiveCallback(frame);  
 }
 
-void ArmPart::setPositionTaskStatus(bool value) {
+void ArmPart::setPositionStatus(bool value) {
   if (value) {
     statuses |= ARM_POSITION_OK;
   } else {
     statuses &= ~ARM_POSITION_OK;
   }
+}
+
+bool ArmPart::getPositionStatus() { 
+  return (statuses & ARM_POSITION_OK) != 0;
 }
 
 void ArmPart::setEngineTaskStatus(bool value) {
@@ -133,11 +138,24 @@ void ArmPart::setUpgrading(bool value) {
   }
 }
 
-void ArmPart::setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQuaternion) {
-  this->homeQuaternion = homeQuaternion;
-  this->platformHomeQuaternion = platformQuaternion;
-  Quaternion homeInverted = Quaternion::Conjugate(homeQuaternion);
-  //this->offsetQuaternion = Quaternion::Multiply(platformQuaternion, homeInverted);
+void ArmPart::setTareError(bool value) {
+  if (value) {
+    statuses |= ARM_TARE_ERROR;
+  } else {
+    statuses &= ~ARM_TARE_ERROR;
+  }
+}
+
+bool ArmPart::getTareError() { 
+  return (statuses & ARM_TARE_ERROR) != 0; 
+}
+
+void ArmPart::setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQuaternion) {  
+  Quaternion pi = Quaternion::Conjugate(platformQuaternion);
+  this->offset = pi * homeQuaternion;
+  EEPROMPositionData ep;
+  ep.set(this->offset);  
+  FlashSettings::save(ep);
 }
 
 Quaternion ArmPart::align(const Quaternion& dest, const Quaternion& source) {  
@@ -153,8 +171,7 @@ Quaternion ArmPart::difference(const Quaternion& a, const Quaternion& b) {
     qn.j = -qn.j;
     qn.k = -qn.k;
   }
-
-  // return Quaternion::Normalize(qn);
+  
   return qn;
 }
 
@@ -165,34 +182,33 @@ int ArmPart::sendFirmwareUpgradeMessage() {
   return 0;
 }
 
-void ArmPart::saveHomeQuaternionsToEEPROM() {
-  EEPROMPositionData quaternionData;
-  
-  quaternionData.homeI = homeQuaternion.i;
-  quaternionData.homeJ = homeQuaternion.j;
-  quaternionData.homeK = homeQuaternion.k;
-  quaternionData.homeReal = homeQuaternion.real;
-  quaternionData.platformHomeI = platformHomeQuaternion.i;
-  quaternionData.platformHomeJ = platformHomeQuaternion.j;
-  quaternionData.platformHomeK = platformHomeQuaternion.k;
-  quaternionData.platformHomeReal = platformHomeQuaternion.real;
-  FlashSettings::save(quaternionData);
-}
-
-bool ArmPart::loadHomeQuaternionsFromEEPROM() {
+bool ArmPart::loadHomeQuaternion() {
   EEPROMPositionData quaternionData;  
   if (!FlashSettings::load(quaternionData)) {    
+    setTareError(true);
     return false;
-  }
-  printf("Loaded home quaternions from EEPROM...\n");
-
-  Quaternion home(
-    quaternionData.homeI, quaternionData.homeJ, quaternionData.homeK, quaternionData.homeReal
-  );
-  Quaternion platform(
-    quaternionData.platformHomeI, quaternionData.platformHomeJ, quaternionData.platformHomeK, quaternionData.platformHomeReal
-  );
-
-  setHomeQuaternion(home, platform);
+  }  
+  this->offset.deserialize(quaternionData.getBuffer());  
+  setTareError(!this->offset.isZero());
   return true;
+}
+
+void ArmPart::scheduleSave() {
+  needSaveQuaternion = true;
+}
+
+void ArmPart::tick(const Quaternion &origin, const Quaternion &current) {
+  TickType_t now = xTaskGetTickCount();
+  if (needSaveQuaternion) {
+    if (tareStart != 0) {
+      if (needSaveQuaternion && (now - tareStart) > tareDelay) {
+        setHomeQuaternion(current, origin);
+        tareStart = 0;
+        needSaveQuaternion = false;
+        printf("Home quaternion saved\n");
+      }
+    } else {
+      tareStart = now;
+    }
+  }
 }

@@ -8,18 +8,10 @@ void ArmWrist::engineTask(void *instance)
   {    
     wrist->wristY.setIMUAngle(wrist->wristY.getPhysicalAngle());
     wrist->wristZ.setIMUAngle(wrist->wristZ.getPhysicalAngle());
-    wrist->setYCalibrating(wrist ->wristY.isCalibrating());
-    wrist->setZCalibrating(wrist->wristZ.isCalibrating());
-
+    
     wrist->wristY.tick();
     wrist->wristZ.tick();
-
-    if (wrist->wristY.isCalibrating() && wrist->wristZ.isCalibrating()) {
-      wrist->setHomeQuaternion(wrist->imu.quaternion, wrist->platform.imu.quaternion);
-      wrist->saveHomeQuaternionsToEEPROM();
-      printf("Wrist home quaternion set and saved to EEPROM\n");
-    }
-
+    
     wrist->setEngineTaskStatus(true);
     wrist->updateStatuses();
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT));

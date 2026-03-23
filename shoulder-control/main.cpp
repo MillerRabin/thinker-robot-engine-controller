@@ -3,8 +3,7 @@
 ArmShoulder* armShoulder;
 
 int main() {	
-  stdio_init_all();  
-  sleep_ms(2000);    
+  stdio_init_all();    
   armShoulder = new ArmShoulder(
       SHOULDER_MEMS_SCK_PIN, SHOULDER_MEMS_MISO_PIN, SHOULDER_MEMS_MOSI_PIN, SHOULDER_MEMS_CS_PIN,
       MEMS_INT_PIN, SHOULDER_MEMS_RST_PIN, SHOULDER_Z_PIN, SHOULDER_Y_PIN,

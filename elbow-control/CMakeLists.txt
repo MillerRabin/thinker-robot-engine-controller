@@ -22,11 +22,12 @@ add_executable(${APP_ELBOW_NAME}
   ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp  
   ${APP_COMMON_DIRECTORY}/qBase/qBase.cpp
   ${APP_COMMON_DIRECTORY}/euler/euler.cpp
-  ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp
-  ${APP_COMMON_DIRECTORY}/detectors/detectors.cpp
+  ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp  
   ${APP_COMMON_DIRECTORY}/armPlatform/armPlatform.cpp    
   ${APP_COMMON_DIRECTORY}/bootsel/bootsel.cpp
   ${APP_COMMON_DIRECTORY}/measureRange/measureRange.cpp
+  ${APP_COMMON_DIRECTORY}/remoteShoulder/remoteShoulder.cpp
+  ${APP_COMMON_DIRECTORY}/accuracy/accuracy.cpp
 )
 
 # Link to built libraries
