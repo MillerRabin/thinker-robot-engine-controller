@@ -1,26 +1,50 @@
 #include "armElbow.h"
+#include "../common/periodic/periodic.h"
 
 void ArmElbow::engineTask(void *instance)
 {
-  auto *elbow = static_cast<ArmElbow *>(instance);
+  auto *elbow = static_cast<ArmElbow *>(instance);      
+  Periodic printer(pdMS_TO_TICKS(1000));
   elbow->imu.begin();
   TickType_t lastWakeTime = xTaskGetTickCount();
+
+  
   while (true)
   {
-    auto eQuat = elbow->imu.quaternion;
-    auto sQuat = elbow->shoulder.imu.quaternion;
-    if (eQuat.isZero() || sQuat.isZero()) {
+    if (!elbow->getPositionStatus() || !elbow->getTareError()) {
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
 
-    auto sRel = sQuat.invert() * eQuat;
+    auto eQuat = elbow->imu.quaternion;
+    auto pQuat = elbow->platform.imu.quaternion;
+    
+    if (!eQuat.isValid() || !pQuat.isValid()) {      
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    
+    auto accel = elbow->imu.accelerometer;
+    auto gyro = elbow->imu.gyroscope;
+    auto yAccel = accel.x;
+    auto yGyro = gyro.y;
+    
+    auto sRel = pQuat.invert() * eQuat;
     auto sDiff = elbow->offset.invert() * sRel;
     auto ea = sDiff.swingTwistToAngles();
-    printf("Angles is x: %f, y: %f, z: %f\n", ea.roll * 180 / M_PI, ea.pitch * 180 / M_PI, ea.yaw * 180 / M_PI);
-    elbow->tick(sQuat, eQuat);
+    auto eEuler = eQuat.getEuler();
+
+    /*printer.run([ea]() {      
+      printf("Angles is x: %f, y: %f, z: %f\n", ea.roll * 180 / M_PI,
+             ea.pitch * 180 / M_PI, ea.yaw * 180 / M_PI);
+    });
+    elbow->tick(pQuat, eQuat);
     
-    elbow->elbowY.setIMUAngle(elbow->elbowY.getPhysicalAngle());    
+    elbow->elbowY.setIMUAngle(elbow->elbowY.getPhysicalAngle());*/
+
+    elbow->elbowY.setIMUAngle(ea.pitch * 180 / M_PI);
+    elbow->elbowY.setAcceleration(yAccel);
+    elbow->elbowY.setAngularSpeed(yGyro);
     elbow->elbowY.tick();
             
     elbow->setEngineTaskStatus(true);
@@ -79,7 +103,6 @@ void ArmElbow::busReceiveCallback(can2040_msg frame)
     uint32_t raw = frame.data32[0];
     uint16_t angleYS = raw & 0xFFFF;
     float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
-    printf("Can elbow %f\n", angleY);
     uint16_t timeMS = (raw >> 16) & 0xFFFF;
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
 

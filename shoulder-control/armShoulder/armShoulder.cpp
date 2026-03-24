@@ -55,8 +55,7 @@ void ArmShoulder::engineTask(void *instance) {
       maxAccel = 0.0f;
     });*/
 
-    shoulder->tick(pQuat, sQuat);
-    //shoulder->shoulderY.setIMUAngle(ea.pitch * 180 / M_PI);
+    shoulder->tick(pQuat, sQuat);    
     shoulder->shoulderY.setIMUAngle(ea.pitch * 180 / M_PI);
     shoulder->shoulderY.setAcceleration(yAccel);
     shoulder->shoulderY.setAngularSpeed(yGyro);
