@@ -33,16 +33,10 @@ void ArmElbow::engineTask(void *instance)
     auto sDiff = elbow->offset.invert() * sRel;
     auto ea = sDiff.swingTwistToAngles();
     auto eEuler = eQuat.getEuler();
-
-    /*printer.run([ea]() {      
-      printf("Angles is x: %f, y: %f, z: %f\n", ea.roll * 180 / M_PI,
-             ea.pitch * 180 / M_PI, ea.yaw * 180 / M_PI);
-    });
-    elbow->tick(pQuat, eQuat);
+    float eaDeg = (ea.pitch * 180 / M_PI) + 45;
     
-    elbow->elbowY.setIMUAngle(elbow->elbowY.getPhysicalAngle());*/
-
-    elbow->elbowY.setIMUAngle(ea.pitch * 180 / M_PI);
+    elbow->tick(pQuat, eQuat);
+    elbow->elbowY.setIMUAngle(eaDeg);
     elbow->elbowY.setAcceleration(yAccel);
     elbow->elbowY.setAngularSpeed(yGyro);
     elbow->elbowY.tick();
@@ -102,7 +96,7 @@ void ArmElbow::busReceiveCallback(can2040_msg frame)
     
     uint32_t raw = frame.data32[0];
     uint16_t angleYS = raw & 0xFFFF;
-    float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
+    float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 10.0f;
     uint16_t timeMS = (raw >> 16) & 0xFFFF;
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
 

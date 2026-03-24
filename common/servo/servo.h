@@ -45,11 +45,11 @@ private:
 
   // regulator settings
   float maxAngularSpeedCmd = 180.0f; // deg/sec
-  float maxAngleStepPerTick = 3.0f;  // deg per tick
+  const float maxAngleStepPerTick = 5.0f;  // deg per tick
 
-  float Kp = 6.0f;
-  float Kd = 0.12f;
-  float Ka = 0.02f;
+  const float Kp = 6.0f;
+  const float Kd = 0.12f;
+  const float Ka = 0.02f;
 
   float physicalAngle = homePosition; // commanded servo angle
   float imuAngle = NAN;               // real angle from IMU
