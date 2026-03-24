@@ -1,7 +1,11 @@
 #include "gyroscope.h"
 
 uint64_t Gyroscope::serialize() {
-  return (uint64_t)this->x | (uint64_t)this->y << 16 | (uint64_t)this->z << 32;
+  uint16_t x = floatToQ(this->x, Q1);
+  uint16_t y = floatToQ(this->y, Q1);
+  uint16_t z = floatToQ(this->z, Q1);
+
+  return (uint64_t)x | (uint64_t)y << 16 | (uint64_t)z << 32;
 }
 
 void Gyroscope::deserialize(uint8_t data[8]) {
