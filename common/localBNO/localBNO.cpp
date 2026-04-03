@@ -62,30 +62,24 @@ void LocalBNO::compassTask(void *instance) {
       case SENSOR_REPORTID_ROTATION_VECTOR:
       case SENSOR_REPORTID_GAME_ROTATION_VECTOR: {        
         bno->quaternion.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);        
-        if (bno->armPart->updateQuaternion(bno) != 0) {
-          printf("quat sending error\n");
-        }
+        bno->armPart->updateQuaternion(bno);
+        bno->updateQuaternionTime();        
         break;
       }
       case SENSOR_REPORTID_GYROSCOPE: {
         bno->gyroscope.fromBNO(imu->rawGyroX, imu->rawGyroY, imu->rawGyroZ);
-        if (bno->armPart->updateGyroscope(bno) != 0) {
-          printf("Gyro sending error\n");
-        }
+        bno->armPart->updateGyroscope(bno);        
         break;
       }
       case SENSOR_REPORTID_LINEAR_ACCELERATION: {
         bno->accelerometer.fromBNO(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
-        if (bno->armPart->updateAccelerometer(bno) != 0) {
-          printf("Accelerometer sending error\n");
-        }
+        bno->armPart->updateAccelerometer(bno);
+          
         break;
       }
       case SENSOR_REPORTID_ACCELEROMETER: {
         bno->accelerometer.fromBNO(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);        
-        if (bno->armPart->updateAccelerometer(bno) != 0) {
-          printf("Accelerometer sending error\n");
-        }
+        bno->armPart->updateAccelerometer(bno);          
         break;
       }
       default:
@@ -93,9 +87,7 @@ void LocalBNO::compassTask(void *instance) {
     }
 
     bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->getQuatAccuracy(), imu->gyroAccuracy, imu->accelLinAccuracy);
-    if (bno->armPart->updateAccuracy(bno) != 0) {
-      printf("Quaternion accuracy sending error\n");
-    }
+    bno->armPart->updateAccuracy(bno);
     
     if ((now - lastCalibrationCheck) >= calibrationCheckInterval) {
       lastCalibrationCheck = now;
@@ -135,9 +127,9 @@ bool LocalBNO::updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quatern
 }
 
 void LocalBNO::initIMU() {
-  imu.enableRotationVector(10);  
-  imu.enableLinearAccelerometer(10);
-  imu.enableGyro(5);
+  imu.enableRotationVector(IMU_UPDATE_INTERVAL);
+  //imu.enableLinearAccelerometer(10);
+  //imu.enableGyro(5);
 }
 
 uint LocalBNO::writeSystemOrientationQuaternion(float w, float x, float y, float z) {
@@ -246,4 +238,9 @@ bool LocalBNO::beginSPI() {
   bi_decl(bi_2pins_with_func(intPin, rstPin, GPIO_FUNC_SIO));
   gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &LocalBNO::compassCallback);
   return imu.beginSPI(spi0, csPin, intPin, rstPin);
+}
+
+bool LocalBNO::isPositionOK() {
+  auto now = xTaskGetTickCount();
+  return (now - lastQuaternionUpdated < maxInterval);
 }

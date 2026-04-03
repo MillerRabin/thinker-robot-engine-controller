@@ -27,6 +27,8 @@ add_executable(${APP_WRIST_NAME}
   ${APP_COMMON_DIRECTORY}/bootsel/bootsel.cpp
   ${APP_COMMON_DIRECTORY}/measureRange/measureRange.cpp
   ${APP_COMMON_DIRECTORY}/accuracy/accuracy.cpp
+  ${APP_COMMON_DIRECTORY}/barometer/barometer.cpp
+  ${APP_COMMON_DIRECTORY}/power/power.cpp
 )
 
 # Link to built libraries

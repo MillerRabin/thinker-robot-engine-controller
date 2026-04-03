@@ -27,7 +27,9 @@ class LocalBNO : public IMUBase {
     static uint32_t notificationIndex;
     static TaskHandle_t compassTaskHandle;
     bool beginI2C();
-    bool beginSPI();    
+    bool beginSPI();
+    TickType_t lastQuaternionUpdated = 0;
+    TickType_t maxInterval = pdMS_TO_TICKS(250);
   protected:
     void initIMU();
     ArmPart *armPart;
@@ -55,5 +57,7 @@ class LocalBNO : public IMUBase {
         return;
       }
       printf("Failed to read System Orientation Quaternion %d\n", res);
-    }    
+    }
+    void updateQuaternionTime() { lastQuaternionUpdated = xTaskGetTickCount(); }
+    bool isPositionOK();
 };

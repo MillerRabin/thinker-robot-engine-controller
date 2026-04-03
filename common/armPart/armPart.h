@@ -31,7 +31,7 @@ struct __attribute__((packed, aligned(4))) EEPROMPositionData : public FlashSett
 };
 
 class ArmPart {
-private:
+private:  
   Bus bus;
   static void canCallback(void *pArmPart, can2040_msg frame);
   volatile uint64_t statuses;
@@ -39,6 +39,7 @@ private:
   TickType_t tareStart = 0;
   const TickType_t tareDelay = pdMS_TO_TICKS(QUATERNION_SAVE_DELAY);  
 protected:
+  constexpr static TickType_t taskInterval = pdMS_TO_TICKS(ENGINE_TASK_LOOP_TIMEOUT_US / 1000);
   virtual void busReceiveCallback(can2040_msg frame) {};
   int updateQuaternion(Quaternion quat);
   int updateAccelerometer(Accelerometer acc);
@@ -79,6 +80,7 @@ public:
   virtual int updateHeight(IMUBase *position) { return 0; };
   virtual int updateRange(float longRange, float shortRange);
   virtual int sendFirmwareUpgradeMessage();
-  virtual int updateStatuses();  
+  virtual int updateStatuses();
+  static float NormalizeAngle(float angle);
   ArmPart(const uint canRxPin, const uint canTxPin);
 };

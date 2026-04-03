@@ -2,53 +2,91 @@
 
 Servo::Servo(const uint pin, Range degreeRange, const float homePosition,
              const float freq, const float lowPeriod, const float highPeriod)
-    : minDegree(degreeRange.from), maxDegree(degreeRange.to),
-      lowPeriod(lowPeriod), highPeriod(highPeriod), homePosition(homePosition) {
+    : pin(pin), minDegree(degreeRange.from), maxDegree(degreeRange.to),
+      lowPeriod(lowPeriod), highPeriod(highPeriod),
+      printer(pdMS_TO_TICKS(100)) {
   gpio_set_function(pin, GPIO_FUNC_PWM);
   slice = pwm_gpio_to_slice_num(pin);
   channel = pwm_gpio_to_channel(pin);
   setFrequency(freq);
 }
 
-uint Servo::setFrequency(const uint freq) {
+int Servo::getWrapAndDivider(const uint freq, PWMParameters &params) const {
   uint32_t clock = clock_get_hz(clk_sys);
-  uint32_t clock_div = 1;
+  uint8_t tDiv = 1;
+  uint32_t tWrap = 0;
+  uint8_t tDivFrac = 0;
 
-  if ((freq < 8) && (freq > clock)) {
-    return -1;
-  }
-
-  for (clk_divider = 1; clk_divider < UINT8_MAX; clk_divider++) {
-    clock_div = div_u32u32(clock, clk_divider);
-    wrap = div_u32u32(clock_div, freq);
-
-    if (div_u32u32(clock_div, UINT16_MAX) <= freq && wrap <= UINT16_MAX) {
+  for (; tDiv < UINT8_MAX; tDiv++) {
+    tWrap = (clock / tDiv) / freq - 1;
+    if (tWrap <= UINT16_MAX)
       break;
-    }
   }
 
-  if (clk_divider == UINT8_MAX) {
-    return -2;
+  if (tDiv == UINT8_MAX)
+    return SERVO_FREQUENCY_OUT_OF_RANGE;
+
+  float realDivider = (float)clock / ((float)(tWrap + 1) * (float)freq);
+  tDivFrac = (uint8_t)roundf((realDivider - tDiv) * 16.0f);
+  if (tDivFrac > 15) {
+    tDivFrac = 0;
+    tDiv++;
   }
 
-  period = 1.0f / ((float)clock_div / (float)wrap);
-  lowSlices = getSlices(lowPeriod);
-  highSlices = getSlices(highPeriod);
-  delta = (highSlices - lowSlices);
-  pulseStep = (float)delta / maxDegree;
+  params.wrap = tWrap;
+  params.divInt = tDiv;
+  params.divFrac = tDivFrac;
+  return 0;
+}
 
-  pwm_set_clkdiv_int_frac(slice, clk_divider, 0);
-  pwm_set_wrap(slice, wrap);
+int Servo::setFrequency(const uint freq) {
+  uint32_t clock = clock_get_hz(clk_sys);
+
+  if (freq < 1 || freq > clock)
+    return SERVO_FREQUENCY_OUT_OF_RANGE;
+
+  PWMParameters params;
+
+  int res = getWrapAndDivider(freq, params);
+  if (res != 0) {
+    return res;
+  }
+
+  float period = (params.divInt + params.divFrac / 16.0f) / (float)clock;
+  lowSlices = getSlices(lowPeriod, period, params.wrap);
+  highSlices = getSlices(highPeriod, period, params.wrap);
+
+  if (highSlices <= lowSlices)
+    return SERVO_WRONG_PERIODS;
+
+  delta = highSlices - lowSlices;
+  pulseStep = (float)delta / (maxDegree - minDegree);
+
+  pwm_set_clkdiv_int_frac(slice, params.divInt, 0);
+  pwm_set_wrap(slice, (uint16_t)params.wrap);
   pwm_set_enabled(slice, true);
 
-  return 1;
+  initialized = true;
+  return 0;
 }
 
-uint16_t Servo::getSlices(const float targetPeriod) {
-  return (uint16_t)((targetPeriod / period) * wrap);
+uint16_t Servo::getSlices(const float targetPeriod, const float period,
+                          const uint32_t wrap) const {
+  if (targetPeriod <= 0.0f)
+    return 0;
+
+  uint32_t slices = (uint32_t)roundf(targetPeriod / period);
+
+  if (slices > wrap)
+    slices = wrap;
+
+  return (uint16_t)slices;
 }
 
-uint Servo::setDegreeDirect(const float degree) {
+int Servo::setDegreeDirect(const float degree) {
+  if (!initialized) {
+    return SERVO_NOT_INITIALIZED;
+  }
   if (isnan(degree)) {
     return SERVO_DEGREE_IS_NAN;
   }
@@ -59,80 +97,102 @@ uint Servo::setDegreeDirect(const float degree) {
     return SERVO_DEGREE_IS_ABOVE_MAXIMUM;
   }
 
-  const uint16_t slices = lowSlices + (uint16_t)(pulseStep * degree);
+  uint16_t slices =
+      lowSlices + (uint16_t)roundf((degree - minDegree) * pulseStep);
   pwm_set_chan_level(slice, channel, slices);
-  return 0;
+  if (positionTime == 0) {
+    positionTime = xTaskGetTickCount();
+  }
+  return SERVO_OK;
 }
 
-bool Servo::setTargetAngle(const float angle, uint16_t timeMS, float deadZone) {
-  if (isnan(angle)) {
+bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
+                           float newDeadZone) {
+  if (isnan(angle))
     return false;
-  }
+  if (angle < minDegree || angle > maxDegree)
+    return false;
 
-  if (angle < minDegree) {
-    targetAngle = minDegree;
-  } else if (angle > maxDegree) {
-    targetAngle = maxDegree;
-  } else {
-    targetAngle = angle;
-  }
-
-  setTimeMS(timeMS);
-  setDeadZone(deadZone);
+  targetAngle = angle;
+  setDeadZone(newDeadZone);
+  setTimeMS(newTimeMS);
+  moveStarted = get_absolute_time();
   return true;
 }
 
 void Servo::tick() {
-  if (isnan(targetAngle) || isnan(imuAngle) || isnan(physicalAngle)) {
+  absolute_time_t now = get_absolute_time();
+  int64_t dtUs = absolute_time_diff_us(lastTickTime, now);
+  lastTickTime = now;
+  
+  if ((dtUs <= 0) || isnan(imuAngle) || isnan(physicalAngle) || isnan(targetAngle))
     return;
-  }
 
-  constexpr float dt = ENGINE_TASK_LOOP_TIMEOUT / 1000.0f;
+  /*if (!isPositioned()) {
+    moveStarted = now;
+    setDegreeDirect(imuAngle);
+    return;
+  }*/
+
+
+  float dtSec = dtUs / 1000000.0f;
+  dtSec = std::min(dtSec, 0.01f);
 
   const float error = targetAngle - imuAngle;
+  const float absError = fabsf(error);
 
-  // already on target and almost not moving
-  if (fabs(error) <= deadZone && fabs(currentAngularSpeed) < 0.5f) {
+  /*if (absError <= deadZone) {
+    physicalAngle = imuAngle;
     return;
-  }
+  }*/
 
-  float cmdSpeed =
-      Kp * error - Kd * currentAngularSpeed - Ka * currentAcceleration;
+  const float dir = (error >= 0.0f) ? 1.0f : -1.0f;
+  const float currentSpeed = speedBuffer.speed();
 
-  if (cmdSpeed > maxAngularSpeedCmd) {
-    cmdSpeed = maxAngularSpeedCmd;
-  }
-  if (cmdSpeed < -maxAngularSpeedCmd) {
-    cmdSpeed = -maxAngularSpeedCmd;
-  }
+  int64_t elapsedUs = absolute_time_diff_us(moveStarted, now);
+  int64_t remainingUs = timeUs - elapsedUs;
+  remainingUs = std::max<int64_t>(remainingUs, stabilizationTimeUs);
 
-  float stepDeg = cmdSpeed * dt;
+  float timeLeftSec = std::max(remainingUs / 1000000.0f, 0.001f);
+  float desiredSpeedDegPerSec = absError / timeLeftSec;  
+  float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, maxAngularSpeed);  
+  float increment = limitedSpeedDegPerSec * dtSec * dir;
+  float nextPhysical = physicalAngle + increment;
+   
+  physicalAngle = std::clamp(nextPhysical, minDegree, maxDegree);
 
-  if (stepDeg > maxAngleStepPerTick) {
-    stepDeg = maxAngleStepPerTick;
-  }
-  if (stepDeg < -maxAngleStepPerTick) {
-    stepDeg = -maxAngleStepPerTick;
-  }
-
-  // do not overshoot target
-  if (fabs(stepDeg) > fabs(error)) {
-    stepDeg = error;
-  }
-
-  physicalAngle += stepDeg;
-
-  if (physicalAngle > maxDegree) {
-    physicalAngle = maxDegree;
-  }
-  if (physicalAngle < minDegree) {
-    physicalAngle = minDegree;
-  }
+  /*if (absError > 2.0f) {
+    printer.run([this, currentSpeed, remainingUs, now, dtSec]() {
+    printf("%llu, Remaining: %ld, Moving, dt: %.4f, Speed: %f, acceleration: %f, imuAngle: %f, "
+           "cmd: %f\n",
+           (unsigned long long)now, (long)remainingUs, dtSec, currentSpeed,
+           speedBuffer.acceleration(), imuAngle, physicalAngle);
+    });
+  } else {
+    printer.run([this, currentSpeed, remainingUs, now, dtSec]() {
+      printf("%llu,  Remaining: %ld, Achieving, dt: %.4f, Speed: %f, "
+             "acceleration: %f, "
+             "imuAngle: %f, cmd: %f\n",
+             (unsigned long long)now, (long)remainingUs, dtSec, currentSpeed,
+             speedBuffer.acceleration(), imuAngle, physicalAngle);
+    });
+  }*/
 
   setDegreeDirect(physicalAngle);
 }
 
 void Servo::setIMUAngle(float value) {
+  if (isnan(value)) {
+    return;
+  }
+
+  speedBuffer.push(value);
+
+  if (value < minDegree)
+    value = minDegree;
+  if (value > maxDegree)
+    value = maxDegree;
+
   imuAngle = value;
 
   if (isnan(physicalAngle)) {
@@ -141,21 +201,7 @@ void Servo::setIMUAngle(float value) {
 }
 
 void Servo::setTimeMS(uint16_t timeMS) {
-  this->timeMS = (timeMS < 1 || timeMS > 10000) ? this->timeMS : timeMS;
-
-  float diff = fabs(targetAngle - physicalAngle);
-  float timeSec = this->timeMS / 1000.0f;
-
-  if (timeSec > 0.0f) {
-    maxAngularSpeedCmd = diff / timeSec;
-
-    if (maxAngularSpeedCmd < 10.0f) {
-      maxAngularSpeedCmd = 10.0f;
-    }
-    if (maxAngularSpeedCmd > 300.0f) {
-      maxAngularSpeedCmd = 300.0f;
-    }
-  }
+  this->timeUs = (timeMS < 1 || timeMS > 10000) ? this->timeUs : timeMS * 1000;
 }
 
 void Servo::setDeadZone(float dz) {
@@ -163,4 +209,12 @@ void Servo::setDeadZone(float dz) {
     return;
   }
   deadZone = dz;
+}
+
+bool Servo::isPositioned() const {
+  if (positionTime == 0) {
+    return false;
+  }
+  auto now = xTaskGetTickCount();
+  return (now - positionTime > positionInterval);
 }

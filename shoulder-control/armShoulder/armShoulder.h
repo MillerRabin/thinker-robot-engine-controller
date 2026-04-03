@@ -41,4 +41,7 @@ public:
   int updateAccuracy(IMUBase *position);
   int updateQuaternion(IMUBase *position);
   int begin();
+  bool isQuaternionFresh() {
+    return imu.isPositionOK();
+  }
 };

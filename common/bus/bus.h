@@ -20,10 +20,18 @@
 // Pico SDK
 #include "pico/stdlib.h"
 #include "pico/binary_info.h"
-#include "../config/config.h" 
-#include "../canRingBuffer/canRingBuffer.h"
+#include "../config/config.h"
 
+extern "C" {
+  #include "../common/canBus/src/can2040.h"
+}
+
+#include "../ringBuffer/ringBuffer.h"
+
+typedef can2040_msg CanFrame;
 typedef void (*CanCallback)(void *armPart, CanFrame frame);
+typedef RingBuffer<CanFrame, CAN_RX_BUFFER_SIZE> CanRingBuffer;
+
 
 typedef enum : int32_t {
   CAN_SUCCESS = 0,

@@ -2,7 +2,6 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
-#include <stdio.h>
 
 class Periodic {
 public:

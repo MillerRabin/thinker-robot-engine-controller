@@ -156,6 +156,7 @@ void ArmPart::setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQu
   EEPROMPositionData ep;
   ep.set(this->offset);  
   FlashSettings::save(ep);
+  setTareError(false);
 }
 
 Quaternion ArmPart::align(const Quaternion& dest, const Quaternion& source) {  
@@ -184,12 +185,12 @@ int ArmPart::sendFirmwareUpgradeMessage() {
 
 bool ArmPart::loadHomeQuaternion() {
   EEPROMPositionData quaternionData;  
-  if (!FlashSettings::load(quaternionData)) {    
+  if (!FlashSettings::load(quaternionData)) {  
     setTareError(true);
     return false;
   }  
-  this->offset.deserialize(quaternionData.getBuffer());  
-  setTareError(!this->offset.isZero());
+  this->offset.deserialize(quaternionData.getBuffer());    
+  setTareError(this->offset.isZero());
   return true;
 }
 
@@ -211,4 +212,14 @@ void ArmPart::tick(const Quaternion &origin, const Quaternion &current) {
       tareStart = now;
     }
   }
+}
+
+float ArmPart::NormalizeAngle(float angle) {  
+  if (angle <= 0 && angle >= -90) {
+   return angle;
+  }
+  angle = fmodf(angle, 360.0f);
+  if (angle < 0)
+    angle += 360.0f;
+  return angle;  
 }
