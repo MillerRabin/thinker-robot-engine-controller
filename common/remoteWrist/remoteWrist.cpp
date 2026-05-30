@@ -1,39 +1,39 @@
 
-#include "remoteShoulder.h"
+#include "remoteWrist.h"
 
-void RemoteShoulder::dispatchMessage(can2040_msg frame) {
-  if (frame.id == CAN_SHOULDER_QUATERNION) {
+void RemoteWrist::dispatchMessage(can2040_msg frame) {
+  if (frame.id == CAN_WRIST_QUATERNION) {
     Quaternion quat;
     quat.deserialize(frame.data);
     imu.quaternion.store(quat);
   }
-  if (frame.id == CAN_SHOULDER_GYROSCOPE)
+  if (frame.id == CAN_WRIST_GYROSCOPE)
     imu.gyroscope.deserialize(frame.data);
-  if (frame.id == CAN_SHOULDER_ACCELEROMETER)
+  if (frame.id == CAN_WRIST_ACCELEROMETER)
     imu.accelerometer.deserialize(frame.data);
-  if (frame.id == CAN_SHOULDER_ACCURACY)
+  if (frame.id == CAN_WRIST_ACCURACY)
     imu.accuracy.deserialize(frame.data);
-  if (frame.id == CAN_SHOULDER_STATUSES) {
+  if (frame.id == CAN_WRIST_STATUSES) {
     uint64_t value;
     memcpy(&value, frame.data, sizeof(value));
-    status.store(value);
+    status.store(value);    
     updateTime();
   }
 }
 
-bool RemoteShoulder::isOnline() {
+bool RemoteWrist::isOnline() {
   auto now = xTaskGetTickCount();
   return (now - lastUpdated < maxInterval);
 }
 
-bool RemoteShoulder::isPositionOK() {
+bool RemoteWrist::isPositionOK() {
   if (!isCalibrated())
     return false;
   return imu.quaternion.isFresh();
 }
 
-bool RemoteShoulder::isCalibrated() {
+bool RemoteWrist::isCalibrated() {
   if (!isOnline())
-    return false;
+    return false;  
   return (this->status.load() & ARM_CALIBRATED) != 0;
 }

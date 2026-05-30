@@ -1,5 +1,7 @@
 #include "rangeDetector.h"
 
+TaskHandle_t RangeDetector::detectorTaskHandle = NULL;
+
 RangeDetector::RangeDetector(ArmPart *armPart, i2c_inst_t *i2c,
                              const uint8_t longDetectorShutPin,
                              const uint8_t shortDetectorShutPin) : 
@@ -15,10 +17,13 @@ RangeDetector::RangeDetector(ArmPart *armPart, i2c_inst_t *i2c,
   gpio_init(longDetectorShutPin);
   gpio_set_dir(longDetectorShutPin, GPIO_OUT);
 
-  if (xTaskCreate(RangeDetector::detectorTask, "RangeDetector::detectorTask", 1024, this, 5, NULL)) {
-    printf("RangeDetect::detector task created\n");
-  } else {
-    printf("RangeDetect::detector task failed\n");
+  if (RangeDetector::detectorTaskHandle == NULL) {
+    if (xTaskCreateAffinitySet(RangeDetector::detectorTask,
+                               "RangeDetector::detectorTask", 4096, this, 5,
+                               IMU_CORE,
+                               &RangeDetector::detectorTaskHandle) != pdPASS) {
+      LogQueue::Log("RangeDetector::readTaskHandle creation failed\n");
+    }
   }
 }
 
@@ -80,7 +85,7 @@ bool RangeDetector::initLongDistanceSensor() {
 }
 
 void RangeDetector::detectorTask(void *instance) {
-  //vTaskDelay(pdMS_TO_TICKS(5000));
+  
   RangeDetector *detector = (RangeDetector *)instance;     
   detector->activateSensors(true, true);
   while (true) {

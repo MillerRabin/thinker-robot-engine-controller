@@ -25,6 +25,7 @@
 #include <math.h>
 #include <hardware/pwm.h>
 #include "../common/config/config.h" 
+#include "../common/logQueue/logQueue.h"
 
 using std::string;
 

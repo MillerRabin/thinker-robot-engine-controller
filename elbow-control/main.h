@@ -21,10 +21,11 @@
 #include "pico/stdlib.h"
 #include "pico/binary_info.h"
 
+#include "../common/config/config.h"
+#include "../common/logQueue/logQueue.h"
 #include "armElbow/armElbow.h"
-#include <math.h>
 #include <hardware/pwm.h>
-#include "../common/config/config.h" 
+#include <math.h>
 
 using std::string;
 

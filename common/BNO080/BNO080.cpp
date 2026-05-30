@@ -1,6 +1,5 @@
 #include "BNO080.h"
 
-
 bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin) {
   _deviceAddress = deviceAddress; // If provided, store the I2C address from user
   _i2cPort = i2c;                 // Grab which port the user wants us to use
@@ -22,7 +21,7 @@ bool BNO080::begin(uint8_t deviceAddress, i2c_inst_t *i2c, uint8_t intPin) {
       {
         if (_printDebug == true)
         {
-          printf("SW Version %d.%d\n", shtpData[2], shtpData[3]);        
+          printf("SW Version %d.%d core: %d\n", shtpData[2], shtpData[3], get_core_num());
           uint32_t SW_Part_Number = ((uint32_t)shtpData[7] << 24) | ((uint32_t)shtpData[6] << 16) | ((uint32_t)shtpData[5] << 8) | ((uint32_t)shtpData[4]);
           printf(" SW Part Number: 0x%x\n", SW_Part_Number);        
           uint32_t SW_Build_Number = ((uint32_t)shtpData[11] << 24) | ((uint32_t)shtpData[10] << 16) | ((uint32_t)shtpData[9] << 8) | ((uint32_t)shtpData[8]);
@@ -49,13 +48,14 @@ bool BNO080::beginSPI(spi_inst_t *spiPort, uint csPin, uint intPin, uint rstPin)
   gpio_put(rstPin, 0);
   vTaskDelay(pdMS_TO_TICKS(10));
   gpio_put(rstPin, 1);
-  
+
   if (!waitForSPI(200)) {
+    printf("No response from spi\n");
     return false;
   }
-      
+
   receivePacket();
-  
+
   if (!waitForSPI(200)) {
     return false;
   }
@@ -83,7 +83,7 @@ bool BNO080::beginSPI(spi_inst_t *spiPort, uint csPin, uint intPin, uint rstPin)
       
     if (shtpData[0] == SHTP_REPORT_PRODUCT_ID_RESPONSE) {
       printf("BNO085 detected OK\n");
-      printf("SW Version %d.%d\n", shtpData[2], shtpData[3]);
+      printf("SW Version %d.%d core: %d\n", shtpData[2], shtpData[3], get_core_num());
       return true;
     }
   }

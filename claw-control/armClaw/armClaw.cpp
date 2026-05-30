@@ -1,24 +1,155 @@
 #include "armClaw.h"
 
-volatile QueueHandle_t ArmClaw::queue;
-int counter = 0;
+void ArmClaw::calibrateYLoop() {
+  // LogQueue::Log("ArmClaw::calibrateYLoop started\n");
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  setYCalibrating(true);
+  float guessAngle = CLAW_Y_HOME_POSITION;
+  float increment = 90.0f;
+  int maxCounter = 40;
+  Quaternion position = imu.quaternion.load();
+  Quaternion origin = position.invert();
+  for (int i = 0; i < maxCounter; i++) {
+    clawY.setDegreeDirect(guessAngle);
+    //LogQueue::Log("\nIteration %d, prevGuessAngle: %.3f, ", i, guessAngle);
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(40));
+    position = imu.quaternion.load();
+
+    Quaternion delta = origin * position;
+    Vector3 g = delta.getGravityVector();
+
+    if (fabs(g.y) < 0.001f) {
+      updateStatuses();
+      continue;
+    }
+
+    origin = position.invert();
+    float dir = (g.y > 0) ? -1.0f : 1.0f;
+    increment = (increment > 0.1f) ? increment / 2.0f : 0.0f;
+    guessAngle += dir * increment;
+    //LogQueue::Log("currGuessAngle: %.3f, increment: %.3f, y: %.3f", guessAngle, increment, g.y);
+    updateStatuses();
+  }
+  setYCalibrating(false);
+}
+
+void ArmClaw::calibrateXLoop() {    
+  //LogQueue::Log("ArmClaw::calibrateXLoop started\n");
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  setXCalibrating(true);
+  float guessAngle = CLAW_X_HOME_POSITION;
+  float increment = 90.0f;
+  int maxCounter = 40;
+  Quaternion position = imu.quaternion.load();
+  Quaternion origin = position.invert();
+  for (int i = 0; i < maxCounter; i++) {
+    clawX.setDegreeDirect(guessAngle);        
+    //LogQueue::Log("\nIteration %d, prevGuessAngle: %.3f, ", i, guessAngle);
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(40));
+    position = imu.quaternion.load();
+
+    Quaternion delta = origin * position;
+    Vector3 g = delta.getGravityVector();
+    
+    if (fabs(g.x) < 0.001f) {
+      updateStatuses();
+      continue;
+    }
+
+    origin = position.invert();
+    float dir = (g.x < 0) ? -1.0f : 1.0f;
+    increment = (increment > 0.1f) ? increment / 2.0f : 0.0f;
+    guessAngle += dir * increment;
+    //LogQueue::Log("currGuessAngle: %.3f, increment: %.3f, x: %.3f", guessAngle, increment, g.x);
+    updateStatuses();
+  }
+  setXCalibrating(false);
+}
+
+void ArmClaw::calibrateLoop() {
+  setArmCalibrated(false);
+  LogQueue::Log("Callibration started\n");
+  updateStatuses();
+  //calibrateXLoop();
+  //calibrateYLoop();  
+  //setArmCalibrated(true);
+  updateStatuses();
+}
+
+float ArmClaw::angleX(const Quaternion &q) {
+  float s = std::fmax(-1.0f, std::fmin(1.0f, 2.0f * (q.real * q.j - q.k * q.i)));
+  return std::asin(s);
+}
+
+float ArmClaw::angleY(const Quaternion &q) {
+  float s = sqrt(q.i * q.i + q.j * q.j + q.k * q.k);
+  return 2.0 * atan2(s, q.real);
+}
+
+Quaternion ArmClaw::makeRotationX(float angleX) {
+  float h = angleX * 0.5f;
+  return {std::cos(h), 0.0f, std::sin(h), 0.0f};
+}
+
+void ArmClaw::engineLoop() {
+  TickType_t lastWakeTime = xTaskGetTickCount();
+
+  vTaskDelay(pdMS_TO_TICKS(200));
+  Quaternion origin = imu.quaternion.load().invert();
+  vTaskDelay(pdMS_TO_TICKS(50));
+
+  Quaternion position = imu.quaternion.load();
+  
+  static constexpr Vector3 X_AXIS = {1.0f, 0.0f, 0.0f};
+  static constexpr Vector3 Y_AXIS = {0.0f, 1.0f, 0.0f};
+  static constexpr Vector3 Z_AXIS = {0.0f, 0.0f, 1.0f};
+
+  while (true) {
+    position = imu.quaternion.load();
+    Quaternion delta = origin * position;
+
+    Vector3 g = delta.getGravityVector();
+    Vector3 localX = delta.rotate({ 1.0f, 0.0f, 0.0f });
+    //LogQueue::Log("Rotated: X: %.3f, Y: %.3f, Z: %.3f\n", localX.x, localX.y, localX.z);
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
+}
 
 void ArmClaw::engineTask(void *instance) {
-  printf("ArmClaw::engineTask started\n");
   auto *claw = static_cast<ArmClaw *>(instance);
+  Periodic printer(pdMS_TO_TICKS(1000));
   TickType_t lastWakeTime = xTaskGetTickCount();
-  while (true) {
-    claw->clawX.setIMUAngle(claw->clawX.getPhysicalAngle());
-    claw->clawY.setIMUAngle(claw->clawY.getPhysicalAngle());
-    claw->clawGripper.setIMUAngle(claw->clawGripper.getPhysicalAngle());
 
-    claw->clawX.tick();
-    claw->clawY.tick();
-    claw->clawGripper.tick();
+  while (true) {
+    auto wp = claw->imu.isPositionOK();
+    auto pp = claw->platform.isPositionOK();    
+
+    if (!wp || !pp) {
+      claw->setEngineTaskStatus(false);
+      claw->updateStatuses();      
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
+    }
+
+    Quaternion eQuat = claw->imu.quaternion.load();
+    Quaternion pQuat = claw->platform.imu.quaternion.load();
+
+    if (!eQuat.isValid() || !eQuat.isValid()) {
+      claw->setEngineTaskStatus(false);
+      claw->updateStatuses();
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
+    }
 
     claw->setEngineTaskStatus(true);
     claw->updateStatuses();
-    vTaskDelayUntil(&lastWakeTime, claw->taskInterval);
+    claw->calibrateLoop();
+    claw->engineLoop();
+
+    claw->setEngineTaskStatus(false);
+    claw->updateStatuses();
+    vTaskDelete(NULL);    
   }
 }
 
@@ -43,18 +174,19 @@ ArmClaw::ArmClaw(const uint8_t detectorsSdaPin, const uint8_t detectorsSclPin,
   gpio_pull_up(detectorsSclPin);
   bi_decl(bi_2pins_with_func(DETECTORS_SDA_PIN, DETECTORS_SCL_PIN, GPIO_FUNC_I2C));
 
-  if (!xTaskCreate(ArmClaw::engineTask, "ArmClaw::engineTask", 2048, this, 5,
-                   NULL)) {
-    printf("Failed to create ArmClaw::engineTask\n");
-    setEngineTaskStatus(false);
-  } else {
-    printf("ArmClaw::engineTask created successfully\n");
-    setEngineTaskStatus(true);
+  if (taskHandle == NULL) {
+    if (xTaskCreateAffinitySet(ArmClaw::engineTask, "ArmClaw::engineTask",
+                               4096, this, 4, ARM_CORE,
+                               &taskHandle) == pdFAIL) {
+      printf("Failed to create ArmClaw engine task\n");
+    } else {
+    }
   }
 }
 
 int ArmClaw::updateQuaternion(IMUBase *position) {
-  return ArmPart::updateQuaternion(position->quaternion);
+  Quaternion quat = position->quaternion.load();
+  return ArmPart::updateQuaternion(quat);
 }
 
 int ArmClaw::updateGyroscope(IMUBase *position) {
@@ -62,7 +194,8 @@ int ArmClaw::updateGyroscope(IMUBase *position) {
 }
 
 int ArmClaw::updateAccelerometer(IMUBase *position) {
-  return ArmPart::updateAccelerometer(position->accelerometer);
+  Accelerometer acc = position->accelerometer.load();
+  return ArmPart::updateAccelerometer(acc);
 }
 
 int ArmClaw::updateAccuracy(IMUBase *position) {
@@ -73,7 +206,7 @@ int ArmClaw::updateHeight(IMUBase *position) {
   return ArmPart::updateHeight(position->height, position->temperature);
 }
 
-void ArmClaw::busReceiveCallback(can2040_msg frame) {
+void ArmClaw::busReceiveCallback(can2040_msg frame) {  
   if (frame.id == CAN_CLAW_SET_XYG_DEGREE) {
     uint32_t raw1 = frame.data32[0];
     uint32_t raw2 = frame.data32[1];
@@ -87,9 +220,6 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
     float angleG = (angleGS == PARAMETER_IS_NAN) ? NAN : angleGS / 100.0f;
 
-    printf("Received CAN_CLAW_SET_XYG_DEGREE: angleX=%.2f, angleY=%.2f, "
-           "angleG=%.2f, timeMS=%d\n",
-           angleX, angleY, angleG, timeMS);
     if (!isnan(angleX)) {
       clawX.setTargetAngle(angleX, timeMS, CLAW_DEAD_ZONE);
     }
@@ -109,8 +239,7 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     if (clearMask & ARM_CLAW) {
       // this->imu.clearTare();
     }
-    if (tareMask & ARM_CLAW) {
-      printf("Taring claw IMU\n");
+    if (tareMask & ARM_CLAW) {    
       this->imu.tare();
       // this->imu.saveTare();
     }

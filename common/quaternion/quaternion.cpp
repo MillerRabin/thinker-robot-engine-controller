@@ -58,6 +58,14 @@ Quaternion Quaternion::Conjugate(const Quaternion &q) {
   return {-q.i, -q.j, -q.k, q.real};
 }
 
+Axis Quaternion::GetAxis(const Quaternion &delta) {
+  float len = sqrt(delta.i * delta.i + delta.j * delta.j + delta.k * delta.k);  
+  float axisX = delta.i / len;
+  float axisY = delta.j / len;
+  float axisZ = delta.k / len;
+  return { axisX, axisY, axisZ, len };
+}
+
 Quaternion Quaternion::Multiply(const Quaternion &a, const Quaternion &b) {
   Quaternion q;
   q.real = a.real * b.real - a.i * b.i - a.j * b.j - a.k * b.k;
@@ -88,17 +96,14 @@ Euler Quaternion::swingTwistToAngles() const {
   static constexpr Vector3 AXIS_X{1, 0, 0};
   static constexpr Vector3 AXIS_Y{0, 1, 0};
   static constexpr Vector3 AXIS_Z{0, 0, 1};
+  
+  const SwingTwist yawST = swingTwistDecomposition(AXIS_Z);
+  const float yaw = yawST.twist.twistAngle(AXIS_Z);
 
-  const SwingTwist yawT = swingTwistDecomposition(AXIS_Z);
-  auto pEuler = yawT.twist.getEuler();
-  const float yaw = yawT.twist.twistAngle();
+  const SwingTwist pitchST = yawST.swing.swingTwistDecomposition(AXIS_Y);
+  const float pitch = pitchST.twist.twistAngle(AXIS_Y);
 
-  const SwingTwist pitchT = swingTwistDecomposition(AXIS_Y);
-  const float pitch = pitchT.twist.twistAngle();
-
-  const SwingTwist rollT = swingTwistDecomposition(AXIS_X);
-  const float roll = rollT.twist.twistAngle();
-
+  const float roll = pitchST.swing.twistAngle(AXIS_X);
   return Euler(roll, pitch, yaw);
 }
 
@@ -112,7 +117,7 @@ Quaternion Quaternion::Normalize(const Quaternion &q) {
   };
 }
 
-Euler Quaternion::getEuler() const {
+Euler Quaternion::toEuler() const {
   float dqw = real;
   float dqx = i;
   float dqy = j;
@@ -180,11 +185,23 @@ Matrix3 Quaternion::toRotationMatrix() const {
 }
 
 SwingTwist Quaternion::swingTwistDecomposition(const Vector3 &axis) const {
-  Vector3 v{this->i, this->j, this->k};  
+  Vector3 v{this->i, this->j, this->k};
   float dot = v.x * axis.x + v.y * axis.y + v.z * axis.z;
-  Quaternion twist{ axis.x * dot, axis.y * dot, axis.z * dot, this->real };
+  Quaternion twist{axis.x * dot, axis.y * dot, axis.z * dot, this->real};
+  
+  if (twist.real < 0) {
+    twist.real = -twist.real;
+    twist.i = -twist.i;
+    twist.j = -twist.j;
+    twist.k = -twist.k;
+  }
 
-  float len = std::hypot(std::hypot(twist.real, twist.i), std::hypot(twist.j, twist.k));
+  float len =
+      std::hypot(std::hypot(twist.real, twist.i), std::hypot(twist.j, twist.k));
+  if (len < 1e-6f) {    
+    twist = {0.0f, 0.0f, 0.0f, 1.0f};
+    return {*this, twist};
+  }
 
   twist.real /= len;
   twist.i /= len;
@@ -195,11 +212,40 @@ SwingTwist Quaternion::swingTwistDecomposition(const Vector3 &axis) const {
   return {swing, twist};
 }
 
-float Quaternion::twistAngle() const {
-  float clamped = std::max(-1.0f, std::min(1.0f, real));
-  float angle = 2.0f * std::acos(clamped);
-  float sign = (i + j + k) >= 0 ? 1.0f : -1.0f;
-  return angle * sign;
+float Quaternion::twistAngle(const Vector3 &axis) const {
+  Quaternion q = *this;
+
+  // q и -q — одно вращение, но atan2 даст разный результат
+  // нормализуем знак через real
+  if (q.real < 0) {
+    q.i = -q.i;
+    q.j = -q.j;
+    q.k = -q.k;
+    q.real = -q.real;
+  }
+
+  // Проекция вектора вращения на заданную ось
+  float dot = q.i * axis.x + q.j * axis.y + q.k * axis.z;
+
+  // Twist-компонента вдоль оси
+  float ti = axis.x * dot;
+  float tj = axis.y * dot;
+  float tk = axis.z * dot;
+  float tw = q.real;
+
+  // Нормализуем twist кватернион
+  float norm = sqrt(ti * ti + tj * tj + tk * tk + tw * tw);
+  if (norm < 1e-6f)
+    return 0.0f;
+  ti /= norm;
+  tj /= norm;
+  tk /= norm;
+  tw /= norm;
+
+  // Угол со знаком
+  float vec_len = sqrt(ti * ti + tj * tj + tk * tk);
+  float sign = dot >= 0 ? 1.0f : -1.0f;
+  return sign * 2.0f * atan2(vec_len, tw);
 }
 
 Quaternion Quaternion::Clone(const Quaternion &q) {
@@ -209,4 +255,26 @@ Quaternion Quaternion::Clone(const Quaternion &q) {
   result.j = q.j;
   result.k = q.k;
   return result;
+}
+
+Vector3 Quaternion::rotate(const Vector3 &v) const {
+  // q * v * q⁻¹
+  Quaternion qv = { v.x, v.y, v.z, 0 };
+  Quaternion res = (*this) * qv * this->invert();
+  return { res.i, res.j, res.k };
+}
+
+Vector3 Quaternion::getGravityVector() const {
+  Vector3 g;
+  g.x = 2.0f * (i * k - real * j);
+  g.y = 2.0f * (real * i + j * k);
+  g.z = real * real - i * i - j * j + k * k;
+  return g;
+}
+
+Quaternion Quaternion::AngleAxis(float angle, float x, float y, float z) {
+  float half = angle * 0.5f;
+  float s = sin(half);
+  Quaternion q(x * s, y * s, z * s, cos(half));    
+  return q;
 }

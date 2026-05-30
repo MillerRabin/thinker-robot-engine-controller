@@ -16,52 +16,6 @@ private:
   float cachedSpeed = 0.0f;
   float cachedAcceleration = 0.0f;
 
-  /*void recalculate() {
-    if (count < 2) {
-      cachedSpeed = 0.0f;
-      cachedAcceleration = 0.0f;
-      return;
-    }
-
-    // Берём реальное время из сэмплов
-    AngleSample newest, oldest;
-    buffer.peek(count - 1, &newest);
-    buffer.peek(0, &oldest);
-
-    float totalTime = (newest.timestamp_us - oldest.timestamp_us) / 1e6f;
-    if (totalTime < 1e-6f) {
-      cachedSpeed = 0.0f;
-      cachedAcceleration = 0.0f;
-      return;
-    }
-
-    float offset = totalTime / 2.0f;
-    float s_t2 = 0, s_t4 = 0;
-    float s_θ = 0, s_tθ = 0, s_t2θ = 0;
-    uint16_t N = count;
-
-    for (uint16_t i = 0; i < N; i++) {
-      AngleSample s;
-      buffer.peek(i, &s);
-      float t = (s.timestamp_us - oldest.timestamp_us) / 1e6f - offset;
-      float t2 = t * t;
-      s_t2 += t2;
-      s_t4 += t2 * t2;
-      s_θ += s.theta;
-      s_tθ += t * s.theta;
-      s_t2θ += t2 * s.theta;
-    }
-
-    cachedSpeed = s_tθ / s_t2;
-
-    if (count >= 3) {
-      float c = (N * s_t2θ - s_t2 * s_θ) / (N * s_t4 - s_t2 * s_t2);
-      cachedAcceleration = 2.0f * c;
-    } else {
-      cachedAcceleration = 0.0f;
-    }
-  }*/
-
   void recalculate() {
     if (count < 2) {
       cachedSpeed = 0.0f;
@@ -74,17 +28,14 @@ private:
     buffer.peek(0, &oldest);
 
     float dt = (newest.timestamp_us - oldest.timestamp_us) / 1e6f;
-    if (dt < 0.01f) { // меньше 10 мс — не считаем
+    if (dt < 0.01f) {
       cachedSpeed = 0.0f;
       cachedAcceleration = 0.0f;
       return;
     }
 
     cachedSpeed = (newest.theta - oldest.theta) / dt;
-
-    // физическое ограничение
-    cachedSpeed = fmaxf(fminf(cachedSpeed, 180.0f), -180.0f);
-
+    //cachedSpeed = fmaxf(fminf(cachedSpeed, 180.0f), -180.0f);
     cachedAcceleration = 0.0f;
   }
 

@@ -22,21 +22,23 @@ class LocalBNO : public IMUBase {
     const uint mosiPin;
     const uint csPin;
     const bool useSPI;
-    static void compassTask(void* instance);
-    static void compassCallback(uint gpio, uint32_t events);    
+    static void compassTask(void* instance);    
     static uint32_t notificationIndex;
     static TaskHandle_t compassTaskHandle;
     bool beginI2C();
-    bool beginSPI();
-    TickType_t lastQuaternionUpdated = 0;
-    TickType_t maxInterval = pdMS_TO_TICKS(250);
+    bool beginSPI();    
+    Quaternion rotate;
   protected:
     void initIMU();
     ArmPart *armPart;
     BNO080 imu;
     int16_t accelerometer_Q1;        
+    SemaphoreHandle_t quaternionSemaphore;
     bool updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quaternionAccuracy, uint8_t gyroscopeAccuracy, uint8_t accelerometerAccuracy);    
   public:
+    void setRotate(Quaternion rotate) {
+      this->rotate = rotate;
+    }
     LocalBNO(ArmPart* armPart, const uint sdaPin, const uint sclPin, const uint intPin, const uint rstPin);
     LocalBNO(ArmPart *armPart, const uint sckPin, const uint misoPin, const uint mosiPin, const uint csPin, const uint rstPin, const uint intPin);
     bool begin();
@@ -57,7 +59,7 @@ class LocalBNO : public IMUBase {
         return;
       }
       printf("Failed to read System Orientation Quaternion %d\n", res);
-    }
-    void updateQuaternionTime() { lastQuaternionUpdated = xTaskGetTickCount(); }
+    }    
     bool isPositionOK();
+    uint getRefreshInterval();
 };

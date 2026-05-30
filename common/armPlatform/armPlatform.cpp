@@ -1,13 +1,14 @@
 
 #include "armPlatform.h"
+#include "../armPart/armPart.h"
 
-void ArmPlatform::dispatchMessage(can2040_msg frame)
-{
-  if (frame.id == CAN_PLATFORM_QUATERNION) {
-    imu.quaternion.deserialize(frame.data);
+void ArmPlatform::dispatchMessage(can2040_msg frame) {
+  if (frame.id == CAN_PLATFORM_QUATERNION) {    
+    Quaternion quat;
+    quat.deserialize(frame.data);
+    imu.quaternion.store(quat);
     updateTime();
-    updateQuaternionTime();
-  }    
+  }
   if (frame.id == CAN_PLATFORM_GYROSCOPE) {
     imu.gyroscope.deserialize(frame.data);
     updateTime();
@@ -46,9 +47,8 @@ bool ArmPlatform::isOnline() {
 }
 
 bool ArmPlatform::isPositionOK() {
-  if (!getEnginesPowerStatus()) return false;
-  auto now = xTaskGetTickCount();
-  return (now - lastQuaternionUpdated < maxInterval);
+  if (!getEnginesPowerStatus()) return false;  
+  return imu.quaternion.isFresh();
 }
 
 bool ArmPlatform::getEnginesPowerStatus() {

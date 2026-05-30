@@ -7,7 +7,7 @@
 
 class RemoteBNO {
   public:
-    Quaternion quaternion{0, 0, 0, 0};
+    AtomicQuaternion quaternion;
     Accuracy accuracy;
     Gyroscope gyroscope;
     Accelerometer accelerometer;

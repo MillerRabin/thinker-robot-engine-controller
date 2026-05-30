@@ -1,16 +1,14 @@
 #pragma once
 
+#include "../quaternion/quaternion.h"
+#include "pico/stdlib.h"
 #include <cstdint>
+#include <cstring>
 #include <hardware/i2c.h>
 #include <hardware/spi.h>
 #include <iostream>
-#include <cstring>
 #include <math.h>
-
-#include "pico/stdlib.h"
-#include <FreeRTOS.h>
-#include <task.h>
-#include "../quaternion/quaternion.h"
+#include <semphr.h>
 
 #define BNO080_DEFAULT_ADDRESS 0x4B
 
@@ -282,9 +280,12 @@ public:
 	int16_t angular_velocity_Q1 = 10;
 	int16_t gravity_Q1 = 8;
 	uint16_t quatAccuracy;
+	void drainFIFO();
+	bool hasData();
 
 private:
 	//Variables
+	SemaphoreHandle_t spiMutex;
 	i2c_inst_t* _i2cPort;
 	spi_inst_t* _spiPort;
 	uint8_t _deviceAddress; // Keeps track of I2C address. setI2CAddress changes this.
@@ -316,5 +317,5 @@ private:
 	bool receivePacketI2C();
 	bool receivePacketSPI();
 	bool sendPacketI2C(uint8_t channelNumber, uint8_t dataLength);
-	bool sendPacketSPI(uint8_t channelNumber, uint8_t dataLength);
+	bool sendPacketSPI(uint8_t channelNumber, uint8_t dataLength);	
 };

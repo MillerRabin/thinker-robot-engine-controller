@@ -1,10 +1,11 @@
 #pragma once
 
-#include "pico/stdlib.h"
-#include <math.h>
+#include "../atomic/atomic.h"
 #include "../config/config.h"
-#include <iostream>
 #include "../qBase/qBase.h"
+#include "pico/stdlib.h"
+#include <iostream>
+#include <math.h>
 
 class Accelerometer : public QBase {
 public:
@@ -17,3 +18,5 @@ public:
   void fromWitmotion(int16_t rawAccX, int16_t rawAccY, int16_t rawAccZ);
   void fromBNO(int16_t rawAccX, int16_t rawAccY, int16_t rawAccZ);
 };
+
+using AtomicAccelerometer = AtomicValue<Accelerometer>;

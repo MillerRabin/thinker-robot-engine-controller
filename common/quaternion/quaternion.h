@@ -7,6 +7,8 @@
 #include "../config/config.h"
 #include "../qBase/qBase.h"
 #include "../euler/euler.h"
+#include "../atomic/atomic.h"
+#include "../logQueue/logQueue.h"
 
 class Quaternion;
 struct SwingTwist;
@@ -15,6 +17,13 @@ struct Vector3 {
   float x;
   float y;
   float z;
+};
+
+struct Axis {
+  float x;
+  float y;
+  float z;
+  float length;
 };
 
 
@@ -40,22 +49,26 @@ class Quaternion {
   
     Quaternion operator * (const Quaternion &q) const {
       return Multiply(*this, q);
-    }    
-    
+    }
+    Vector3 rotate(const Vector3 &v) const;    
     SwingTwist swingTwistDecomposition(const Vector3 &axis) const;
     Euler swingTwistToAngles() const;
-    float twistAngle() const;
-    Quaternion invert() const {
-      return Conjugate(*this);
-    }
+    float twistAngle(const Vector3 &axis) const;
+    Quaternion normalize() const { return Normalize(*this); }
+    Quaternion invert() const { return Conjugate(*this); }
+    Axis getAxis() { return GetAxis(*this); }
+    static Quaternion AngleAxis(float angle, float axisX, float axisY, float axisZ);
     static Quaternion FromEuler(float roll, float pitch, float yaw);
     static Quaternion Conjugate(const Quaternion &q);
     static Quaternion Multiply(const Quaternion &a, const Quaternion &b);
     static Quaternion Normalize(const Quaternion &q);
     static Quaternion Difference(const Quaternion &start, const Quaternion &end);
-    static Quaternion Clone(const Quaternion &q);
+    static Quaternion Clone(const Quaternion &q);    
+    static Axis GetAxis(const Quaternion &delta);
     Matrix3 toRotationMatrix() const;    
-    Euler getEuler() const;
+    Euler toEuler() const;
+    Vector3 getGravityVector() const;
+    
     bool isZero() const {
       return (i == 0) && (j == 0) && (k == 0) && (real == 0);
     }
@@ -68,3 +81,5 @@ struct SwingTwist {
   Quaternion swing;
   Quaternion twist;
 };
+
+using AtomicQuaternion = AtomicValue<Quaternion>;

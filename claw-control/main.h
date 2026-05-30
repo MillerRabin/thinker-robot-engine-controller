@@ -3,37 +3,35 @@
 
 // FreeRTOS
 #include <FreeRTOS.h>
-#include <task.h>
 #include <queue.h>
-#include <timers.h>
 #include <semphr.h>
+#include <task.h>
+#include <timers.h>
 // CXX
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <cstdlib>
-#include <cstdint>
-#include <cstring>
-#include <sstream>
-#include <iomanip>
-#include <algorithm>
 // Pico SDK
-#include "pico/stdlib.h"
 #include "pico/binary_info.h"
+#include "pico/stdlib.h"
 
+#include "../common/config/config.h"
+#include "../common/logQueue/logQueue.h"
 #include "armClaw/armClaw.h"
-#include <math.h>
 #include <hardware/pwm.h>
-#include "../common/config/config.h" 
+#include <math.h>
 
 using std::string;
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
-
-  
 
 #ifdef __cplusplus
 } // extern "C"

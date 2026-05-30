@@ -3,7 +3,7 @@
 Servo::Servo(const uint pin, Range degreeRange, const float homePosition,
              const float freq, const float lowPeriod, const float highPeriod)
     : pin(pin), minDegree(degreeRange.from), maxDegree(degreeRange.to),
-      lowPeriod(lowPeriod), highPeriod(highPeriod),
+      lowPeriod(lowPeriod), highPeriod(highPeriod), physicalAngle(homePosition),
       printer(pdMS_TO_TICKS(100)) {
   gpio_set_function(pin, GPIO_FUNC_PWM);
   slice = pwm_gpio_to_slice_num(pin);
@@ -103,6 +103,7 @@ int Servo::setDegreeDirect(const float degree) {
   if (positionTime == 0) {
     positionTime = xTaskGetTickCount();
   }
+  physicalAngle = degree;
   return SERVO_OK;
 }
 
@@ -128,23 +129,11 @@ void Servo::tick() {
   if ((dtUs <= 0) || isnan(imuAngle) || isnan(physicalAngle) || isnan(targetAngle))
     return;
 
-  /*if (!isPositioned()) {
-    moveStarted = now;
-    setDegreeDirect(imuAngle);
-    return;
-  }*/
-
-
   float dtSec = dtUs / 1000000.0f;
   dtSec = std::min(dtSec, 0.01f);
 
   const float error = targetAngle - imuAngle;
   const float absError = fabsf(error);
-
-  /*if (absError <= deadZone) {
-    physicalAngle = imuAngle;
-    return;
-  }*/
 
   const float dir = (error >= 0.0f) ? 1.0f : -1.0f;
   const float currentSpeed = speedBuffer.speed();

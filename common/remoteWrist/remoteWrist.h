@@ -1,20 +1,21 @@
 #pragma once
 
-#include "pico/stdlib.h"
 #include "../../common/bus/bus.h"
-#include "../../common/remoteBNO/remoteBNO.h"
 #include "../../common/config/config.h"
+#include "../../common/remoteBNO/remoteBNO.h"
+#include <atomic>
+#include "pico/stdlib.h"
 
-class RemoteShoulder {
+class RemoteWrist {
 private:
-  TickType_t lastUpdated = 0;
+  TickType_t lastUpdated = 0;  
   const TickType_t maxInterval = pdMS_TO_TICKS(500);
-  void updateTime() { lastUpdated = xTaskGetTickCount(); }
+  void updateTime() { lastUpdated = xTaskGetTickCount(); }  
 public:
   std::atomic_ulong status;
-  bool isCalibrated();
+  bool isCalibrated();  
   bool isPositionOK();
-  bool isOnline();
+  bool isOnline();  
   RemoteBNO imu;
   void dispatchMessage(can2040_msg frame);
 };

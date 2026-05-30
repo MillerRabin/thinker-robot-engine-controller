@@ -1,50 +1,66 @@
 cmake_minimum_required(VERSION 3.14)
 
-# Make project data accessible to compiler
+# ==============================
+# Compile definitions
+# ==============================
+
 add_compile_definitions(APP_NAME="${APP_WRIST_NAME}")
 add_compile_definitions(APP_VERSION="${APP_WRIST_VERSION_NUMBER}")
 add_compile_definitions(BUILD_NUM=${BUILD_NUMBER})
 
-# Include app source code file(s)
+# ==============================
+# Sources
+# ==============================
+
+file(GLOB_RECURSE APP_WRIST_SOURCES CONFIGURE_DEPENDS
+    "${APP_WRIST_SRC_DIRECTORY}/*.cpp"
+    "${APP_COMMON_DIRECTORY}/*.cpp"
+    "${APP_COMMON_DIRECTORY}/*.c"
+)
+
+list(FILTER APP_WRIST_SOURCES EXCLUDE REGEX ".*/example/.*")
+list(FILTER APP_WRIST_SOURCES EXCLUDE REGEX ".*/examples/.*")
+list(FILTER APP_WRIST_SOURCES EXCLUDE REGEX ".*/test/.*")
+list(FILTER APP_WRIST_SOURCES EXCLUDE REGEX ".*/tests/.*")
+list(FILTER APP_WRIST_SOURCES EXCLUDE REGEX ".*/mock/.*")
+
+# ==============================
+# Executable
+# ==============================
+
 add_executable(${APP_WRIST_NAME}
-  ${APP_WRIST_SRC_DIRECTORY}/main.cpp
-  ${APP_WRIST_SRC_DIRECTORY}/armWrist/armWrist.cpp
-  ${APP_COMMON_DIRECTORY}/canBus/src/can2040.c
-  ${APP_COMMON_DIRECTORY}/BNO080/BNO080.cpp
-  ${APP_COMMON_DIRECTORY}/remoteBNO/remoteBNO.cpp    
-  ${APP_COMMON_DIRECTORY}/servo/servo.cpp
-  ${APP_COMMON_DIRECTORY}/flashSettings/flashSettings.cpp
-  ${APP_COMMON_DIRECTORY}/imuBase/imuBase.cpp
-  ${APP_COMMON_DIRECTORY}/localBNO/localBNO.cpp
-  ${APP_COMMON_DIRECTORY}/bus/bus.cpp  
-  ${APP_COMMON_DIRECTORY}/armPart/armPart.cpp  
-  ${APP_COMMON_DIRECTORY}/qBase/qBase.cpp
-  ${APP_COMMON_DIRECTORY}/accelerometer/accelerometer.cpp
-  ${APP_COMMON_DIRECTORY}/gyroscope/gyroscope.cpp
-  ${APP_COMMON_DIRECTORY}/euler/euler.cpp
-  ${APP_COMMON_DIRECTORY}/quaternion/quaternion.cpp
-  ${APP_COMMON_DIRECTORY}/armPlatform/armPlatform.cpp
-  ${APP_COMMON_DIRECTORY}/bootsel/bootsel.cpp
-  ${APP_COMMON_DIRECTORY}/measureRange/measureRange.cpp
-  ${APP_COMMON_DIRECTORY}/accuracy/accuracy.cpp
-  ${APP_COMMON_DIRECTORY}/barometer/barometer.cpp
-  ${APP_COMMON_DIRECTORY}/power/power.cpp
+    ${APP_WRIST_SOURCES}
 )
 
-# Link to built libraries
-target_link_libraries(${APP_WRIST_NAME} LINK_PUBLIC
-  pico_stdlib
-  hardware_i2c
-  hardware_spi
-  hardware_pwm
-  hardware_flash
-  hardware_sync
-  FreeRTOS
+# ==============================
+# Include directories
+# ==============================
+
+target_include_directories(${APP_WRIST_NAME} PRIVATE
+    ${FREERTOS_CFG_DIRECTORY}
+    ${APP_COMMON_DIRECTORY}
 )
 
-# Enable/disable STDIO via USB and UART
+# ==============================
+# Link libraries
+# ==============================
+
+target_link_libraries(${APP_WRIST_NAME}
+    pico_stdlib
+    hardware_i2c
+    hardware_spi
+    hardware_pwm
+    hardware_flash
+    hardware_sync
+    FreeRTOS-Kernel
+    FreeRTOS-Kernel-Heap4
+)
+
+# ==============================
+# Pico settings
+# ==============================
+
 pico_enable_stdio_usb(${APP_WRIST_NAME} 1)
 pico_enable_stdio_uart(${APP_WRIST_NAME} 0)
 
-# Enable extra build products
 pico_add_extra_outputs(${APP_WRIST_NAME})

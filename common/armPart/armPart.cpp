@@ -1,35 +1,36 @@
 #include "armPart.h"
 
-ArmPart::ArmPart(const uint canRxPin, const uint canTxPin) : bus(canRxPin, canTxPin, this, canCallback) {
-  FlashSettings::init();
+ArmPart::ArmPart(const uint canRxPin, const uint canTxPin)
+    : bus(canRxPin, canTxPin, this, canCallback) {
   auto status = bus.begin();
-  if (status!= CAN_SUCCESS) { 
-    printf("Can error %d\n", status); 
+  if (status != CAN_SUCCESS) {
+    printf("Can error %d\n", status);
   }
-  FlashSettings::init();
-  loadHomeQuaternion();
 }
 
-int ArmPart::updateQuaternion(Quaternion quat) {    
+int ArmPart::updateQuaternion(Quaternion quat) {
   uint64_t data = quat.serialize();
-  uint8_t id = getQuaternionMessageId();  
-  if (id == 0) return -1;  
+  uint8_t id = getQuaternionMessageId();
+  if (id == 0)
+    return -1;
   bus.send(id, data);
   return 0;
 }
 
-int ArmPart::updateGyroscope(Gyroscope gyro) {  
+int ArmPart::updateGyroscope(Gyroscope gyro) {
   uint64_t data = gyro.serialize();
   uint8_t id = getGyroscopeMessageId();
-  if (id == 0) return -1;
+  if (id == 0)
+    return -1;
   bus.send(id, data);
   return 0;
 }
 
-int ArmPart::updateAccelerometer(Accelerometer acc) {  
+int ArmPart::updateAccelerometer(Accelerometer acc) {
   uint64_t data = acc.serialize();
   uint8_t id = getAccelerometerMessageId();
-  if (id == 0) return -1;
+  if (id == 0)
+    return -1;
   bus.send(id, data);
   return 0;
 }
@@ -37,7 +38,8 @@ int ArmPart::updateAccelerometer(Accelerometer acc) {
 int ArmPart::updateAccuracy(Accuracy acc) {
   uint64_t data = acc.serialize();
   uint8_t id = getAccuracyMessageId();
-  if (id == 0) return -1;
+  if (id == 0)
+    return -1;
   bus.send(id, data);
   return 0;
 }
@@ -45,34 +47,36 @@ int ArmPart::updateAccuracy(Accuracy acc) {
 int ArmPart::updateHeight(uint32_t height, uint16_t temperature) {
   uint64_t data = (uint64_t)temperature << 32 | (uint64_t)height;
   uint8_t id = getHeightMessageId();
-  if (id == 0) return -1;
+  if (id == 0)
+    return -1;
   bus.send(id, data);
   return 0;
 }
 
-int ArmPart::updateStatuses() {  
+int ArmPart::updateStatuses() {
   uint8_t id = getStatusesMessageId();
   if (id == 0)
     return -1;
-  bus.send(id, statuses);  
+  bus.send(id, statuses);
   return 0;
 }
 
 int ArmPart::updateRange(float longRange, float shortRange) {
-  MeasureRange mRange;  
-  mRange.set(longRange, shortRange);  
+  MeasureRange mRange;
+  mRange.set(longRange, shortRange);
   uint64_t data = mRange.serialize();
   uint8_t id = getRangeMessageId();
-  if (id == 0) return -1;
+  if (id == 0)
+    return -1;
   bus.send(id, data);
   return 0;
 }
 
-void ArmPart::canCallback(void* pArmPart, can2040_msg frame) {
+void ArmPart::canCallback(void *pArmPart, can2040_msg frame) {
   uint32_t ident = frame.id;
-  ArmPart* armPart = (ArmPart*)pArmPart;
+  ArmPart *armPart = (ArmPart *)pArmPart;
   armPart->platform.dispatchMessage(frame);
-  armPart->busReceiveCallback(frame);  
+  armPart->busReceiveCallback(frame);
 }
 
 void ArmPart::setPositionStatus(bool value) {
@@ -83,9 +87,7 @@ void ArmPart::setPositionStatus(bool value) {
   }
 }
 
-bool ArmPart::getPositionStatus() { 
-  return (statuses & ARM_POSITION_OK) != 0;
-}
+bool ArmPart::getPositionStatus() { return (statuses & ARM_POSITION_OK) != 0; }
 
 void ArmPart::setEngineTaskStatus(bool value) {
   if (value) {
@@ -98,8 +100,7 @@ void ArmPart::setEngineTaskStatus(bool value) {
 void ArmPart::setBusReceivingTaskStatus(bool value) {
   if (value) {
     statuses |= BUS_RECEIVING_OK;
-  }
-  else {
+  } else {
     statuses &= ~BUS_RECEIVING_OK;
   }
 }
@@ -115,8 +116,7 @@ void ArmPart::setYCalibrating(bool value) {
 void ArmPart::setZCalibrating(bool value) {
   if (value) {
     statuses |= ARM_Z_CALIBRATING;
-  }
-  else {
+  } else {
     statuses &= ~ARM_Z_CALIBRATING;
   }
 }
@@ -129,97 +129,61 @@ void ArmPart::setXCalibrating(bool value) {
   }
 }
 
+void ArmPart::setArmCalibrated(bool value) {
+  if (value) {
+    statuses |= ARM_CALIBRATED;
+  } else {
+    statuses &= ~ARM_CALIBRATED;
+  }
+}
+
 void ArmPart::setUpgrading(bool value) {
   if (value) {
     statuses |= ARM_UPGRADING;
-  }
-  else {
+  } else {
     statuses &= ~ARM_UPGRADING;
   }
 }
 
-void ArmPart::setTareError(bool value) {
-  if (value) {
-    statuses |= ARM_TARE_ERROR;
-  } else {
-    statuses &= ~ARM_TARE_ERROR;
-  }
-}
-
-bool ArmPart::getTareError() { 
-  return (statuses & ARM_TARE_ERROR) != 0; 
-}
-
-void ArmPart::setHomeQuaternion(Quaternion homeQuaternion, Quaternion platformQuaternion) {  
-  Quaternion pi = Quaternion::Conjugate(platformQuaternion);
-  this->offset = pi * homeQuaternion;
-  EEPROMPositionData ep;
-  ep.set(this->offset);  
-  FlashSettings::save(ep);
-  setTareError(false);
-}
-
-Quaternion ArmPart::align(const Quaternion& dest, const Quaternion& source) {  
-  return Quaternion::Multiply(dest, source);
-}
-
-Quaternion ArmPart::difference(const Quaternion& a, const Quaternion& b) {
-  Quaternion pInv = Quaternion::Conjugate(b);
-  Quaternion qn = Quaternion::Multiply(pInv, a);
-  if (qn.real < 0.0f) {
-    qn.real = -qn.real;
-    qn.i = -qn.i;
-    qn.j = -qn.j;
-    qn.k = -qn.k;
-  }
-  
-  return qn;
-}
-
 int ArmPart::sendFirmwareUpgradeMessage() {
   uint8_t id = getFirmwareUpgradeMessageId();
-  if (id == 0) return -1;
+  if (id == 0)
+    return -1;
   bus.send(id, 0);
   return 0;
 }
 
-bool ArmPart::loadHomeQuaternion() {
-  EEPROMPositionData quaternionData;  
-  if (!FlashSettings::load(quaternionData)) {  
-    setTareError(true);
-    return false;
-  }  
-  this->offset.deserialize(quaternionData.getBuffer());    
-  setTareError(this->offset.isZero());
-  return true;
-}
-
-void ArmPart::scheduleSave() {
-  needSaveQuaternion = true;
-}
-
-void ArmPart::tick(const Quaternion &origin, const Quaternion &current) {
-  TickType_t now = xTaskGetTickCount();
-  if (needSaveQuaternion) {
-    if (tareStart != 0) {
-      if (needSaveQuaternion && (now - tareStart) > tareDelay) {
-        setHomeQuaternion(current, origin);
-        tareStart = 0;
-        needSaveQuaternion = false;
-        printf("Home quaternion saved\n");
-      }
-    } else {
-      tareStart = now;
-    }
-  }
-}
-
-float ArmPart::NormalizeAngle(float angle) {  
+float ArmPart::NormalizeAngle(float angle) {
   if (angle <= 0 && angle >= -90) {
-   return angle;
+    return angle;
   }
   angle = fmodf(angle, 360.0f);
   if (angle < 0)
     angle += 360.0f;
-  return angle;  
+  return angle;
+}
+
+bool ArmPart::Equals(float a, float b, float threshold) {
+  return (fabs(a - b) < threshold);
+}
+
+void ArmPart::setOffsetZYX(const float angleX, const float angleY,
+                           const float angleZ, const Quaternion &imu) {
+  
+  Vector3 la = getIMUAngles(angleX, angleY, angleZ);
+  Quaternion qx = Quaternion::AngleAxis(la.x * DEG_TO_RAD, 1.0f, 0.0f, 0.0f);
+  Quaternion qy = Quaternion::AngleAxis(la.y * DEG_TO_RAD, 0.0f, 1.0f, 0.0f);
+  Quaternion qz = Quaternion::AngleAxis(la.z * DEG_TO_RAD, 0.0f, 0.0f, 1.0f);
+  Quaternion qm = qz * qy * qx;
+  this->offset = qm * imu.invert(); 
+}
+
+void ArmPart::setOffsetYZX(const float angleX, const float angleY,
+                           const float angleZ, const Quaternion &imu) {
+  Vector3 la = getIMUAngles(angleX, angleY, angleZ);
+  Quaternion qx = Quaternion::AngleAxis(la.x * DEG_TO_RAD, 1.0f, 0.0f, 0.0f);
+  Quaternion qy = Quaternion::AngleAxis(la.y * DEG_TO_RAD, 0.0f, 1.0f, 0.0f);
+  Quaternion qz = Quaternion::AngleAxis(la.z * DEG_TO_RAD, 0.0f, 0.0f, 1.0f);
+  Quaternion qm = qy * qz * qx;
+  this->offset = qm * imu.invert();
 }

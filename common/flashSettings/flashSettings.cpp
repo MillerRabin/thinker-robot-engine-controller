@@ -36,7 +36,8 @@ void FlashSettings::init() {
     return;
   }
 
-  BaseType_t res = xTaskCreate(FlashSettings::flashSaveTask, "FlashSave", 4096, NULL, tskIDLE_PRIORITY, &FlashSettings::flashSaveTaskHandle);
+  BaseType_t res = xTaskCreateAffinitySet(
+      FlashSettings::flashSaveTask, "FlashSave", 4096, NULL, tskIDLE_PRIORITY, IMU_CORE, &FlashSettings::flashSaveTaskHandle);
   if (res != pdPASS) {
     printf("Failed to create flashSaveTask\n");
   }

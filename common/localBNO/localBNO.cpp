@@ -3,67 +3,52 @@
 uint32_t LocalBNO::notificationIndex = 1;
 TaskHandle_t LocalBNO::compassTaskHandle;
 
-void LocalBNO::compassCallback(uint gpio, uint32_t events) {
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  vTaskNotifyGiveIndexedFromISR(LocalBNO::compassTaskHandle, LocalBNO::notificationIndex, &xHigherPriorityTaskWoken);
-  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-}
-
 void LocalBNO::tare(uint8_t axisMask) {
   imu.tare(axisMask, 0);
 }
 
-void LocalBNO::compassTask(void *instance) {  
+void LocalBNO::compassTask(void *instance) {
   LocalBNO *bno = (LocalBNO *)instance;
   bool needCalibration = false;
   bool needSaveCalibration = false;
-  TickType_t lastCalibrationCheck = 0;  
+  TickType_t lastCalibrationCheck = 0;
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  TickType_t lTime = xTaskGetTickCount();
   BNO080 *imu = &(bno->imu);
-  const TickType_t calibrationCheckInterval = pdMS_TO_TICKS(3000);  
-  TickType_t lastSendTime = 0;
-  uint noDataCount = 0;
-
-  while (true) {
+  const TickType_t calibrationCheckInterval = pdMS_TO_TICKS(3000);
+  bno->begin();  
+  while (true) {            
     if (imu->hasReset()) {
       printf("IMU was reset. Re-enabling sensor...\n");
       needCalibration = false;
       bno->initIMU();
     }
-    
-    uint32_t notificationValue = ulTaskNotifyTakeIndexed(notificationIndex, pdTRUE, pdMS_TO_TICKS(IMU_WAIT_TIMEOUT));
-    if (notificationValue == 0) {            
-      bno->armPart->setPositionStatus(false);
-      noDataCount++;
-      if (noDataCount >= 5) {
-        noDataCount = 0;
-        printf("Restarting imu\n");
-        auto res = bno->begin();
-        needCalibration = false;
-        if (res) {
-          printf("IMU initialized\n");
-        } else {
-          printf("IMU initialization failed\n");
-        }
-      }
-      vTaskDelay(pdMS_TO_TICKS(IMU_NO_DATA_TIMEOUT));
-      continue;
-    }        
-    
-    bno->armPart->setPositionStatus(true);
 
-    uint16_t datatype;
-    
-    datatype = imu->getReadings();    
-    noDataCount = 0;
-    TickType_t now = xTaskGetTickCount();
-    lastSendTime = now;
+    bool isAlive = bno->isPositionOK();
+    bno->armPart->setPositionStatus(isAlive);
+    if (!isAlive) {
+      printf("Restarting imu\n");
+      auto res = bno->begin();
+      needCalibration = false;
+      vTaskDelay(pdMS_TO_TICKS(IMU_UPDATE_INTERVAL));
+      continue;
+    }
+        
+    uint16_t datatype = imu->getReadings();
+    if (datatype == 0) {
+      vTaskDelay(1);
+      continue;
+    }
+    TickType_t now = xTaskGetTickCount();    
 
     switch (datatype) {
       case SENSOR_REPORTID_ROTATION_VECTOR:
-      case SENSOR_REPORTID_GAME_ROTATION_VECTOR: {        
-        bno->quaternion.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);        
+      case SENSOR_REPORTID_GAME_ROTATION_VECTOR: {                
+        Quaternion quat;
+        quat.fromBNO(imu->rawQuatI, imu->rawQuatJ, imu->rawQuatK, imu->rawQuatReal);        
+        Quaternion qr = (bno->rotate.isValid()) ? quat * bno->rotate : quat;
+        bno->quaternion.store(qr);
         bno->armPart->updateQuaternion(bno);
-        bno->updateQuaternionTime();        
         break;
       }
       case SENSOR_REPORTID_GYROSCOPE: {
@@ -72,14 +57,17 @@ void LocalBNO::compassTask(void *instance) {
         break;
       }
       case SENSOR_REPORTID_LINEAR_ACCELERATION: {
-        bno->accelerometer.fromBNO(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
-        bno->armPart->updateAccelerometer(bno);
-          
+        Accelerometer acc;
+        acc.fromBNO(imu->rawLinAccelX, imu->rawLinAccelY, imu->rawLinAccelZ);
+        bno->accelerometer.store(acc);
+        bno->armPart->updateAccelerometer(bno);            
         break;
       }
-      case SENSOR_REPORTID_ACCELEROMETER: {
-        bno->accelerometer.fromBNO(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);        
-        bno->armPart->updateAccelerometer(bno);          
+      case SENSOR_REPORTID_ACCELEROMETER: {        
+        Accelerometer acc;
+        acc.fromBNO(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);        
+        bno->accelerometer.store(acc);
+        bno->armPart->updateAccelerometer(bno);
         break;
       }
       default:
@@ -111,6 +99,7 @@ void LocalBNO::compassTask(void *instance) {
         needSaveCalibration = true;
       }
     }
+    vTaskDelayUntil(&lastWakeTime, IMU_UPDATE_INTERVAL);
   }
 }
 
@@ -126,10 +115,17 @@ bool LocalBNO::updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quatern
   return ad || rd || qd || gd;
 }
 
-void LocalBNO::initIMU() {
-  imu.enableRotationVector(IMU_UPDATE_INTERVAL);
+uint LocalBNO::getRefreshInterval() {
+  return (useSPI) ? 5 : 10;
+}
+
+void LocalBNO::initIMU() {    
+  uint rr = getRefreshInterval();
+  imu.enableGameRotationVector(rr);
+  // imu.enableRotationVector(IMU_UPDATE_INTERVAL);
   //imu.enableLinearAccelerometer(10);
-  //imu.enableGyro(5);
+  imu.enableAccelerometer(rr);
+  // imu.enableGyro(5);
 }
 
 uint LocalBNO::writeSystemOrientationQuaternion(float w, float x, float y, float z) {
@@ -157,7 +153,15 @@ LocalBNO::LocalBNO(ArmPart *armPart, const uint sdaPin, const uint sclPin, const
   misoPin(0xFF),
   mosiPin(0xFF),
   armPart(armPart),
-  useSPI(false) {}
+  useSPI(false) {
+    if (LocalBNO::compassTaskHandle == NULL) {
+      if (xTaskCreateAffinitySet(LocalBNO::compassTask, "LocalBNO::compassTask",
+                                4096, this, 5, IMU_CORE,
+                                &LocalBNO::compassTaskHandle) != pdPASS) {
+        printf("LocalBNO::compassTask creation failed\n");
+      }
+    }
+}
 
 LocalBNO::LocalBNO(ArmPart *armPart, const uint sckPin, const uint misoPin, const uint mosiPin, const uint csPin, const uint rstPin, const uint intPin) : 
   sckPin(sckPin),
@@ -169,11 +173,19 @@ LocalBNO::LocalBNO(ArmPart *armPart, const uint sckPin, const uint misoPin, cons
   sdaPin(0xFF),
   sclPin(0xFF),
   armPart(armPart),
-  useSPI(true) {}
+  useSPI(true) {
+    if (LocalBNO::compassTaskHandle == NULL) {
+      if (xTaskCreateAffinitySet(LocalBNO::compassTask, "LocalBNO::compassTask",
+                                 4096, this, 5, IMU_CORE,
+                                 &LocalBNO::compassTaskHandle) != pdPASS) {
+        printf("LocalBNO::compassTask creation failed\n");        
+      }
+    }
+  }
 
 
-bool LocalBNO::begin() {
-  if (useSPI) {
+bool LocalBNO::begin() {  
+  if (useSPI) {    
     auto spires = beginSPI();
     if (!spires) {
       printf("Failed to initialize LocalBNO IMU in SPI mode\n");
@@ -185,18 +197,13 @@ bool LocalBNO::begin() {
       printf("Failed to initialize LocalBNO IMU in I2C mode\n");
       //return false;
     }
-  }    
-  initIMU();  
-  if (LocalBNO::compassTaskHandle == NULL) {
-    if (xTaskCreate(LocalBNO::compassTask, "LocalBNO::compassTask", 4096, this, 6, &LocalBNO::compassTaskHandle) != pdPASS) {
-      printf("LocalBNO::compassTask creation failed\n");
-      return false;
-    }
-  }
+  }      
+  initIMU();
+  quaternion.makeFresh();
   return true;
 } 
 
-bool LocalBNO::beginI2C() {
+bool LocalBNO::beginI2C() {  
   i2c_init(i2c_default, 400 * 1000);
   gpio_set_function(sdaPin, GPIO_FUNC_I2C);
   gpio_set_function(sclPin, GPIO_FUNC_I2C);
@@ -207,14 +214,13 @@ bool LocalBNO::beginI2C() {
   gpio_put(rstPin, 1);
   gpio_init(intPin);
   gpio_set_dir(intPin, GPIO_IN);
-  gpio_pull_up(intPin);
-  gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &LocalBNO::compassCallback);  
+  gpio_pull_up(intPin);  
   bi_decl(bi_2pins_with_func(sdaPin, sclPin, GPIO_FUNC_I2C));
   bi_decl(bi_2pins_with_func(intPin, rstPin, GPIO_FUNC_SIO));
   return imu.begin(BNO080_DEFAULT_ADDRESS, i2c_default, intPin); 
 }
 
-bool LocalBNO::beginSPI() {
+bool LocalBNO::beginSPI() {  
   spi_init(spi0, 3 * 1000 * 1000);
   spi_set_format(spi0, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
 
@@ -236,11 +242,10 @@ bool LocalBNO::beginSPI() {
   bi_decl(bi_3pins_with_func(misoPin, mosiPin, sckPin, GPIO_FUNC_SPI));
   bi_decl(bi_1pin_with_func(csPin, GPIO_FUNC_SIO));
   bi_decl(bi_2pins_with_func(intPin, rstPin, GPIO_FUNC_SIO));
-  gpio_set_irq_enabled_with_callback(intPin, GPIO_IRQ_EDGE_FALL, true, &LocalBNO::compassCallback);
+    
   return imu.beginSPI(spi0, csPin, intPin, rstPin);
 }
 
 bool LocalBNO::isPositionOK() {
-  auto now = xTaskGetTickCount();
-  return (now - lastQuaternionUpdated < maxInterval);
+  return quaternion.isFresh();
 }

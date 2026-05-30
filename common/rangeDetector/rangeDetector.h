@@ -34,6 +34,7 @@ class RangeDetector {
     bool initShortDistanceSensor();
     bool initLongDistanceSensor();
     void activateSensors(bool shortSensor, bool longSensor);
+    static TaskHandle_t detectorTaskHandle;
   public:
     ArmPart *armPart;        
     i2c_inst_t *i2c;

@@ -10,13 +10,13 @@
 #include "../gyroscope/gyroscope.h"
 #include "../accuracy/accuracy.h"
 
-class IMUBase {
+class IMUBase {  
   public:
-    Quaternion quaternion;
+    AtomicQuaternion quaternion;    
     Accuracy accuracy;
     Gyroscope gyroscope;
-    Accelerometer accelerometer;
+    AtomicAccelerometer accelerometer;
     Accelerometer lastAccelerometer;
     uint32_t height;    
-    uint16_t temperature;
+    uint16_t temperature;    
 };
