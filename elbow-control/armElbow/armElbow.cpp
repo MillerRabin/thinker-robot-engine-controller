@@ -9,20 +9,19 @@ void ArmElbow::calibrateLoop() {
   updateStatuses();
 }
 
-void ArmElbow::calibrateYLoop() {    
-  Periodic printer(pdMS_TO_TICKS(1000));
-  setEngineTaskStatus(false);
-  setYCalibrating(true);  
-  Vector3 iv = { 0, angleY(), 0};
-  Vector3 gv = getPhysicalAngles(iv);
-  int maxCount = 10;    
-  for (int i = 0; i < maxCount; i++) {    
-    elbowY.setDegreeDirect(gv.y);
-    updateStatuses();
+void ArmElbow::calibrateYLoop() {
+  setYCalibrating(true);
+  int maxCounter = 10;  
+  float imuY = angleFromGravityY();
+  imuY = std::clamp(imuY, 0.0f, 180.0f);      
+  for (int i = 0; i < maxCounter; i++) {
+    //elbowY.setDegreeDirect(imuY);
     vTaskDelay(pdMS_TO_TICKS(50));
-  }    
+    updateStatuses();
+  }
   setYCalibrating(false);
 }
+
 
 void ArmElbow::engineTask(void *instance) {
   auto *elbow = static_cast<ArmElbow *>(instance);
@@ -32,10 +31,8 @@ void ArmElbow::engineTask(void *instance) {
   while (true) {
     auto sp = elbow->imu.isPositionOK();
     auto pp = elbow->platform.isPositionOK();
-    //auto sc = elbow->shoulder.isCalibrated();
-    bool sc = false;
-
-    if (!sp || !pp || !sc) {
+    
+    if (!sp || !pp ) {
       elbow->setEngineTaskStatus(false);
       elbow->updateStatuses();
       vTaskDelay(pdMS_TO_TICKS(250));
@@ -43,9 +40,9 @@ void ArmElbow::engineTask(void *instance) {
     }
     
     Quaternion eQuat = elbow->imu.quaternion.load();
-    Quaternion pQuat = elbow->platform.imu.quaternion.load();
+    Quaternion sQuat = elbow->shoulder.imu.quaternion.load();
 
-    if (!eQuat.isValid() || !eQuat.isValid()) {
+    if (!eQuat.isValid() || !sQuat.isValid()) {
       elbow->setEngineTaskStatus(false);
       elbow->updateStatuses();
       vTaskDelay(pdMS_TO_TICKS(250));
@@ -154,4 +151,13 @@ Vector3 ArmElbow::getIMUAngles() {
   Quaternion qm = base * imu.quaternion.load();
   float pitch = qm.twistAngle({0.0f, 1.0f, 0.0f});  
   return {0, pitch, 0};
+}
+
+float ArmElbow::angleFromGravityY() {
+  Accelerometer acc = imu.accelerometer.load();
+  float res = atan2(acc.y, acc.z) * RAD_TO_DEG;
+  /*if (res < -45) {
+    res = 360 + res;
+  }*/
+  return res;
 }

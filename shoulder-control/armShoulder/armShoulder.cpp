@@ -3,15 +3,19 @@
 #include "../common/quaternion/quaternion.h"
 #include "../common/speedBuffer/speedBuffer.h"
 
-void ArmShoulder::calibrateYLoop() {  
-  setYCalibrating(true);  
-  int maxCounter = 10;
+void ArmShoulder::calibrateYLoop() {
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  setYCalibrating(true);    
   float imuY = angleFromGravityY();
   imuY = std::clamp(imuY, 0.0f, 180.0f);  
-  for (int i = 0; i < maxCounter; i++) {
-    shoulderY.setDegreeDirect(imuY);
-    vTaskDelay(pdMS_TO_TICKS(50));
+  shoulderY.setDegreeDirect(imuY);
+  vTaskDelay(pdMS_TO_TICKS(2000));
+  shoulderY.setTargetAngle(SHOULDER_Y_HOME_POSITION, 1000, 0.001f);  
+  while (!shoulderY.isPositioned()) {    
+    shoulderY.setIMUAngle(shoulderY.getPhysicalAngle());
+    shoulderY.tick();    
     updateStatuses();
+    vTaskDelayUntil(&lastWakeTime, taskInterval);    
   }
   setYCalibrating(false);
 }
@@ -19,6 +23,7 @@ void ArmShoulder::calibrateYLoop() {
 void ArmShoulder::calibrateZLoop() {
   setZCalibrating(true);
   shoulderZ.setDegreeDirect(SHOULDER_Z_HOME_POSITION);
+  shoulderZ.setTargetAngle(SHOULDER_Z_HOME_POSITION, 1000, 0.001f);
   vTaskDelay(pdMS_TO_TICKS(2000));
   setZCalibrating(false);
 }
@@ -28,9 +33,8 @@ void ArmShoulder::calibrateLoop() {
   updateStatuses();
   calibrateYLoop();
   calibrateZLoop();
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  Quaternion homeQ = getHomeQuaternion();
-  base = homeQ.invert();
+  vTaskDelay(pdMS_TO_TICKS(2000));  
+  base = imu.quaternion.load().invert();  
   setArmCalibrated(true);
   updateStatuses();
 }
@@ -50,18 +54,18 @@ void ArmShoulder::engineLoop() {
     Vector3 physicalAngles = getPhysicalAngles(imuAngles);
     Vector3 logicalAngles = getIMUAngles(0, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
     /*printer.interval([&]() {
-      LogQueue::Log("Y: %.3f %.3f %.3f, Z: %.3f %.3f %.3f\n", logicalAngles.y, imuAngles.y * RAD_TO_DEG, physicalAngles.y, logicalAngles.z, imuAngles.z * RAD_TO_DEG, physicalAngles.z);
+      LogQueue::Log("Y: %.2f %.2f %.2f, Z: %.2f %.2f %.2f, SignY: %d\n",
+                    physicalAngles.y, imuAngles.y * RAD_TO_DEG, logicalAngles.y,
+                    physicalAngles.z, imuAngles.z * RAD_TO_DEG, logicalAngles.z,
+                    (int)yAxisSign);
     });*/
 
     shoulderY.setIMUAngle(physicalAngles.y);
     shoulderZ.setIMUAngle(physicalAngles.z);
-    //shoulderY.setIMUAngle(shoulderY.getPhysicalAngle());
-    //shoulderZ.setIMUAngle(shoulderZ.getPhysicalAngle());
     shoulderY.tick();
     shoulderZ.tick();
 
-    updateStatuses();
-    //vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));
+    updateStatuses();    
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
 }
@@ -96,9 +100,7 @@ void ArmShoulder::engineTask(void *instance) {
     shoulder->calibrateLoop();  
     shoulder->engineLoop();
     shoulder->setEngineTaskStatus(false);
-    shoulder->updateStatuses();
-    //LogQueue::Log("ArmShoulder engine task finished\n");
-    //vTaskDelete(NULL);
+    shoulder->updateStatuses();    
   }
 }
 
@@ -120,7 +122,7 @@ int ArmShoulder::updateQuaternion(IMUBase *position) {
   if (!base.isValid()) {
     return ERROR_PART_IS_NOT_CALIBRATED;
   }
-  Quaternion quat = position->quaternion.load() * base;
+  Quaternion quat = base * position->quaternion.load();
   return ArmPart::updateQuaternion(quat);
 }
 
@@ -183,11 +185,11 @@ Vector3 ArmShoulder::getIMUAngles(float physicalX, float physicalY, float physic
 }
 
 Vector3 ArmShoulder::getIMUAngles() {
-  Quaternion qm = imu.quaternion.load() * base;
+  Quaternion qm = base * imu.quaternion.load();
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
   Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f);
   Quaternion qSwing = qZ.invert() * qm;
-  float pitchX = qSwing.twistAngle({yAxisSign, 0.0f, 0.0f});  
+  float pitchX = qSwing.twistAngle({0.0f, 1.0f, 0.0f});  
   return {0, pitchX, yawZ};
 }
 
@@ -224,11 +226,7 @@ Quaternion ArmShoulder::getHomeQuaternion() {
     Quaternion imuQ = imu.quaternion.load();
     float dY = (shoulderY.getPhysicalAngle() - SHOULDER_Y_HOME_POSITION) * DEG_TO_RAD;
     float dZ = (shoulderZ.getPhysicalAngle() - SHOULDER_Z_HOME_POSITION) * DEG_TO_RAD;
-    if (dY < 0.0f) {
-      yAxisSign = -1.0f;
-    }
-    Quaternion qy = Quaternion::AngleAxis(dY, yAxisSign, 0.0f, 0.0f);
-    Quaternion qz = Quaternion::AngleAxis(dZ, 0.0f, 0.0f, 1.0f);
-    
+    Quaternion qy = Quaternion::AngleAxis(dY, 1.0f, 0.0f, 0.0f);
+    Quaternion qz = Quaternion::AngleAxis(dZ, 0.0f, 0.0f, 1.0f);    
     return (qz * qy).invert() * imuQ; 
 }

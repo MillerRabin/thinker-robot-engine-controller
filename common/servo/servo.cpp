@@ -150,23 +150,6 @@ void Servo::tick() {
    
   physicalAngle = std::clamp(nextPhysical, minDegree, maxDegree);
 
-  /*if (absError > 2.0f) {
-    printer.run([this, currentSpeed, remainingUs, now, dtSec]() {
-    printf("%llu, Remaining: %ld, Moving, dt: %.4f, Speed: %f, acceleration: %f, imuAngle: %f, "
-           "cmd: %f\n",
-           (unsigned long long)now, (long)remainingUs, dtSec, currentSpeed,
-           speedBuffer.acceleration(), imuAngle, physicalAngle);
-    });
-  } else {
-    printer.run([this, currentSpeed, remainingUs, now, dtSec]() {
-      printf("%llu,  Remaining: %ld, Achieving, dt: %.4f, Speed: %f, "
-             "acceleration: %f, "
-             "imuAngle: %f, cmd: %f\n",
-             (unsigned long long)now, (long)remainingUs, dtSec, currentSpeed,
-             speedBuffer.acceleration(), imuAngle, physicalAngle);
-    });
-  }*/
-
   setDegreeDirect(physicalAngle);
 }
 
@@ -201,9 +184,8 @@ void Servo::setDeadZone(float dz) {
 }
 
 bool Servo::isPositioned() const {
-  if (positionTime == 0) {
+  if (isnan(targetAngle) || isnan(imuAngle)) {
     return false;
   }
-  auto now = xTaskGetTickCount();
-  return (now - positionTime > positionInterval);
+  return fabsf(targetAngle - imuAngle) <= deadZone;
 }
