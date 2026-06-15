@@ -3,6 +3,7 @@
 #include "../config/config.h"
 #include "../periodic/periodic.h"
 #include "../speedBuffer/speedBuffer.h"
+#include "../logQueue/logQueue.h"
 #include "hardware/clocks.h"
 #include "pico/divider.h"
 #include "pico/stdlib.h"
@@ -39,8 +40,7 @@ private:
   uint pin;
   uint slice;
   uint channel;
-
-  SpeedBuffer speedBuffer;
+  
   uint8_t clk_divider = 1;
   const float lowPeriod;
   const float highPeriod;
@@ -104,6 +104,11 @@ public:
 
   void stop() {
     targetAngle = NAN;    
+  }
+
+  void reset() { 
+    targetAngle = NAN;
+    physicalAngle = NAN;
   }
 
   bool isPositioned() const;

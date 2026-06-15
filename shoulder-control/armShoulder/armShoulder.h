@@ -25,8 +25,7 @@ private:
   void engineLoop();
   Quaternion base;
   float angleFromGravityY();    
-  Quaternion getHomeQuaternion();
-  float yAxisSign = 1.0f;
+  Quaternion getHomeQuaternion();  
 public:
   Servo shoulderZ;
   Servo shoulderY;

@@ -5,13 +5,18 @@
 
 void ArmShoulder::calibrateYLoop() {
   TickType_t lastWakeTime = xTaskGetTickCount();
+  Periodic printer(pdMS_TO_TICKS(500));
+
   setYCalibrating(true);    
   float imuY = angleFromGravityY();
   imuY = std::clamp(imuY, 0.0f, 180.0f);  
   shoulderY.setDegreeDirect(imuY);
   vTaskDelay(pdMS_TO_TICKS(2000));
   shoulderY.setTargetAngle(SHOULDER_Y_HOME_POSITION, 1000, 0.001f);  
-  while (!shoulderY.isPositioned()) {    
+  while (!shoulderY.isPositioned()) {
+    printer.interval([&]() {
+      LogQueue::Log("Calibrating Y... IMU Y: %.3f, Physical Y: %.3f\n", imuY, shoulderY.getPhysicalAngle());
+    });    
     shoulderY.setIMUAngle(shoulderY.getPhysicalAngle());
     shoulderY.tick();    
     updateStatuses();
@@ -34,12 +39,15 @@ void ArmShoulder::calibrateLoop() {
   calibrateYLoop();
   calibrateZLoop();
   vTaskDelay(pdMS_TO_TICKS(2000));  
-  base = imu.quaternion.load().invert();  
+  if (!base.isValid()) {
+    base = imu.quaternion.load().invert();
+  }  
   setArmCalibrated(true);
   updateStatuses();
 }
 
-void ArmShoulder::engineLoop() {  
+void ArmShoulder::engineLoop() { 
+  LogQueue::Log("Starting Engine Loop\n"); 
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));      
   while (true) {
@@ -47,18 +55,18 @@ void ArmShoulder::engineLoop() {
     auto pp = platform.isPositionOK();
     if (!sp || !pp) {
       LogQueue::Log("Engine is turned off\n");
+      shoulderY.reset();
+      shoulderZ.reset();
       break;
     }
 
     Vector3 imuAngles = getIMUAngles();
-    Vector3 physicalAngles = getPhysicalAngles(imuAngles);
-    Vector3 logicalAngles = getIMUAngles(0, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
-    /*printer.interval([&]() {
-      LogQueue::Log("Y: %.2f %.2f %.2f, Z: %.2f %.2f %.2f, SignY: %d\n",
-                    physicalAngles.y, imuAngles.y * RAD_TO_DEG, logicalAngles.y,
-                    physicalAngles.z, imuAngles.z * RAD_TO_DEG, logicalAngles.z,
-                    (int)yAxisSign);
-    });*/
+    Vector3 physicalAngles = getPhysicalAngles(imuAngles);    
+    printer.interval([&]() {
+      LogQueue::Log("Y: %.2f %.2f, Z: %.2f %.2f\n",
+                    physicalAngles.y, imuAngles.y * RAD_TO_DEG,
+                    physicalAngles.z, imuAngles.z * RAD_TO_DEG);
+    });
 
     shoulderY.setIMUAngle(physicalAngles.y);
     shoulderZ.setIMUAngle(physicalAngles.z);
@@ -184,7 +192,7 @@ Vector3 ArmShoulder::getIMUAngles(float physicalX, float physicalY, float physic
   return { 0, getIMUAngleY(physicalY), getIMUAngleZ(physicalZ) };  
 }
 
-Vector3 ArmShoulder::getIMUAngles() {
+Vector3 ArmShoulder::getIMUAngles() {  
   Quaternion qm = base * imu.quaternion.load();
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
   Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f);

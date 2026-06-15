@@ -40,4 +40,10 @@ public:
       return SIZE;
     return (head - tail + SIZE) % SIZE;
   }
+
+  inline void clear() {
+    head = 0;
+    tail = 0;
+    full = false;
+  }
 };

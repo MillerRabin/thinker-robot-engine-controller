@@ -40,8 +40,7 @@ private:
     int updateAccelerometer(IMUBase * position);
     int updateGyroscope(IMUBase * position);
     int updateAccuracy(IMUBase * position);
-    int begin();
-    Vector3 getIMUAngles(float physicalX, float physicalY, float physicalZ);
+    int begin();    
     Vector3 getIMUAngles();
     Vector3 getPhysicalAngles(Vector3 & imuAngles);
   };

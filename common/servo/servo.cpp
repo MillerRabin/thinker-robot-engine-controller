@@ -4,7 +4,7 @@ Servo::Servo(const uint pin, Range degreeRange, const float homePosition,
              const float freq, const float lowPeriod, const float highPeriod)
     : pin(pin), minDegree(degreeRange.from), maxDegree(degreeRange.to),
       lowPeriod(lowPeriod), highPeriod(highPeriod), physicalAngle(homePosition),
-      printer(pdMS_TO_TICKS(100)) {
+      printer(pdMS_TO_TICKS(1000)) {
   gpio_set_function(pin, GPIO_FUNC_PWM);
   slice = pwm_gpio_to_slice_num(pin);
   channel = pwm_gpio_to_channel(pin);
@@ -135,19 +135,20 @@ void Servo::tick() {
   const float error = targetAngle - imuAngle;
   const float absError = fabsf(error);
 
-  const float dir = (error >= 0.0f) ? 1.0f : -1.0f;
-  const float currentSpeed = speedBuffer.speed();
-
+  const float dir = (error >= 0.0f) ? 1.0f : -1.0f;  
   int64_t elapsedUs = absolute_time_diff_us(moveStarted, now);
   int64_t remainingUs = timeUs - elapsedUs;
   remainingUs = std::max<int64_t>(remainingUs, stabilizationTimeUs);
 
   float timeLeftSec = std::max(remainingUs / 1000000.0f, 0.001f);
   float desiredSpeedDegPerSec = absError / timeLeftSec;  
-  float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, maxAngularSpeed);  
+  float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, maxAngularSpeed);   
   float increment = limitedSpeedDegPerSec * dtSec * dir;
   float nextPhysical = physicalAngle + increment;
-   
+  printer.interval([&]() {
+    LogQueue::Log("Tick: Target: %.2f, IMU: %.2f, Physical: %.2f, Error: %.2f, DesiredSpeed: %.2f, LimitedSpeed: %.2f\n",
+                  targetAngle, imuAngle, physicalAngle, error, desiredSpeedDegPerSec, limitedSpeedDegPerSec);
+  });
   physicalAngle = std::clamp(nextPhysical, minDegree, maxDegree);
 
   setDegreeDirect(physicalAngle);
@@ -157,8 +158,6 @@ void Servo::setIMUAngle(float value) {
   if (isnan(value)) {
     return;
   }
-
-  speedBuffer.push(value);
 
   if (value < minDegree)
     value = minDegree;
