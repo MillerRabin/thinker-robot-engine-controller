@@ -24,8 +24,9 @@ private:
   void calibrateLoop();
   void engineLoop();
   Quaternion base;
-  float angleFromGravityY();    
-  Quaternion getHomeQuaternion();  
+  AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
+  float angleFromGravityY();
+  Quaternion getHomeQuaternion();
 public:
   Servo shoulderZ;
   Servo shoulderY;

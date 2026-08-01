@@ -68,8 +68,15 @@ void ArmShoulder::engineLoop() {
                     physicalAngles.z, imuAngles.z * RAD_TO_DEG);
     });
 
-    shoulderY.setIMUAngle(physicalAngles.y);
-    shoulderZ.setIMUAngle(physicalAngles.z);
+    uint8_t imuMode = useIMUMode.load();
+    if (imuMode == USE_IMU_NOT_USE) {
+      shoulderY.setIMUAngle(shoulderY.getPhysicalAngle());
+      shoulderZ.setIMUAngle(shoulderZ.getPhysicalAngle());
+    } else {
+      // USE_IMU_USE and USE_IMU_AUTO currently behave identically.
+      shoulderY.setIMUAngle(physicalAngles.y);
+      shoulderZ.setIMUAngle(physicalAngles.z);
+    }
     shoulderY.tick();
     shoulderZ.tick();
 
@@ -165,6 +172,12 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame) {
     if (!isnan(angleZ)) {
       shoulderZ.setTargetAngle(angleZ, timeMS, SHOULDER_DEAD_ZONE);
     }
+  }
+
+  if (frame.id == CAN_USE_IMU) {
+    uint8_t mode = frame.data32[0] & 0xFF;
+    useIMUMode.store(mode);
+    setUseIMUStatus(mode);
   }
 
   if (frame.id == CAN_SHOULDER_FIRMWARE_UPGRADE) {

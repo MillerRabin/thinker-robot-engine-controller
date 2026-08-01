@@ -137,6 +137,16 @@ void ArmPart::setArmCalibrated(bool value) {
   }
 }
 
+void ArmPart::setUseIMUStatus(uint8_t mode) {
+  statuses &= ~(uint64_t)(ARM_USE_IMU_ENABLED | ARM_USE_IMU_AUTO);
+  if (mode == USE_IMU_USE || mode == USE_IMU_AUTO) {
+    statuses |= ARM_USE_IMU_ENABLED;
+  }
+  if (mode == USE_IMU_AUTO) {
+    statuses |= ARM_USE_IMU_AUTO;
+  }
+}
+
 void ArmPart::setUpgrading(bool value) {
   if (value) {
     statuses |= ARM_UPGRADING;

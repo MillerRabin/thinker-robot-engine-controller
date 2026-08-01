@@ -56,6 +56,7 @@ public:
   void setXCalibrating(bool value);
   void setArmCalibrated(bool value);
   void setUpgrading(bool value);
+  void setUseIMUStatus(uint8_t mode);
   void setOffsetZYX(const float angleX, const float angleY, const float angleZ,
                     const Quaternion &imu);
   void setOffsetYZX(const float angleX, const float angleY, const float angleZ,
