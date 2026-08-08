@@ -9,29 +9,26 @@ void ArmElbow::calibrateLoop() {
   updateStatuses();
 }
 
-// Closes the loop on the accelerometer, not on the servo's own commanded
-// angle. angleFromGravityY() reads in "gravity-formula degrees" where 90
-// means vertical (same convention ArmShoulder's formula uses) - that is a
-// DIFFERENT scale than ELBOW_Y_HOME_POSITION (a PWM/servo angle), so it must
-// never be fed directly into setDegreeDirect() - doing that previously
-// caused a hard, uncontrolled jump the instant calibration started. Instead
-// ramp smoothly (speed-limited via tick()) from wherever physicalAngle
-// already is toward wherever the accelerometer reads 90.
+bool ArmElbow::settled(bool withinTolerance, TickType_t &stableSince) {
+  if (!withinTolerance) {
+    stableSince = 0;
+    return false;
+  }
+  if (stableSince == 0) {
+    stableSince = xTaskGetTickCount();
+    return false;
+  }
+  return (xTaskGetTickCount() - stableSince) >= pdMS_TO_TICKS(CALIBRATION_STABLE_TIME_MS);
+}
+
 void ArmElbow::calibrateYLoop() {
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
   setYCalibrating(true);
-  // Force physicalAngle back to NaN before every calibration, not just after
-  // engineLoop()'s own reset() on a later re-run. On a fresh boot/reflash
-  // physicalAngle still holds the Servo constructor's nominal home value
-  // (ELBOW_Y_HOME_POSITION), not the servo's true physical position - the
-  // very first tick() below would otherwise write that nominal value to the
-  // PWM immediately (a hard jump) before settling into the intended smooth
-  // ramp. Resetting here makes setIMUAngle()'s NaN-seed path (below) always
-  // seed physicalAngle from the live accelerometer reading instead.
   elbowY.reset();
   elbowY.setTargetAngle(90.0f, 1000, ELBOW_DEAD_ZONE);
-  while (!elbowY.isPositioned()) {
+  TickType_t stableSince = 0;
+  while (true) {
     float gravityY = angleFromGravityY();
     printer.interval([&]() {
       LogQueue::Log("Calibrating Y... IMU Y: %.3f, Physical Y: %.3f\n", gravityY, elbowY.getPhysicalAngle());
@@ -39,6 +36,9 @@ void ArmElbow::calibrateYLoop() {
     elbowY.setIMUAngle(gravityY);
     elbowY.tick();
     updateStatuses();
+    if (settled(fabsf(90.0f - gravityY) <= CALIBRATION_SETTLE_TOLERANCE, stableSince)) {
+      break;
+    }
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
   elbowYHomeAngle = elbowY.getPhysicalAngle();
@@ -85,13 +85,6 @@ void ArmElbow::engineLoop() {
   LogQueue::Log("Starting Engine Loop\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
   base = shoulder.imu.quaternion.load().invert();
-  // calibrateYLoop() leaves targetAngle at 90 in gravity/accelerometer-space
-  // (90 = vertical), but this loop tracks physicalAngle self-referentially
-  // in PWM-space (setIMUAngle(getPhysicalAngle())). Left unretargeted, that
-  // scale mismatch drags physicalAngle away from the true calibrated
-  // vertical (elbowYHomeAngle, a PWM value ~135) down toward the number 90
-  // in PWM-space, which is nowhere near vertical - retarget here so holding
-  // is anchored to where calibration actually converged.
   elbowY.setTargetAngle(elbowYHomeAngle, 500, ELBOW_DEAD_ZONE);
   while (true) {
     auto sp = imu.isPositionOK();
@@ -114,16 +107,7 @@ ArmElbow::ArmElbow(const uint memsSdaPin, const uint memsSclPin,
                    const uint engineYPin, const uint canRxPin,
                    const uint canTxPin) : ArmPart(canRxPin, canTxPin), elbowY(engineYPin, Range(0, 270), ELBOW_Y_HOME_POSITION, 100),
                                           imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin) {
-  
-  
-  // Derived empirically: moved elbow-y and shoulder-z independently by known
-  // amounts, measured the resulting raw-quaternion rotation axis for each
-  // (common/quaternion Difference + GetAxis), then solved for the rotation
-  // that maps target axes (0,-1,0)/(0,0,-1) - matching ArmShoulder's Y/Z
-  // convention - onto the measured axes. Validated: after applying this,
-  // an elbow-y-only move shows up as a pure Y-twist (Z leakage < 1 deg),
-  // and a shoulder-z-only move (elbow held still) shows up as a pure
-  // Z-twist matching the shoulder's own reported Z angle within ~0.4 deg.
+  // Mounting correction: maps raw IMU axes onto ArmShoulder's Y/Z convention.
   Quaternion q_corr = {-0.314134f, -0.584772f, -0.348743f, 0.661619f};
   imu.setRotate(q_corr);
 }
@@ -188,9 +172,6 @@ Vector3 ArmElbow::getPhysicalAngles(Vector3 &imuAngles) {
   return {0, (imuAngles.y * RAD_TO_DEG) + elbowYHomeAngle, 0};
 }
 
-// shoulder.imu.quaternion is the shoulder's base-corrected quaternion (shoulder
-// sends base * rawQuaternion over CAN), home-relative, same decomposition as
-// ArmShoulder::getIMUAngles() uses to get its own Y angle.
 float ArmElbow::shoulderYAngleDeg() {
   Quaternion sq = shoulder.imu.quaternion.load();
   if (!sq.isValid()) {
@@ -203,14 +184,7 @@ float ArmElbow::shoulderYAngleDeg() {
   return pitchY * RAD_TO_DEG;
 }
 
-// Confirmed via a full PWM-tagged sweep of the entire 0-270 range (both
-// directions, results repeatable/no hysteresis): the corrected reading is
-// monotonic across the whole range once the atan2 +/-180 wrap is undone -
-// continuous band from about -30 (PWM=0) through +180 (PWM~225) to +216
-// (PWM=270). The wrap into large-negative values only happens past
-// PWM~225, so any strongly-negative reading is that continuation, not a
-// fresh cycle - add 360 to unwrap it back onto the same continuous scale.
-// Bounds give a little margin around the actual tested extremes.
+// Monotonic across the full 0-270 PWM range once the atan2 +/-180 wrap is undone (confirmed via full-range sweep).
 constexpr float ELBOW_GRAVITY_UNWRAP_THRESHOLD = -90.0f;
 constexpr float ELBOW_GRAVITY_Y_MIN = -35.0f;
 constexpr float ELBOW_GRAVITY_Y_MAX = 220.0f;
@@ -218,16 +192,11 @@ constexpr float ELBOW_GRAVITY_Y_MAX = 220.0f;
 float ArmElbow::angleFromGravityY() {
   Accelerometer acc = imu.accelerometer.load();
   float res = atan2(acc.y, acc.z) * RAD_TO_DEG;
-  // Elbow's own accelerometer sees gravity in its local frame, which is
-  // already tilted by the shoulder's current Y angle - subtract it out so
-  // the result reflects only the elbow's own joint angle.
   res -= shoulderYAngleDeg();
   if (res < ELBOW_GRAVITY_UNWRAP_THRESHOLD) {
     res += 360.0f;
   }
   if (res < ELBOW_GRAVITY_Y_MIN || res > ELBOW_GRAVITY_Y_MAX) {
-    // Out of the trusted window - report invalid rather than risk driving
-    // the servo on a corrupted reading.
     return NAN;
   }
   return res;

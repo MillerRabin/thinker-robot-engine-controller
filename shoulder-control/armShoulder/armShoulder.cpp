@@ -3,23 +3,29 @@
 #include "../common/quaternion/quaternion.h"
 #include "../common/speedBuffer/speedBuffer.h"
 
+bool ArmShoulder::settled(bool withinTolerance, TickType_t &stableSince) {
+  if (!withinTolerance) {
+    stableSince = 0;
+    return false;
+  }
+  if (stableSince == 0) {
+    stableSince = xTaskGetTickCount();
+    return false;
+  }
+  return (xTaskGetTickCount() - stableSince) >= pdMS_TO_TICKS(CALIBRATION_STABLE_TIME_MS);
+}
+
 void ArmShoulder::calibrateYLoop() {
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
 
   setYCalibrating(true);
-  float imuY = angleFromGravityY();
-  imuY = std::clamp(imuY, 0.0f, 180.0f);
-  LogQueue::Log("[DIAG] calibrateYLoop: instant snap physicalY %.2f -> %.2f (accel raw before clamp)\n", shoulderY.getPhysicalAngle(), imuY);
+  float imuY = std::clamp(angleFromGravityY(), 0.0f, 180.0f);
   shoulderY.setDegreeDirect(imuY);
   vTaskDelay(pdMS_TO_TICKS(2000));
-  // Close the loop on the accelerometer, not on the servo's own commanded
-  // angle: SHOULDER_Y_HOME_POSITION (90) is meant to be vertical, but the
-  // servo's PWM "90" doesn't always correspond to true vertical (mechanical
-  // offset/tilt). Driving until the accelerometer itself reads 90 lands on
-  // the real vertical regardless of that offset.
   shoulderY.setTargetAngle(SHOULDER_Y_HOME_POSITION, 1000, SHOULDER_DEAD_ZONE);
-  while (!shoulderY.isPositioned()) {
+  TickType_t stableSince = 0;
+  while (true) {
     float gravityY = angleFromGravityY();
     printer.interval([&]() {
       LogQueue::Log("Calibrating Y... IMU Y: %.3f, Physical Y: %.3f\n", gravityY, shoulderY.getPhysicalAngle());
@@ -27,11 +33,11 @@ void ArmShoulder::calibrateYLoop() {
     shoulderY.setIMUAngle(gravityY);
     shoulderY.tick();
     updateStatuses();
+    if (settled(fabsf(SHOULDER_Y_HOME_POSITION - gravityY) <= CALIBRATION_SETTLE_TOLERANCE, stableSince)) {
+      break;
+    }
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
-  // Record where this actually landed (accelerometer-verified vertical) so
-  // downstream PWM<->base-relative-angle conversions use the real value
-  // instead of assuming it landed exactly on SHOULDER_Y_HOME_POSITION.
   shoulderYHomeAngle = shoulderY.getPhysicalAngle();
   setYCalibrating(false);
 }
@@ -41,21 +47,10 @@ void ArmShoulder::calibrateZLoop() {
   Periodic printer(pdMS_TO_TICKS(500));
 
   setZCalibrating(true);
-  // Z (yaw) has no accelerometer reference, so unlike Y we can't verify
-  // where it actually is - the best available guess is the last physical
-  // angle this same power-on session commanded it to (engineLoop's break
-  // now preserves this via stop() instead of reset()). Only a genuinely
-  // fresh boot (no prior command this session) has no such guess, in which
-  // case nominal home is the only option. Either way, drive there with a
-  // speed-limited ramp (self-tracking, physicalAngle as its own feedback -
-  // same pattern elbow's engineLoop uses) instead of an instant PWM jump:
-  // if Z was left far from home when power was cut, an unramped
-  // setDegreeDirect() would snap the servo at full mechanical speed.
   float startZ = shoulderZ.getPhysicalAngle();
   if (isnan(startZ)) {
     startZ = SHOULDER_Z_HOME_POSITION;
   }
-  LogQueue::Log("[DIAG] calibrateZLoop: ramping physicalZ %.2f -> %.2f (home)\n", startZ, (float)SHOULDER_Z_HOME_POSITION);
   shoulderZ.setDegreeDirect(startZ);
   shoulderZ.setTargetAngle(SHOULDER_Z_HOME_POSITION, 1000, SHOULDER_DEAD_ZONE);
   while (!shoulderZ.isPositioned()) {
@@ -71,36 +66,51 @@ void ArmShoulder::calibrateZLoop() {
   setZCalibrating(false);
 }
 
+Vector3 ArmShoulder::trackTick() {
+  Vector3 imuAngles = getIMUAngles();
+  Vector3 physicalAngles = getPhysicalAngles(imuAngles);
+  if (useIMUMode.load() == USE_IMU_NOT_USE) {
+    shoulderY.setIMUAngle(shoulderY.getPhysicalAngle());
+    shoulderZ.setIMUAngle(shoulderZ.getPhysicalAngle());
+  } else {
+    shoulderY.setIMUAngle(physicalAngles.y);
+    shoulderZ.setIMUAngle(physicalAngles.z);
+  }
+  shoulderY.tick();
+  shoulderZ.tick();
+  updateStatuses();
+  return physicalAngles;
+}
+
 void ArmShoulder::calibrateLoop() {
   setArmCalibrated(false);
   updateStatuses();
   calibrateYLoop();
   calibrateZLoop();
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  // Re-derive base on every calibration, not just the first time: BNO085 yaw
-  // (Game Rotation Vector, no magnetometer) has no absolute reference and
-  // drifts continuously, so a base kept from a much earlier calibration goes
-  // stale across repeated engine power-cycles. Y has just been driven to
-  // accelerometer-verified vertical and Z has just been snapped to its
-  // nominal home PWM - this is the most accurate moment to declare "zero",
-  // and refreshing it here eliminates the accumulated drift that was
-  // driving Y/Z into a diverging, full-speed runaway.
   base.store(imu.quaternion.load().invert());
+
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  TickType_t stableSince = 0;
+  while (true) {
+    Vector3 physicalAngles = trackTick();
+    bool withinTolerance =
+        fabsf(shoulderYHomeAngle - physicalAngles.y) <= CALIBRATION_SETTLE_TOLERANCE &&
+        fabsf(SHOULDER_Z_HOME_POSITION - physicalAngles.z) <= CALIBRATION_SETTLE_TOLERANCE;
+    if (settled(withinTolerance, stableSince)) {
+      break;
+    }
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
+  }
   setArmCalibrated(true);
   updateStatuses();
 }
 
 void ArmShoulder::onIMUReset() {
-  LogQueue::Log("[DIAG] onIMUReset: invalidating base\n");
+  LogQueue::Log("onIMUReset: invalidating base\n");
   base.store(Quaternion());
 }
 
 int ArmShoulder::updateStatuses() {
-  // Sync the reported useIMU bits from the actual live useIMUMode every
-  // time, not just when a CAN_USE_IMU command happens to arrive - otherwise
-  // a freshly booted/reflashed board reports "not-use" (the register's
-  // zero default) even though useIMUMode's own constructor default is
-  // USE_IMU_USE, until the first command ever shows up.
   setUseIMUStatus(useIMUMode.load());
   return ArmPart::updateStatuses();
 }
@@ -114,38 +124,16 @@ void ArmShoulder::engineLoop() {
     auto pp = platform.isPositionOK();
     auto bp = base.load().isValid();
     if (!sp || !pp || !bp) {
-      LogQueue::Log("[DIAG] Engine is turned off (sp=%d pp=%d bp=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
+      LogQueue::Log("Engine is turned off (sp=%d pp=%d bp=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
       shoulderY.reset();
-      // Y always re-seeds physicalAngle from the accelerometer at the start
-      // of calibrateYLoop() regardless, so wiping it here is harmless. Z has
-      // no such external reference - stop() (clears targetAngle only) keeps
-      // physicalAngle as calibrateZLoop()'s best-known starting point for a
-      // smooth ramp back to home, instead of losing that memory entirely.
       shoulderZ.stop();
       break;
     }
 
-    Vector3 imuAngles = getIMUAngles();
-    Vector3 physicalAngles = getPhysicalAngles(imuAngles);    
+    Vector3 physicalAngles = trackTick();
     printer.interval([&]() {
-      LogQueue::Log("Y: %.2f %.2f, Z: %.2f %.2f\n",
-                    physicalAngles.y, imuAngles.y * RAD_TO_DEG,
-                    physicalAngles.z, imuAngles.z * RAD_TO_DEG);
+      LogQueue::Log("Y: %.2f, Z: %.2f\n", physicalAngles.y, physicalAngles.z);
     });
-
-    uint8_t imuMode = useIMUMode.load();
-    if (imuMode == USE_IMU_NOT_USE) {
-      shoulderY.setIMUAngle(shoulderY.getPhysicalAngle());
-      shoulderZ.setIMUAngle(shoulderZ.getPhysicalAngle());
-    } else {
-      // USE_IMU_USE and USE_IMU_AUTO currently behave identically.
-      shoulderY.setIMUAngle(physicalAngles.y);
-      shoulderZ.setIMUAngle(physicalAngles.z);
-    }
-    shoulderY.tick();
-    shoulderZ.tick();
-
-    updateStatuses();    
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
 }
@@ -161,7 +149,7 @@ void ArmShoulder::engineTask(void *instance) {
 
     if (!sp || !pp) {
       if (wasOK) {
-        LogQueue::Log("[DIAG] engineTask: position NOT OK (sp=%d pp=%d), stopped\n", sp, pp);
+        LogQueue::Log("engineTask: position NOT OK (sp=%d pp=%d), stopped\n", sp, pp);
         wasOK = false;
       }
       shoulder->setEngineTaskStatus(false);
@@ -175,7 +163,7 @@ void ArmShoulder::engineTask(void *instance) {
 
     if (!position.isValid() || !platformPosition.isValid()) {
       if (wasOK) {
-        LogQueue::Log("[DIAG] engineTask: quaternion invalid (imu=%d platform=%d), stopped\n", position.isValid(), platformPosition.isValid());
+        LogQueue::Log("engineTask: quaternion invalid (imu=%d platform=%d), stopped\n", position.isValid(), platformPosition.isValid());
         wasOK = false;
       }
       shoulder->setEngineTaskStatus(false);
@@ -184,7 +172,7 @@ void ArmShoulder::engineTask(void *instance) {
       continue;
     }
 
-    LogQueue::Log("[DIAG] engineTask: position OK -> entering calibrateLoop (physicalY=%.2f physicalZ=%.2f)\n", shoulder->shoulderY.getPhysicalAngle(), shoulder->shoulderZ.getPhysicalAngle());
+    LogQueue::Log("engineTask: position OK -> entering calibrateLoop (physicalY=%.2f physicalZ=%.2f)\n", shoulder->shoulderY.getPhysicalAngle(), shoulder->shoulderZ.getPhysicalAngle());
     wasOK = true;
     shoulder->setEngineTaskStatus(true);
     shoulder->calibrateLoop();

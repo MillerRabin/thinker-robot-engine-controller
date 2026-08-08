@@ -131,10 +131,7 @@ void Servo::tick() {
 
   const float error = targetAngle - imuAngle;
   const float absError = fabsf(error);
-  // Within the dead zone: hold still. Without this, tiny sensor/quantization
-  // noise in imuAngle (which changes every tick) keeps producing a nonzero
-  // error, and the servo chases it forever - visible as a persistent small
-  // sway while "holding" a position.
+  // Hold still within the dead zone, otherwise sensor noise keeps producing a nonzero error forever.
   if (absError <= deadZone)
     return;
 
@@ -161,26 +158,14 @@ void Servo::tick() {
 }
 
 void Servo::setIMUAngle(float value) {
-  // Propagate NaN into imuAngle rather than silently keeping the old value:
-  // if feedback is currently unavailable/invalid, tick()'s own NaN guard
-  // must see that and freeze, not keep computing an error against a stale
-  // imuAngle while physicalAngle continues to move - that mismatch is what
-  // caused a runaway to the mechanical limit (error never converges because
-  // it no longer reflects reality).
+  // Propagate NaN rather than keeping a stale value - tick()'s NaN guard must see it and freeze.
   if (isnan(value)) {
     imuAngle = value;
     return;
   }
 
-  // No [minDegree, maxDegree] clamp here: imuAngle is feedback in whatever
-  // units the caller's control loop uses (e.g. elbow's gravity-formula
-  // degrees, which can legitimately go negative), not a PWM command -
-  // clamping it silently corrupts genuinely out-of-servo-range but valid
-  // feedback into a fixed, wrong constant, which disconnects the error
-  // computation from reality and previously drove physicalAngle to the
-  // mechanical limit chasing a feedback value that could never update.
-  // physicalAngle (the actual PWM output) is already range-clamped
-  // separately in tick().
+  // No [minDegree, maxDegree] clamp: imuAngle is feedback in the caller's units (can be negative),
+  // not a PWM command. physicalAngle (the actual PWM output) is range-clamped separately in tick().
   imuAngle = value;
 
   if (isnan(physicalAngle)) {

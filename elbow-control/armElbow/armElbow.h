@@ -22,15 +22,14 @@ private:
   void calibrateYLoop();
   void calibrateLoop();
   void engineLoop();
+  bool settled(bool withinTolerance, TickType_t &stableSince);
   TaskHandle_t taskHandle = NULL;
   RemoteShoulder shoulder;
   float angleY();
   Quaternion base;
   float angleFromGravityY();
   float shoulderYAngleDeg();
-  // Actual PWM angle where calibrateYLoop() last landed (accelerometer-verified
-  // vertical), which can differ from the nominal ELBOW_Y_HOME_POSITION due to
-  // mechanical tilt/mounting. Mirrors ArmShoulder::shoulderYHomeAngle.
+  // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical).
   float elbowYHomeAngle = ELBOW_Y_HOME_POSITION;
   public:
     Servo elbowY;

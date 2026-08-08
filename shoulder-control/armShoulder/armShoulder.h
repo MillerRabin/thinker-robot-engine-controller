@@ -23,12 +23,11 @@ private:
   void calibrateZLoop();
   void calibrateLoop();
   void engineLoop();
+  Vector3 trackTick();
+  bool settled(bool withinTolerance, TickType_t &stableSince);
   AtomicQuaternion base;
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
-  // Actual PWM angle where calibrateYLoop() last landed (accelerometer-verified
-  // vertical), which can differ from the nominal SHOULDER_Y_HOME_POSITION due
-  // to mechanical tilt. base is captured relative to this angle, so all
-  // PWM<->base-relative-angle conversions must use this, not the constant.
+  // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical); base is relative to this.
   float shoulderYHomeAngle = SHOULDER_Y_HOME_POSITION;
   float angleFromGravityY();
 public:

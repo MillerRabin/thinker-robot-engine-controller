@@ -134,6 +134,9 @@
 #define SHOULDER_DEAD_ZONE 0.1f
 #define ELBOW_Y_HOME_POSITION 135
 #define ELBOW_DEAD_ZONE 0.1f
+// Looser than *_DEAD_ZONE: resting accelerometer noise alone spans ~+/-0.5-1 deg.
+#define CALIBRATION_SETTLE_TOLERANCE 1.0f
+#define CALIBRATION_STABLE_TIME_MS 500
 #define WRIST_Z_HOME_POSITION 135
 #define WRIST_Y_HOME_POSITION 135
 #define WRIST_DEAD_ZONE 0.3f
