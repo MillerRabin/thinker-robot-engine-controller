@@ -129,13 +129,19 @@ void Servo::tick() {
   if ((dtUs <= 0) || isnan(imuAngle) || isnan(physicalAngle) || isnan(targetAngle))
     return;
 
+  const float error = targetAngle - imuAngle;
+  const float absError = fabsf(error);
+  // Within the dead zone: hold still. Without this, tiny sensor/quantization
+  // noise in imuAngle (which changes every tick) keeps producing a nonzero
+  // error, and the servo chases it forever - visible as a persistent small
+  // sway while "holding" a position.
+  if (absError <= deadZone)
+    return;
+
   float dtSec = dtUs / 1000000.0f;
   dtSec = std::min(dtSec, 0.01f);
 
-  const float error = targetAngle - imuAngle;
-  const float absError = fabsf(error);
-
-  const float dir = (error >= 0.0f) ? 1.0f : -1.0f;  
+  const float dir = (error >= 0.0f) ? 1.0f : -1.0f;
   int64_t elapsedUs = absolute_time_diff_us(moveStarted, now);
   int64_t remainingUs = timeUs - elapsedUs;
   remainingUs = std::max<int64_t>(remainingUs, stabilizationTimeUs);
@@ -155,15 +161,26 @@ void Servo::tick() {
 }
 
 void Servo::setIMUAngle(float value) {
+  // Propagate NaN into imuAngle rather than silently keeping the old value:
+  // if feedback is currently unavailable/invalid, tick()'s own NaN guard
+  // must see that and freeze, not keep computing an error against a stale
+  // imuAngle while physicalAngle continues to move - that mismatch is what
+  // caused a runaway to the mechanical limit (error never converges because
+  // it no longer reflects reality).
   if (isnan(value)) {
+    imuAngle = value;
     return;
   }
 
-  if (value < minDegree)
-    value = minDegree;
-  if (value > maxDegree)
-    value = maxDegree;
-
+  // No [minDegree, maxDegree] clamp here: imuAngle is feedback in whatever
+  // units the caller's control loop uses (e.g. elbow's gravity-formula
+  // degrees, which can legitimately go negative), not a PWM command -
+  // clamping it silently corrupts genuinely out-of-servo-range but valid
+  // feedback into a fixed, wrong constant, which disconnects the error
+  // computation from reality and previously drove physicalAngle to the
+  // mechanical limit chasing a feedback value that could never update.
+  // physicalAngle (the actual PWM output) is already range-clamped
+  // separately in tick().
   imuAngle = value;
 
   if (isnan(physicalAngle)) {

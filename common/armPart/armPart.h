@@ -80,6 +80,7 @@ public:
   virtual Vector3 getIMUAngles(float physicalX, float physicalY, float physicalZ) { return Vector3{0, 0, 0}; };
   virtual Vector3 getIMUAngles() { return Vector3{0, 0, 0}; };
   virtual Vector3 getPhysicalAngles( Vector3& imuAngles) { return Vector3{0, 0, 0}; };
+  virtual void onIMUReset() {};
   static float NormalizeAngle(float angle);
   static bool Equals(float a, float b, float threshold);
   ArmPart(const uint canRxPin, const uint canTxPin);

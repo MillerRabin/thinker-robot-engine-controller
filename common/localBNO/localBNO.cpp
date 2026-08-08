@@ -22,6 +22,7 @@ void LocalBNO::compassTask(void *instance) {
       printf("IMU was reset. Re-enabling sensor...\n");
       needCalibration = false;
       bno->initIMU();
+      bno->armPart->onIMUReset();
     }
 
     bool isAlive = bno->isPositionOK();

@@ -23,10 +23,14 @@ private:
   void calibrateZLoop();
   void calibrateLoop();
   void engineLoop();
-  Quaternion base;
+  AtomicQuaternion base;
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
+  // Actual PWM angle where calibrateYLoop() last landed (accelerometer-verified
+  // vertical), which can differ from the nominal SHOULDER_Y_HOME_POSITION due
+  // to mechanical tilt. base is captured relative to this angle, so all
+  // PWM<->base-relative-angle conversions must use this, not the constant.
+  float shoulderYHomeAngle = SHOULDER_Y_HOME_POSITION;
   float angleFromGravityY();
-  Quaternion getHomeQuaternion();
 public:
   Servo shoulderZ;
   Servo shoulderY;
@@ -42,16 +46,13 @@ public:
     return CAN_SHOULDER_FIRMWARE_UPGRADE_CONFIRMED;
   };
 
-  Vector3 getIMUAngles(float physicalX, float physicalY, float physicalZ);
-  float getIMUAngleY();  
-  float getIMUAngleZ();
-  float getIMUAngleY(float physicalY);
-  float getIMUAngleZ(float physicalZ);
-  Vector3 getIMUAngles();  
+  Vector3 getIMUAngles();
   Vector3 getPhysicalAngles(Vector3 &imuAngles);
   int updateAccelerometer(IMUBase *position);
   int updateGyroscope(IMUBase *position);
   int updateAccuracy(IMUBase *position);
   int updateQuaternion(IMUBase *position);
-  int begin();      
+  int begin();
+  int updateStatuses();
+  void onIMUReset();
 };

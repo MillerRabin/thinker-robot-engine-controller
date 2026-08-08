@@ -27,6 +27,11 @@ private:
   float angleY();
   Quaternion base;
   float angleFromGravityY();
+  float shoulderYAngleDeg();
+  // Actual PWM angle where calibrateYLoop() last landed (accelerometer-verified
+  // vertical), which can differ from the nominal ELBOW_Y_HOME_POSITION due to
+  // mechanical tilt/mounting. Mirrors ArmShoulder::shoulderYHomeAngle.
+  float elbowYHomeAngle = ELBOW_Y_HOME_POSITION;
   public:
     Servo elbowY;
     ArmElbow(uint memsSdaPin, uint memsSclPin, uint memsIntPin, uint memsRstPin,
