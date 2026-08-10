@@ -16,19 +16,24 @@ bool ArmShoulder::settled(bool withinTolerance, TickType_t &stableSince) {
 }
 
 void ArmShoulder::calibrateYLoop() {
+  printf("[DIAG] calibrateYLoop: enter\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
 
   setYCalibrating(true);
   float imuY = std::clamp(angleFromGravityY(), 0.0f, 180.0f);
+  printf("[DIAG] calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f)\n", imuY, angleFromGravityY());
   shoulderY.setDegreeDirect(imuY);
   vTaskDelay(pdMS_TO_TICKS(2000));
-  shoulderY.setTargetAngle(SHOULDER_Y_HOME_POSITION, 1000, SHOULDER_DEAD_ZONE);
+  printf("[DIAG] calibrateYLoop: post-seed delay done, starting settle loop\n");
+  shoulderY.setTargetAngle(SHOULDER_Y_HOME_POSITION, SHOULDER_Y_RECOVERY_TIME_MS, SHOULDER_DEAD_ZONE);
   TickType_t stableSince = 0;
+  uint32_t iterations = 0;
   while (true) {
     float gravityY = angleFromGravityY();
+    iterations++;
     printer.interval([&]() {
-      LogQueue::Log("Calibrating Y... IMU Y: %.3f, Physical Y: %.3f\n", gravityY, shoulderY.getPhysicalAngle());
+      printf("[DIAG] calibrateYLoop: iter=%lu gravityY=%.3f physicalY=%.3f\n", (unsigned long)iterations, gravityY, shoulderY.getPhysicalAngle());
     });
     shoulderY.setIMUAngle(gravityY);
     shoulderY.tick();
@@ -40,9 +45,11 @@ void ArmShoulder::calibrateYLoop() {
   }
   shoulderYHomeAngle = shoulderY.getPhysicalAngle();
   setYCalibrating(false);
+  printf("[DIAG] calibrateYLoop: exit after %lu iterations, shoulderYHomeAngle=%.2f\n", (unsigned long)iterations, shoulderYHomeAngle);
 }
 
 void ArmShoulder::calibrateZLoop() {
+  printf("[DIAG] calibrateZLoop: enter\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
 
@@ -51,11 +58,14 @@ void ArmShoulder::calibrateZLoop() {
   if (isnan(startZ)) {
     startZ = SHOULDER_Z_HOME_POSITION;
   }
+  printf("[DIAG] calibrateZLoop: startZ=%.2f\n", startZ);
   shoulderZ.setDegreeDirect(startZ);
   shoulderZ.setTargetAngle(SHOULDER_Z_HOME_POSITION, 1000, SHOULDER_DEAD_ZONE);
+  uint32_t iterations = 0;
   while (!shoulderZ.isPositioned()) {
+    iterations++;
     printer.interval([&]() {
-      LogQueue::Log("Calibrating Z... Physical Z: %.3f\n", shoulderZ.getPhysicalAngle());
+      printf("[DIAG] calibrateZLoop: iter=%lu physicalZ=%.3f imuZ=%.3f\n", (unsigned long)iterations, shoulderZ.getPhysicalAngle(), shoulderZ.getIMUAngle());
     });
     shoulderZ.setIMUAngle(shoulderZ.getPhysicalAngle());
     shoulderZ.tick();
@@ -64,6 +74,7 @@ void ArmShoulder::calibrateZLoop() {
   }
   vTaskDelay(pdMS_TO_TICKS(2000));
   setZCalibrating(false);
+  printf("[DIAG] calibrateZLoop: exit after %lu iterations\n", (unsigned long)iterations);
 }
 
 Vector3 ArmShoulder::trackTick() {
@@ -83,19 +94,29 @@ Vector3 ArmShoulder::trackTick() {
 }
 
 void ArmShoulder::calibrateLoop() {
+  printf("[DIAG] calibrateLoop: enter\n");
   setArmCalibrated(false);
   updateStatuses();
-  calibrateYLoop();
+  calibrateYLoop(); // rough pass: lift off gravity's resting position, safe for Z to move next
   calibrateZLoop();
+  calibrateYLoop(); // Z is home now, so gravityY is no longer skewed by it - refine Y
   base.store(imu.quaternion.load().invert());
+  printf("[DIAG] calibrateLoop: base refreshed, starting final settle wait\n");
 
   TickType_t lastWakeTime = xTaskGetTickCount();
   TickType_t stableSince = 0;
+  Periodic printer(pdMS_TO_TICKS(500));
+  uint32_t iterations = 0;
   while (true) {
     Vector3 physicalAngles = trackTick();
+    iterations++;
     bool withinTolerance =
         fabsf(shoulderYHomeAngle - physicalAngles.y) <= CALIBRATION_SETTLE_TOLERANCE &&
         fabsf(SHOULDER_Z_HOME_POSITION - physicalAngles.z) <= CALIBRATION_SETTLE_TOLERANCE;
+    printer.interval([&]() {
+      printf("[DIAG] calibrateLoop: settle iter=%lu physicalY=%.2f physicalZ=%.2f withinTolerance=%d\n",
+             (unsigned long)iterations, physicalAngles.y, physicalAngles.z, withinTolerance);
+    });
     if (settled(withinTolerance, stableSince)) {
       break;
     }
@@ -103,6 +124,7 @@ void ArmShoulder::calibrateLoop() {
   }
   setArmCalibrated(true);
   updateStatuses();
+  printf("[DIAG] calibrateLoop: exit after %lu settle iterations\n", (unsigned long)iterations);
 }
 
 void ArmShoulder::onIMUReset() {
@@ -115,16 +137,17 @@ int ArmShoulder::updateStatuses() {
   return ArmPart::updateStatuses();
 }
 
-void ArmShoulder::engineLoop() { 
-  LogQueue::Log("Starting Engine Loop\n"); 
+void ArmShoulder::engineLoop() {
+  printf("[DIAG] engineLoop: enter\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
-  Periodic printer(pdMS_TO_TICKS(500));      
+  Periodic printer(pdMS_TO_TICKS(500));
   while (true) {
     auto sp = imu.isPositionOK();
     auto pp = platform.isPositionOK();
     auto bp = base.load().isValid();
-    if (!sp || !pp || !bp) {
-      LogQueue::Log("Engine is turned off (sp=%d pp=%d bp=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
+    auto diverging = shoulderY.isDiverging() || shoulderZ.isDiverging();
+    if (!sp || !pp || !bp || diverging) {
+      printf("[DIAG] engineLoop: exit (sp=%d pp=%d bp=%d diverging=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, diverging, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
       shoulderY.reset();
       shoulderZ.stop();
       break;
@@ -172,11 +195,12 @@ void ArmShoulder::engineTask(void *instance) {
       continue;
     }
 
-    LogQueue::Log("engineTask: position OK -> entering calibrateLoop (physicalY=%.2f physicalZ=%.2f)\n", shoulder->shoulderY.getPhysicalAngle(), shoulder->shoulderZ.getPhysicalAngle());
+    printf("[DIAG] engineTask: position OK -> entering calibrateLoop (physicalY=%.2f physicalZ=%.2f)\n", shoulder->shoulderY.getPhysicalAngle(), shoulder->shoulderZ.getPhysicalAngle());
     wasOK = true;
     shoulder->setEngineTaskStatus(true);
     shoulder->calibrateLoop();
     shoulder->engineLoop();
+    printf("[DIAG] engineTask: engineLoop returned, back to top\n");
     shoulder->setEngineTaskStatus(false);
     shoulder->updateStatuses();
   }

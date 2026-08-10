@@ -73,9 +73,22 @@ private:
   float lastIMUAngle = NAN;  // last angle from IMU, used for acceleration estimation
   float physicalAngle = NAN; // commanded servo angle
   float targetAngle = NAN;   // target angle
-  
-  int getWrapAndDivider(const uint freq, PWMParameters& params) const;  
-  uint16_t getSlices(const float targetPeriod, const float period, const uint32_t wrap) const;  
+
+  // Divergence guard: if tracking error grows instead of shrinking for a
+  // sustained period, freeze instead of continuing to drive - a converging
+  // move's error should trend down, so a sustained rise means feedback has
+  // decoupled from reality (bad sensor data, drifted reference frame, etc).
+  float divergenceCheckError = NAN;
+  absolute_time_t divergenceCheckTime = 0;
+  uint8_t divergingIntervals = 0;
+  bool diverging = false;
+  static constexpr int64_t divergenceCheckIntervalUs = 300000;
+  static constexpr uint8_t divergenceMaxIntervals = 6;
+  static constexpr float divergenceMarginDeg = 2.0f;
+  void resetDivergence();
+
+  int getWrapAndDivider(const uint freq, PWMParameters& params) const;
+  uint16_t getSlices(const float targetPeriod, const float period, const uint32_t wrap) const;
   Periodic printer;
 
 public:  
@@ -103,13 +116,14 @@ public:
   void tick();
 
   void stop() {
-    targetAngle = NAN;    
+    targetAngle = NAN;
   }
 
-  void reset() { 
+  void reset() {
     targetAngle = NAN;
     physicalAngle = NAN;
   }
 
   bool isPositioned() const;
+  bool isDiverging() const { return diverging; }
 };

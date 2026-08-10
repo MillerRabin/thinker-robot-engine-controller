@@ -118,22 +118,53 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
   setDeadZone(newDeadZone);
   setTimeMS(newTimeMS);
   moveStarted = get_absolute_time();
+  resetDivergence();
   return true;
+}
+
+void Servo::resetDivergence() {
+  divergenceCheckError = NAN;
+  divergingIntervals = 0;
+  diverging = false;
 }
 
 void Servo::tick() {
   absolute_time_t now = get_absolute_time();
   int64_t dtUs = absolute_time_diff_us(lastTickTime, now);
   lastTickTime = now;
-  
+
   if ((dtUs <= 0) || isnan(imuAngle) || isnan(physicalAngle) || isnan(targetAngle))
+    return;
+
+  if (diverging)
     return;
 
   const float error = targetAngle - imuAngle;
   const float absError = fabsf(error);
   // Hold still within the dead zone, otherwise sensor noise keeps producing a nonzero error forever.
-  if (absError <= deadZone)
+  if (absError <= deadZone) {
+    resetDivergence();
     return;
+  }
+
+  if (isnan(divergenceCheckError)) {
+    divergenceCheckError = absError;
+    divergenceCheckTime = now;
+  } else if (absolute_time_diff_us(divergenceCheckTime, now) >= divergenceCheckIntervalUs) {
+    if (absError > divergenceCheckError + divergenceMarginDeg) {
+      divergingIntervals++;
+      if (divergingIntervals >= divergenceMaxIntervals) {
+        diverging = true;
+        LogQueue::Log("Servo diverging: error grew %.2f -> %.2f over %d checks, freezing\n",
+                      divergenceCheckError, absError, divergingIntervals);
+        return;
+      }
+    } else {
+      divergingIntervals = 0;
+    }
+    divergenceCheckError = absError;
+    divergenceCheckTime = now;
+  }
 
   float dtSec = dtUs / 1000000.0f;
   dtSec = std::min(dtSec, 0.01f);

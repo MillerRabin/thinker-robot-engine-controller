@@ -1,6 +1,11 @@
 #include "armElbow.h"
 #include "../common/periodic/periodic.h"
 
+int ArmElbow::updateStatuses() {
+  setUseIMUStatus(useIMUMode.load());
+  return ArmPart::updateStatuses();
+}
+
 void ArmElbow::calibrateLoop() {
   setArmCalibrated(false);
   updateStatuses();
@@ -42,6 +47,7 @@ void ArmElbow::calibrateYLoop() {
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
   elbowYHomeAngle = elbowY.getPhysicalAngle();
+  base = imu.quaternion.load().invert();
   setYCalibrating(false);
 }
 
@@ -81,23 +87,37 @@ void ArmElbow::engineTask(void *instance) {
   }
 }
 
+Vector3 ArmElbow::trackTick() {
+  Vector3 imuAngles = getIMUAngles();
+  Vector3 physicalAngles = getPhysicalAngles(imuAngles);
+  if (useIMUMode.load() == USE_IMU_NOT_USE) {
+    elbowY.setIMUAngle(elbowY.getPhysicalAngle());
+  } else {
+    elbowY.setIMUAngle(physicalAngles.y);
+  }
+  elbowY.tick();
+  updateStatuses();
+  return physicalAngles;
+}
+
 void ArmElbow::engineLoop() {
   LogQueue::Log("Starting Engine Loop\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
-  base = shoulder.imu.quaternion.load().invert();
+  Periodic printer(pdMS_TO_TICKS(500));
   elbowY.setTargetAngle(elbowYHomeAngle, 500, ELBOW_DEAD_ZONE);
   while (true) {
     auto sp = imu.isPositionOK();
     auto pp = shoulder.isPositionOK();
-    if (!sp || !pp) {
-      LogQueue::Log("Engine is turned off\n");
+    if (!sp || !pp || elbowY.isDiverging()) {
+      LogQueue::Log("Engine is turned off (diverging=%d)\n", elbowY.isDiverging());
       elbowY.reset();
       break;
     }
 
-    elbowY.setIMUAngle(elbowY.getPhysicalAngle());
-    elbowY.tick();
-    updateStatuses();
+    Vector3 physicalAngles = trackTick();
+    printer.interval([&]() {
+      LogQueue::Log("Y: %.2f, physical: %.2f\n", physicalAngles.y, elbowY.getPhysicalAngle());
+    });
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
 }
@@ -158,6 +178,12 @@ void ArmElbow::busReceiveCallback(can2040_msg frame) {
     }
   }
 
+  if (frame.id == CAN_USE_IMU) {
+    uint8_t mode = frame.data32[0] & 0xFF;
+    useIMUMode.store(mode);
+    setUseIMUStatus(mode);
+  }
+
   if (frame.id == CAN_ELBOW_FIRMWARE_UPGRADE) {
     rebootInBootMode();
   }
@@ -203,16 +229,10 @@ float ArmElbow::angleFromGravityY() {
 }
 
 Vector3 ArmElbow::getIMUAngles() {
-  Quaternion sq = shoulder.imu.quaternion.load();
-  Quaternion qm = imu.quaternion.load();
-  float pitchX = qm.twistAngle({1.0f, 0.0f, 0.0f});
-  /*float pitchY = qm.twistAngle({0.0f, 1.0f, 0.0f});
-  float pitchZ = qm.twistAngle({0.0f, 0.0f, 1.0f});*/  
-  Quaternion qZ = Quaternion::AngleAxis(pitchX, 0.0f, 0.0f, 1.0f);
+  Quaternion qm = base * imu.quaternion.load();
+  float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
+  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f);
   Quaternion qSwing = qZ.invert() * qm;
-  float yawX = qSwing.twistAngle({1.0f, 1.0f, 0.0f});
-  float yawY = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
-  float yawZ = qSwing.twistAngle({0.0f, 0.0f, 1.0f});
-  LogQueue::Log("Raw IMU angles: X: %.2f, pitchX: %.2f, pitchY: %.2f, pitchZ: %.2f\n", pitchX * RAD_TO_DEG, yawX * RAD_TO_DEG, yawY * RAD_TO_DEG, yawZ * RAD_TO_DEG);
-  return {0, pitchX, yawX};
+  float pitchY = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
+  return {0, pitchY, 0};
 }

@@ -22,11 +22,14 @@ private:
   void calibrateYLoop();
   void calibrateLoop();
   void engineLoop();
+  Vector3 trackTick();
   bool settled(bool withinTolerance, TickType_t &stableSince);
   TaskHandle_t taskHandle = NULL;
   RemoteShoulder shoulder;
   float angleY();
+  // Relative-to-shoulder orientation at the moment calibrateYLoop() last converged, so getIMUAngles() reads 0 there.
   Quaternion base;
+  AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_NOT_USE), pdMS_TO_TICKS(500)};
   float angleFromGravityY();
   float shoulderYAngleDeg();
   // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical).
@@ -44,7 +47,8 @@ private:
     int updateAccelerometer(IMUBase * position);
     int updateGyroscope(IMUBase * position);
     int updateAccuracy(IMUBase * position);
-    int begin();    
+    int begin();
+    int updateStatuses();
     Vector3 getIMUAngles();
     Vector3 getPhysicalAngles(Vector3 & imuAngles);
   };
