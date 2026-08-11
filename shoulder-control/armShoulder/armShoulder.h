@@ -29,6 +29,8 @@ private:
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
   // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical); base is relative to this.
   float shoulderYHomeAngle = SHOULDER_Y_HOME_POSITION;
+  // Sign of pitchX from the last tick where it was unambiguous - see getIMUAngles().
+  float lastPitchXSign = 1.0f;
   float angleFromGravityY();
 public:
   Servo shoulderZ;

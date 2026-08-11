@@ -49,7 +49,8 @@ private:
   uint16_t highSlices = 0;
   uint16_t delta = 0;
   float pulseStep = 0.0f;
-  bool initialized = false;  
+  bool pulseStepLogged = false;
+  bool initialized = false;
   TickType_t positionTime = 0;
   const TickType_t positionInterval = pdMS_TO_TICKS(1000);
   constexpr static float tickInterval = (float)ENGINE_TASK_LOOP_TIMEOUT_US;
@@ -62,14 +63,16 @@ private:
   float stabilizationSpeed = 1.0f; // deg/s
 
   const float maxAngularSpeed = 60.0f;   // deg/s
-  float maxAngularAccelerationCmd = 180.0f; // deg/s^2  
+  float maxAngularAccelerationCmd = 180.0f; // deg/s^2
+  float appliedSpeedDegPerSec = 0.0f; // signed, ramped toward the desired speed by maxAngularAccelerationCmd
   const float maxAngleStepPerTick = 30.0f; // deg, to prevent too large steps in case of long delays
   int64_t timeUs = 1000000; // default 1 second
   absolute_time_t moveStarted = 0;
   absolute_time_t lastTickTime;
   float velocityKp = 0.3f;  // velocity loop gain
   
-  float imuAngle = NAN;      // real angle from IMU
+  float imuAngle = NAN;      // real angle from IMU, low-pass filtered in setIMUAngle()
+  const float imuFilterAlpha = 0.2f; // lower = smoother but laggier
   float lastIMUAngle = NAN;  // last angle from IMU, used for acceleration estimation
   float physicalAngle = NAN; // commanded servo angle
   float targetAngle = NAN;   // target angle

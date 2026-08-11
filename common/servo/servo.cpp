@@ -126,9 +126,16 @@ void Servo::resetDivergence() {
   divergenceCheckError = NAN;
   divergingIntervals = 0;
   diverging = false;
+  appliedSpeedDegPerSec = 0.0f;
 }
 
 void Servo::tick() {
+  if (!pulseStepLogged) {
+    pulseStepLogged = true;
+    LogQueue::Log("[DIAG] Servo pin=%u pulseStep=%.3f slices/deg (min PWM step ~%.4f deg)\n",
+                  pin, pulseStep, 1.0f / pulseStep);
+  }
+
   absolute_time_t now = get_absolute_time();
   int64_t dtUs = absolute_time_diff_us(lastTickTime, now);
   lastTickTime = now;
@@ -175,13 +182,23 @@ void Servo::tick() {
   remainingUs = std::max<int64_t>(remainingUs, stabilizationTimeUs);
 
   float timeLeftSec = std::max(remainingUs / 1000000.0f, 0.001f);
-  float desiredSpeedDegPerSec = absError / timeLeftSec;  
-  float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, maxAngularSpeed);   
-  float increment = limitedSpeedDegPerSec * dtSec * dir;
+  float desiredSpeedDegPerSec = absError / timeLeftSec;
+  float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, maxAngularSpeed);
+
+  // Ramp the applied speed toward the desired speed instead of jumping to it -
+  // otherwise a single noisy/moving-target tick can swing the commanded speed
+  // instantly, which is what made continuous tracking (elbow following a
+  // moving shoulder) look jerky rather than smooth.
+  float desiredSignedSpeed = limitedSpeedDegPerSec * dir;
+  float maxSpeedDelta = maxAngularAccelerationCmd * dtSec;
+  float speedDelta = std::clamp(desiredSignedSpeed - appliedSpeedDegPerSec, -maxSpeedDelta, maxSpeedDelta);
+  appliedSpeedDegPerSec += speedDelta;
+
+  float increment = appliedSpeedDegPerSec * dtSec;
   float nextPhysical = physicalAngle + increment;
   printer.interval([&]() {
-    LogQueue::Log("Tick: Target: %.2f, IMU: %.2f, Physical: %.2f, Error: %.2f, DesiredSpeed: %.2f, LimitedSpeed: %.2f\n",
-                  targetAngle, imuAngle, physicalAngle, error, desiredSpeedDegPerSec, limitedSpeedDegPerSec);
+    LogQueue::Log("Tick: Target: %.2f, IMU: %.2f, Physical: %.2f, Error: %.2f, DesiredSpeed: %.2f, AppliedSpeed: %.2f\n",
+                  targetAngle, imuAngle, physicalAngle, error, desiredSpeedDegPerSec, appliedSpeedDegPerSec);
   });
   physicalAngle = std::clamp(nextPhysical, minDegree, maxDegree);
 
@@ -197,7 +214,13 @@ void Servo::setIMUAngle(float value) {
 
   // No [minDegree, maxDegree] clamp: imuAngle is feedback in the caller's units (can be negative),
   // not a PWM command. physicalAngle (the actual PWM output) is range-clamped separately in tick().
-  imuAngle = value;
+  // Low-pass filter instead of taking the raw reading directly - sensor noise otherwise feeds
+  // straight into the speed calculation in tick(), showing up as jerks even with speed ramping.
+  if (isnan(imuAngle)) {
+    imuAngle = value;
+  } else {
+    imuAngle = imuFilterAlpha * value + (1.0f - imuFilterAlpha) * imuAngle;
+  }
 
   if (isnan(physicalAngle)) {
     physicalAngle = imuAngle;

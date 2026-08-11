@@ -294,7 +294,37 @@ Vector3 ArmShoulder::getIMUAngles() {
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
   Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f);
   Quaternion qSwing = qZ.invert() * qm;
-  float pitchX = qSwing.twistAngle({0.0f, 1.0f, 0.0f});  
+
+  // Near a zero swing angle, qSwing's vector part is itself near zero, so the
+  // sign twistAngle() picks (from the sign of a dot product against that tiny
+  // vector) is noise-dominated - reproduced live as pitchX suddenly flipping
+  // sign. The rotation *magnitude* stays well-behaved through that zone
+  // (it's derived from the whole unit quaternion, not just the tiny vector
+  // part), so only the sign needs a fallback: below the threshold, carry
+  // forward the last unambiguous sign instead of trusting a fresh noisy one.
+  Quaternion qs = qSwing;
+  if (qs.real < 0) {
+    qs.i = -qs.i; qs.j = -qs.j; qs.k = -qs.k; qs.real = -qs.real;
+  }
+  float vecLen = sqrtf(qs.i * qs.i + qs.j * qs.j + qs.k * qs.k);
+  float magnitude = 2.0f * atan2f(vecLen, qs.real);
+  constexpr float pitchSignAmbiguityThreshold = 0.05f; // ~sin(2.9deg/2) i.e. ~5.7deg swing
+
+  float pitchX;
+  if (vecLen < pitchSignAmbiguityThreshold) {
+    pitchX = lastPitchXSign * magnitude;
+  } else {
+    lastPitchXSign = (qs.j >= 0.0f) ? 1.0f : -1.0f;
+    pitchX = lastPitchXSign * magnitude;
+  }
+
+  static Periodic axisPrinter(pdMS_TO_TICKS(300));
+  axisPrinter.interval([&]() {
+    Axis a = qSwing.getAxis();
+    LogQueue::Log("[DIAG] qSwing axis: x=%.3f y=%.3f z=%.3f len=%.3f pitchX=%.2f yawZ=%.2f\n",
+                  a.x, a.y, a.z, a.length, pitchX * RAD_TO_DEG, yawZ * RAD_TO_DEG);
+  });
+
   return {0, pitchX, yawZ};
 }
 
