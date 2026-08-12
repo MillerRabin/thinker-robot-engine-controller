@@ -9,6 +9,7 @@
 #include "../../common/quaternion/quaternion.h"
 #include "../../common/remoteElbow/remoteElbow.h"
 #include "../../common/servo/servo.h"
+#include "../../common/statusLed/statusLed.h"
 
 #include "pico/stdlib.h"
 #include <FreeRTOS.h>
@@ -25,15 +26,15 @@ private:
   void engineLoop();
   Vector3 trackTick();
   bool settled(bool withinTolerance, TickType_t &stableSince);
+  StatusLed statusLed{STATUS_LED_PIN};
+  // Latched, not live isDiverging() - a trip can self-clear within one tick, too fast to see.
+  TickType_t lastGuardTripTick = 0;
+  void updateStatusLed(bool calibrating);
   AtomicQuaternion base;
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
   // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical); base is relative to this.
   float shoulderYHomeAngle = SHOULDER_Y_HOME_POSITION;
-  // pitchX is tracked by accumulating the small swing rotation between
-  // consecutive ticks (see getIMUAngles()) rather than re-deriving an
-  // absolute magnitude+sign every tick, which could jump discontinuously
-  // when the swing axis isn't pinned near +-Y (observed live at off-home Z
-  // angles). Reset alongside base whenever calibration re-anchors it.
+  // Delta-integrated per tick rather than re-derived absolutely - see getIMUAngles().
   Quaternion lastOrientation;
   bool pitchIntegrationValid = false;
   float accumulatedPitchX = 0.0f;

@@ -15,6 +15,24 @@ bool ArmElbow::calibrateLoop() {
   return ok;
 }
 
+void ArmElbow::updateStatusLed(bool calibrating) {
+  constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
+  if (elbowY.isDiverging()) {
+    lastGuardTripTick = xTaskGetTickCount();
+  }
+  bool guardTripRecent = lastGuardTripTick != 0 &&
+      (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
+  if (guardTripRecent) {
+    statusLed.setState(LedState::GuardTripped);
+  } else if (!platform.getEnginesPowerStatus()) {
+    statusLed.setState(LedState::EnginesDisabled);
+  } else if (calibrating) {
+    statusLed.setState(LedState::Calibrating);
+  } else {
+    statusLed.setState(LedState::Off);
+  }
+}
+
 bool ArmElbow::settled(bool withinTolerance, TickType_t &stableSince) {
   if (!withinTolerance) {
     stableSince = 0;
@@ -32,18 +50,13 @@ bool ArmElbow::calibrateYLoop() {
   Periodic printer(pdMS_TO_TICKS(500));
   setYCalibrating(true);
 
-  // Require a run of consecutive, mutually-close gravity readings before
-  // seeding - the very first raw reading right after a power cycle can be
-  // wildly wrong (observed live: res=217, near the sensor's own range
-  // limit, as the first sample), and elbowY.setIMUAngle() commits whatever
-  // it's given instantly (physicalAngle jumps straight to it, no ramp,
-  // since physicalAngle starts NaN after reset()) - an unvalidated bad seed
-  // produces an uncontrolled physical jerk.
+  // Require stable readings before seeding - a transient first sample caused an uncontrolled jerk.
   constexpr int seedStableSamples = 5;
   constexpr float seedStableTolerance = 5.0f; // deg
   float lastSeedSample = NAN;
   int seedStableCount = 0;
   while (true) {
+    updateStatusLed(true);
     if (!shoulder.isPositionOK()) {
       LogQueue::Log("Calibrating Y aborted: shoulder lost position (seeding)\n");
       setYCalibrating(false);
@@ -68,17 +81,13 @@ bool ArmElbow::calibrateYLoop() {
   TickType_t stableSince = 0;
   bool ok = true;
   while (true) {
+    updateStatusLed(true);
     if (!shoulder.isPositionOK()) {
       LogQueue::Log("Calibrating Y aborted: shoulder lost position\n");
       ok = false;
       break;
     }
-    // A frozen (diverging) servo can never satisfy settled() - without this
-    // check the loop spins forever once the guard freezes it (reproduced
-    // live: guard correctly froze at physical=270 with "pinned at limit"
-    // message, but the loop kept spinning for 15+ more iterations reading
-    // wild gravity swings until an unrelated shoulder-position loss finally
-    // broke it out). Same fix as ArmShoulder's calibration loops.
+    // A frozen servo can never satisfy settled(), so this loop needs its own way out.
     if (elbowY.isDiverging()) {
       LogQueue::Log("Calibrating Y aborted: elbowY diverging\n");
       ok = false;
@@ -114,8 +123,9 @@ void ArmElbow::engineTask(void *instance) {
 
   while (true) {
     auto sp = elbow->imu.isPositionOK();
-    auto pp = elbow->shoulder.isPositionOK();        
+    auto pp = elbow->shoulder.isPositionOK();
     if (!sp || !pp ) {
+      elbow->updateStatusLed(false);
       elbow->setEngineTaskStatus(false);
       elbow->updateStatuses();
       LogQueue::Log("Engine task failed sp-%d, pp-%d\n", sp, pp);
@@ -135,11 +145,7 @@ void ArmElbow::engineTask(void *instance) {
 
     elbow->setEngineTaskStatus(true);
     elbow->updateStatuses();
-    // engineLoop() retargets to elbowYHomeAngle/base from the *last*
-    // successful calibration - if this attempt failed (aborted), those are
-    // stale, and engineLoop() would still immediately drive toward them as
-    // if they were current. Only proceed on success; otherwise loop back
-    // and let the outer gate (sp/pp) decide whether to retry.
+    // Only proceed on a successful calibration - engineLoop() would otherwise retarget to stale values.
     if (elbow->calibrateLoop()) {
       elbow->engineLoop();
     }
@@ -168,6 +174,7 @@ void ArmElbow::engineLoop() {
   Periodic printer(pdMS_TO_TICKS(500));
   elbowY.setTargetAngle(elbowYHomeAngle, 500, ELBOW_DEAD_ZONE);
   while (true) {
+    updateStatusLed(false);
     auto sp = imu.isPositionOK();
     auto pp = shoulder.isPositionOK();
     if (!sp || !pp || elbowY.isDiverging()) {
@@ -301,32 +308,13 @@ float ArmElbow::angleFromGravityY() {
 
 Vector3 ArmElbow::getIMUAngles() {
   Quaternion qm = base * imu.quaternion.load();
-  // Yaw is extracted absolutely every tick - matches ArmShoulder, where this
-  // never showed the discontinuity described below.
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
   Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f); // used below for the drift-correction reference
 
-  // pitchY used to be re-derived from scratch every tick as an absolute
-  // twist extraction off qSwing - the same pattern that caused ArmShoulder's
-  // sustained self-inflicted oscillation (a discrete sign/axis decision
-  // every tick can jump discontinuously when the swing axis isn't pinned
-  // near +-Y). Ported the same fix here before making useIMU:use elbow's
-  // default: accumulate the small swing rotation between consecutive ticks
-  // instead - always small/well-defined at our ~5ms tick rate, no discrete
-  // choice to get wrong. Anchored at 0 whenever base is freshly set
-  // (calibration defines the current orientation as the zero point).
-  //
-  // Pure integration drifts (random walk from accumulated per-tick noise,
-  // confirmed live on ArmShoulder: ~5.7deg over 16s/3200+ ticks while
-  // stationary), so also ported ArmShoulder's complementary-filter
-  // correction: nudge the accumulator a small fixed fraction toward a fresh
-  // absolute extraction each tick, small enough that an occasional bad-sign
-  // absolute sample barely perturbs it, but enough to cancel long-term
-  // drift within ~1s.
+  // pitchY is delta-integrated (drift-corrected below) rather than re-derived absolutely, matching ArmShoulder's pitchX fix.
   float pitchY;
   if (!qm.isValid()) {
-    // Glitched/missing reading - hold the last known value rather than
-    // integrating garbage into the accumulator permanently.
+    // Glitched reading - hold the last value instead of integrating NaN permanently.
     pitchY = accumulatedPitchY;
   } else if (!pitchIntegrationValid) {
     pitchY = 0.0f;

@@ -7,6 +7,7 @@
 #include "../../common/localBNO/localBNO.h"
 #include "../../common/remoteClaw/remoteClaw.h"
 #include "../../common/servo/servo.h"
+#include "../../common/statusLed/statusLed.h"
 #include "pico/stdlib.h"
 
 class ArmWristQueueParams {
@@ -26,6 +27,9 @@ private:
   void engineLoop();
   TaskHandle_t taskHandle = NULL;
   RemoteClaw claw;
+  StatusLed statusLed{STATUS_LED_PIN};
+  TickType_t lastGuardTripTick = 0;
+  void updateStatusLed(bool calibrating);
 
 public:
   Servo wristY;

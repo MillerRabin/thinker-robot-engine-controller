@@ -52,9 +52,12 @@ target_link_libraries(${APP_SHOULDER_NAME}
     hardware_pwm
     hardware_flash
     hardware_sync
+    hardware_pio
     FreeRTOS-Kernel
     FreeRTOS-Kernel-Heap4
 )
+
+pico_generate_pio_header(${APP_SHOULDER_NAME} ${APP_COMMON_DIRECTORY}/statusLed/ws2812.pio)
 
 # ==============================
 # Pico settings

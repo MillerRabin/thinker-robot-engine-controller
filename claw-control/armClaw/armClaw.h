@@ -7,6 +7,7 @@
 #include "../../common/localWitmotion/localWitmotion.h"
 #include "../../common/rangeDetector/rangeDetector.h"
 #include "../../common/servo/servo.h"
+#include "../../common/statusLed/statusLed.h"
 #include "pico/stdlib.h"
 
 class ArmClaw : public ArmPart {
@@ -20,6 +21,9 @@ private:
   void calibrateXLoop();
   void engineLoop();
   TaskHandle_t taskHandle = NULL;
+  StatusLed statusLed{STATUS_LED_PIN};
+  TickType_t lastGuardTripTick = 0;
+  void updateStatusLed(bool calibrating);
   float angleY(const Quaternion &q);
   float angleX(const Quaternion &q);
   Quaternion makeRotationX(float angleX);

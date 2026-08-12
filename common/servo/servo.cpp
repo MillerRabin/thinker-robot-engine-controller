@@ -186,10 +186,7 @@ void Servo::tick() {
   float desiredSpeedDegPerSec = absError / timeLeftSec;
   float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, maxAngularSpeed);
 
-  // Ramp the applied speed toward the desired speed instead of jumping to it -
-  // otherwise a single noisy/moving-target tick can swing the commanded speed
-  // instantly, which is what made continuous tracking (elbow following a
-  // moving shoulder) look jerky rather than smooth.
+  // Ramp toward the desired speed instead of jumping to it - a noisy/moving target otherwise looks jerky.
   float desiredSignedSpeed = limitedSpeedDegPerSec * dir;
   float maxSpeedDelta = maxAngularAccelerationCmd * dtSec;
   float speedDelta = std::clamp(desiredSignedSpeed - appliedSpeedDegPerSec, -maxSpeedDelta, maxSpeedDelta);
@@ -230,10 +227,7 @@ void Servo::setIMUAngle(float value) {
     return;
   }
 
-  // No [minDegree, maxDegree] clamp: imuAngle is feedback in the caller's units (can be negative),
-  // not a PWM command. physicalAngle (the actual PWM output) is range-clamped separately in tick().
-  // Low-pass filter instead of taking the raw reading directly - sensor noise otherwise feeds
-  // straight into the speed calculation in tick(), showing up as jerks even with speed ramping.
+  // Low-pass filtered, not raw - sensor noise otherwise feeds straight into tick()'s speed calc.
   if (isnan(imuAngle)) {
     imuAngle = value;
   } else {

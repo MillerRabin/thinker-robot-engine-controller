@@ -7,6 +7,7 @@
 #include "../../common/localBNO/localBNO.h"
 #include "../../common/remoteShoulder/remoteShoulder.h"
 #include "../../common/servo/servo.h"
+#include "../../common/statusLed/statusLed.h"
 #include "pico/stdlib.h"
 
 class ArmElbowQueueParams {
@@ -23,24 +24,21 @@ private:
   bool calibrateLoop();
   void engineLoop();
   Vector3 trackTick();
+  StatusLed statusLed{STATUS_LED_PIN};
+  // Latched, not live isDiverging() - a trip can self-clear within one tick, too fast to see.
+  TickType_t lastGuardTripTick = 0;
+  void updateStatusLed(bool calibrating);
   bool settled(bool withinTolerance, TickType_t &stableSince);
   TaskHandle_t taskHandle = NULL;
   RemoteShoulder shoulder;
   float angleY();
   // Relative-to-shoulder orientation at the moment calibrateYLoop() last converged, so getIMUAngles() reads 0 there.
   Quaternion base;
-  // pitchY is tracked by accumulating the small swing rotation between
-  // consecutive ticks (see getIMUAngles()) rather than re-deriving an
-  // absolute magnitude+sign every tick - same fix as ArmShoulder's pitchX,
-  // ported here before making useIMU:use elbow's default. Reset alongside
-  // base whenever calibration re-anchors it.
+  // Delta-integrated per tick rather than re-derived absolutely - see getIMUAngles().
   Quaternion lastOrientation;
   bool pitchIntegrationValid = false;
   float accumulatedPitchY = 0.0f;
-  // use is the intended default (matches ArmShoulder); not-use is the
-  // emergency fallback, not the normal state. Safe now that getIMUAngles()
-  // has the same delta-integration + drift-correction protection shoulder's
-  // does (see lastOrientation/pitchIntegrationValid/accumulatedPitchY above).
+  // use is the intended default; not-use is the emergency fallback.
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
   float angleFromGravityY();
   float shoulderYAngleDeg();

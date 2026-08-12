@@ -1,6 +1,24 @@
 #include "armWrist.h"
 #include "../common/periodic/periodic.h"
 
+void ArmWrist::updateStatusLed(bool calibrating) {
+  constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
+  if (wristY.isDiverging() || wristZ.isDiverging()) {
+    lastGuardTripTick = xTaskGetTickCount();
+  }
+  bool guardTripRecent = lastGuardTripTick != 0 &&
+      (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
+  if (guardTripRecent) {
+    statusLed.setState(LedState::GuardTripped);
+  } else if (!platform.getEnginesPowerStatus()) {
+    statusLed.setState(LedState::EnginesDisabled);
+  } else if (calibrating) {
+    statusLed.setState(LedState::Calibrating);
+  } else {
+    statusLed.setState(LedState::Off);
+  }
+}
+
 void ArmWrist::calibrateYLoop() {
   LogQueue::Log("ArmClaw::calibrateYLoop started\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
@@ -79,6 +97,7 @@ void ArmWrist::calibrateLoop() {
 void ArmWrist::engineLoop() {
   TickType_t lastWakeTime = xTaskGetTickCount();
   while (true) {
+    updateStatusLed(false);
     /*Quaternion delta = positionOrigin.invert() * position;
     auto euler = delta.swingTwistToAngles();
     //shoulderY.setIMUAngle(physY);
@@ -101,6 +120,7 @@ void ArmWrist::engineTask(void *instance) {
     auto ec = wrist->claw.isCalibrated();
     
     if (!wp || !pp || !ec) {
+      wrist->updateStatusLed(false);
       wrist->setEngineTaskStatus(false);
       wrist->updateStatuses();
       vTaskDelay(pdMS_TO_TICKS(250));
@@ -111,6 +131,7 @@ void ArmWrist::engineTask(void *instance) {
     Quaternion pQuat = wrist->platform.imu.quaternion.load();
 
     if (!eQuat.isValid() || !eQuat.isValid()) {
+      wrist->updateStatusLed(false);
       wrist->setEngineTaskStatus(false);
       wrist->updateStatuses();
       vTaskDelay(pdMS_TO_TICKS(250));

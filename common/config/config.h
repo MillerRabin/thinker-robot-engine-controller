@@ -99,6 +99,9 @@
 #define CLAW_GRIPPER_PIN 11
 #define CAN_RX_PIN 4
 #define CAN_TX_PIN 5
+
+// Onboard WS2812 on the Waveshare RP2040-Zero/Tiny boards.
+#define STATUS_LED_PIN 16
 #define CAN_SEND_LOOP_TIMEOUT 50
 #define CAN_SEND_WAIT_TIMEOUT 50
 #define CAN_RECEIVE_LOOP_TIMEOUT 50

@@ -1,5 +1,23 @@
 #include "armClaw.h"
 
+void ArmClaw::updateStatusLed(bool calibrating) {
+  constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
+  if (clawX.isDiverging() || clawY.isDiverging() || clawGripper.isDiverging()) {
+    lastGuardTripTick = xTaskGetTickCount();
+  }
+  bool guardTripRecent = lastGuardTripTick != 0 &&
+      (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
+  if (guardTripRecent) {
+    statusLed.setState(LedState::GuardTripped);
+  } else if (!platform.getEnginesPowerStatus()) {
+    statusLed.setState(LedState::EnginesDisabled);
+  } else if (calibrating) {
+    statusLed.setState(LedState::Calibrating);
+  } else {
+    statusLed.setState(LedState::Off);
+  }
+}
+
 void ArmClaw::calibrateYLoop() {
   // LogQueue::Log("ArmClaw::calibrateYLoop started\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
@@ -105,6 +123,7 @@ void ArmClaw::engineLoop() {
   static constexpr Vector3 Z_AXIS = {0.0f, 0.0f, 1.0f};
 
   while (true) {
+    updateStatusLed(false);
     position = imu.quaternion.load();
     Quaternion delta = origin * position;
 
@@ -126,8 +145,9 @@ void ArmClaw::engineTask(void *instance) {
     auto pp = claw->platform.isPositionOK();    
 
     if (!wp || !pp) {
+      claw->updateStatusLed(false);
       claw->setEngineTaskStatus(false);
-      claw->updateStatuses();      
+      claw->updateStatuses();
       vTaskDelay(pdMS_TO_TICKS(250));
       continue;
     }
@@ -136,6 +156,7 @@ void ArmClaw::engineTask(void *instance) {
     Quaternion pQuat = claw->platform.imu.quaternion.load();
 
     if (!eQuat.isValid() || !eQuat.isValid()) {
+      claw->updateStatusLed(false);
       claw->setEngineTaskStatus(false);
       claw->updateStatuses();
       vTaskDelay(pdMS_TO_TICKS(250));
