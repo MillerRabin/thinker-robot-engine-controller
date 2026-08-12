@@ -47,7 +47,7 @@ Fields (all optional booleans, only send the ones you want to change):
 ```bash
 curl -X POST http://192.168.1.120/set -H "Content-Type: application/json" -d '{"useIMU": "use"}'
 ```
-Values: `"not-use"` (self-referential/physically-inert, always safe), `"use"`, `"auto"` (currently == `"use"`). Broadcasts to every module over CAN; shoulder defaults to `use`, elbow defaults to `not-use` (elbow's active-tracking control path is new and has caused physical incidents in testing — don't switch it to `use` without direct supervision and someone ready to cut power).
+Values: `"not-use"` (self-referential/physically-inert — the emergency fallback, not the normal state), `"use"` (the intended default), `"auto"` (currently == `"use"`). Broadcasts to every module over CAN — toggling it always affects both shoulder and elbow together, there's no per-module version. Both shoulder and elbow default to `use`.
 
 ## Reading live logs
 
@@ -66,4 +66,4 @@ The host broadcasts full arm status (quaternions, accelerometers, per-module sta
 
 - Always confirm with a human before enabling engines on the physical arm — droop-then-recovery and calibration motion are real, visible movements.
 - After any engine power cycle, both shoulder and elbow recalibrate automatically; shoulder's calibration is gated by a settle check before it reports itself calibrated (elbow's own calibration waits on that).
-- `useIMU: use` on elbow is unverified/incident-prone as of 2026-08-10 — see project memory (`robot_arm_session_status`) for details before re-enabling it.
+- `useIMU: use` on elbow is now the default (as of 2026-08-11 night) — earlier incidents (2026-08-10) traced to root causes since fixed (see project memory `robot_arm_session_status` for the full list). Still confirm with a human before enabling engines regardless.

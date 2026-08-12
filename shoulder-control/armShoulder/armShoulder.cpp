@@ -15,25 +15,57 @@ bool ArmShoulder::settled(bool withinTolerance, TickType_t &stableSince) {
   return (xTaskGetTickCount() - stableSince) >= pdMS_TO_TICKS(CALIBRATION_STABLE_TIME_MS);
 }
 
-void ArmShoulder::calibrateYLoop() {
-  printf("[DIAG] calibrateYLoop: enter\n");
+bool ArmShoulder::calibrateYLoop() {
+  LogQueue::Log("[DIAG] calibrateYLoop: enter\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
 
   setYCalibrating(true);
+
+  // Require a run of consecutive, mutually-close gravity readings before
+  // seeding - the very first raw reading right after a power cycle (while
+  // shoulder is still drooping/settling) can be transiently wrong, and the
+  // seed below commits to it instantly via setDegreeDirect() with no ramp,
+  // which showed up live as a sharp jerk at calibration start. Same fix as
+  // elbow's calibrateYLoop().
+  constexpr int seedStableSamples = 5;
+  constexpr float seedStableTolerance = 5.0f; // deg
+  float lastSeedSample = NAN;
+  int seedStableCount = 0;
+  while (seedStableCount < seedStableSamples) {
+    float sample = angleFromGravityY();
+    if (!isnan(sample) && !isnan(lastSeedSample) &&
+        fabsf(sample - lastSeedSample) <= seedStableTolerance) {
+      seedStableCount++;
+    } else {
+      seedStableCount = isnan(sample) ? 0 : 1;
+    }
+    lastSeedSample = sample;
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
+  }
+
   float imuY = std::clamp(angleFromGravityY(), 0.0f, 180.0f);
-  printf("[DIAG] calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f)\n", imuY, angleFromGravityY());
+  LogQueue::Log("[DIAG] calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f)\n", imuY, angleFromGravityY());
   shoulderY.setDegreeDirect(imuY);
   vTaskDelay(pdMS_TO_TICKS(2000));
-  printf("[DIAG] calibrateYLoop: post-seed delay done, starting settle loop\n");
+  LogQueue::Log("[DIAG] calibrateYLoop: post-seed delay done, starting settle loop\n");
   shoulderY.setTargetAngle(SHOULDER_Y_HOME_POSITION, SHOULDER_Y_RECOVERY_TIME_MS, SHOULDER_DEAD_ZONE);
   TickType_t stableSince = 0;
   uint32_t iterations = 0;
   while (true) {
+    // A frozen (diverging) servo can never satisfy settled() - without this
+    // check the loop spins forever, as reproduced live (35000+ iterations
+    // pinned at physicalY=180 after the divergence guard had already
+    // frozen the servo).
+    if (shoulderY.isDiverging()) {
+      LogQueue::Log("[DIAG] calibrateYLoop: aborted, shoulderY diverging\n");
+      setYCalibrating(false);
+      return false;
+    }
     float gravityY = angleFromGravityY();
     iterations++;
     printer.interval([&]() {
-      printf("[DIAG] calibrateYLoop: iter=%lu gravityY=%.3f physicalY=%.3f\n", (unsigned long)iterations, gravityY, shoulderY.getPhysicalAngle());
+      LogQueue::Log("[DIAG] calibrateYLoop: iter=%lu gravityY=%.3f physicalY=%.3f\n", (unsigned long)iterations, gravityY, shoulderY.getPhysicalAngle());
     });
     shoulderY.setIMUAngle(gravityY);
     shoulderY.tick();
@@ -45,11 +77,12 @@ void ArmShoulder::calibrateYLoop() {
   }
   shoulderYHomeAngle = shoulderY.getPhysicalAngle();
   setYCalibrating(false);
-  printf("[DIAG] calibrateYLoop: exit after %lu iterations, shoulderYHomeAngle=%.2f\n", (unsigned long)iterations, shoulderYHomeAngle);
+  LogQueue::Log("[DIAG] calibrateYLoop: exit after %lu iterations, shoulderYHomeAngle=%.2f\n", (unsigned long)iterations, shoulderYHomeAngle);
+  return true;
 }
 
-void ArmShoulder::calibrateZLoop() {
-  printf("[DIAG] calibrateZLoop: enter\n");
+bool ArmShoulder::calibrateZLoop() {
+  LogQueue::Log("[DIAG] calibrateZLoop: enter\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
 
@@ -58,14 +91,19 @@ void ArmShoulder::calibrateZLoop() {
   if (isnan(startZ)) {
     startZ = SHOULDER_Z_HOME_POSITION;
   }
-  printf("[DIAG] calibrateZLoop: startZ=%.2f\n", startZ);
+  LogQueue::Log("[DIAG] calibrateZLoop: startZ=%.2f\n", startZ);
   shoulderZ.setDegreeDirect(startZ);
   shoulderZ.setTargetAngle(SHOULDER_Z_HOME_POSITION, 1000, SHOULDER_DEAD_ZONE);
   uint32_t iterations = 0;
   while (!shoulderZ.isPositioned()) {
+    if (shoulderZ.isDiverging()) {
+      LogQueue::Log("[DIAG] calibrateZLoop: aborted, shoulderZ diverging\n");
+      setZCalibrating(false);
+      return false;
+    }
     iterations++;
     printer.interval([&]() {
-      printf("[DIAG] calibrateZLoop: iter=%lu physicalZ=%.3f imuZ=%.3f\n", (unsigned long)iterations, shoulderZ.getPhysicalAngle(), shoulderZ.getIMUAngle());
+      LogQueue::Log("[DIAG] calibrateZLoop: iter=%lu physicalZ=%.3f imuZ=%.3f\n", (unsigned long)iterations, shoulderZ.getPhysicalAngle(), shoulderZ.getIMUAngle());
     });
     shoulderZ.setIMUAngle(shoulderZ.getPhysicalAngle());
     shoulderZ.tick();
@@ -74,7 +112,8 @@ void ArmShoulder::calibrateZLoop() {
   }
   vTaskDelay(pdMS_TO_TICKS(2000));
   setZCalibrating(false);
-  printf("[DIAG] calibrateZLoop: exit after %lu iterations\n", (unsigned long)iterations);
+  LogQueue::Log("[DIAG] calibrateZLoop: exit after %lu iterations\n", (unsigned long)iterations);
+  return true;
 }
 
 Vector3 ArmShoulder::trackTick() {
@@ -93,43 +132,57 @@ Vector3 ArmShoulder::trackTick() {
   return physicalAngles;
 }
 
-void ArmShoulder::calibrateLoop() {
-  printf("[DIAG] calibrateLoop: enter\n");
+bool ArmShoulder::calibrateLoop() {
+  LogQueue::Log("[DIAG] calibrateLoop: enter\n");
   setArmCalibrated(false);
   updateStatuses();
-  calibrateYLoop(); // rough pass: lift off gravity's resting position, safe for Z to move next
-  calibrateZLoop();
-  calibrateYLoop(); // Z is home now, so gravityY is no longer skewed by it - refine Y
-  base.store(imu.quaternion.load().invert());
-  printf("[DIAG] calibrateLoop: base refreshed, starting final settle wait\n");
+  bool ok = calibrateYLoop(); // rough pass: lift off gravity's resting position, safe for Z to move next
+  if (ok) ok = calibrateZLoop();
+  if (ok) ok = calibrateYLoop(); // Z is home now, so gravityY is no longer skewed by it - refine Y
 
-  TickType_t lastWakeTime = xTaskGetTickCount();
-  TickType_t stableSince = 0;
-  Periodic printer(pdMS_TO_TICKS(500));
-  uint32_t iterations = 0;
-  while (true) {
-    Vector3 physicalAngles = trackTick();
-    iterations++;
-    bool withinTolerance =
-        fabsf(shoulderYHomeAngle - physicalAngles.y) <= CALIBRATION_SETTLE_TOLERANCE &&
-        fabsf(SHOULDER_Z_HOME_POSITION - physicalAngles.z) <= CALIBRATION_SETTLE_TOLERANCE;
-    printer.interval([&]() {
-      printf("[DIAG] calibrateLoop: settle iter=%lu physicalY=%.2f physicalZ=%.2f withinTolerance=%d\n",
-             (unsigned long)iterations, physicalAngles.y, physicalAngles.z, withinTolerance);
-    });
-    if (settled(withinTolerance, stableSince)) {
-      break;
+  if (ok) {
+    base.store(imu.quaternion.load().invert());
+    pitchIntegrationValid = false; // re-anchor pitchX to 0 at the new base
+    LogQueue::Log("[DIAG] calibrateLoop: base refreshed, starting final settle wait\n");
+
+    TickType_t lastWakeTime = xTaskGetTickCount();
+    TickType_t stableSince = 0;
+    Periodic printer(pdMS_TO_TICKS(500));
+    uint32_t iterations = 0;
+    while (true) {
+      // Same reasoning as calibrateYLoop()/calibrateZLoop(): a frozen servo
+      // can never satisfy settled(), so this wait needs its own way out.
+      if (shoulderY.isDiverging() || shoulderZ.isDiverging()) {
+        LogQueue::Log("[DIAG] calibrateLoop: aborted, servo diverging during settle wait\n");
+        ok = false;
+        break;
+      }
+      Vector3 physicalAngles = trackTick();
+      iterations++;
+      bool withinTolerance =
+          fabsf(shoulderYHomeAngle - physicalAngles.y) <= CALIBRATION_SETTLE_TOLERANCE &&
+          fabsf(SHOULDER_Z_HOME_POSITION - physicalAngles.z) <= CALIBRATION_SETTLE_TOLERANCE;
+      printer.interval([&]() {
+        LogQueue::Log("[DIAG] calibrateLoop: settle iter=%lu physicalY=%.2f physicalZ=%.2f withinTolerance=%d\n",
+               (unsigned long)iterations, physicalAngles.y, physicalAngles.z, withinTolerance);
+      });
+      if (settled(withinTolerance, stableSince)) {
+        break;
+      }
+      vTaskDelayUntil(&lastWakeTime, taskInterval);
     }
-    vTaskDelayUntil(&lastWakeTime, taskInterval);
+    LogQueue::Log("[DIAG] calibrateLoop: exit after %lu settle iterations\n", (unsigned long)iterations);
   }
-  setArmCalibrated(true);
+
+  setArmCalibrated(ok);
   updateStatuses();
-  printf("[DIAG] calibrateLoop: exit after %lu settle iterations\n", (unsigned long)iterations);
+  return ok;
 }
 
 void ArmShoulder::onIMUReset() {
   LogQueue::Log("onIMUReset: invalidating base\n");
   base.store(Quaternion());
+  pitchIntegrationValid = false;
 }
 
 int ArmShoulder::updateStatuses() {
@@ -138,7 +191,7 @@ int ArmShoulder::updateStatuses() {
 }
 
 void ArmShoulder::engineLoop() {
-  printf("[DIAG] engineLoop: enter\n");
+  LogQueue::Log("[DIAG] engineLoop: enter\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
   while (true) {
@@ -147,7 +200,7 @@ void ArmShoulder::engineLoop() {
     auto bp = base.load().isValid();
     auto diverging = shoulderY.isDiverging() || shoulderZ.isDiverging();
     if (!sp || !pp || !bp || diverging) {
-      printf("[DIAG] engineLoop: exit (sp=%d pp=%d bp=%d diverging=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, diverging, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
+      LogQueue::Log("[DIAG] engineLoop: exit (sp=%d pp=%d bp=%d diverging=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, diverging, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
       shoulderY.reset();
       shoulderZ.stop();
       break;
@@ -165,6 +218,12 @@ void ArmShoulder::engineTask(void *instance) {
   auto *shoulder = static_cast<ArmShoulder *>(instance);
   TickType_t lastWakeTime = xTaskGetTickCount();
   bool wasOK = false;
+
+  // Gives a fixed window after every boot/reflash to attach a serial log
+  // reader before anything interesting happens, so the full sequence -
+  // including calibration's first seed - is always captured instead of
+  // being missed by a reader that attaches a moment too late.
+  vTaskDelay(pdMS_TO_TICKS(3000));
 
   while (true) {
     auto sp = shoulder->imu.isPositionOK();
@@ -195,12 +254,18 @@ void ArmShoulder::engineTask(void *instance) {
       continue;
     }
 
-    printf("[DIAG] engineTask: position OK -> entering calibrateLoop (physicalY=%.2f physicalZ=%.2f)\n", shoulder->shoulderY.getPhysicalAngle(), shoulder->shoulderZ.getPhysicalAngle());
+    LogQueue::Log("[DIAG] engineTask: position OK -> entering calibrateLoop (physicalY=%.2f physicalZ=%.2f)\n", shoulder->shoulderY.getPhysicalAngle(), shoulder->shoulderZ.getPhysicalAngle());
     wasOK = true;
     shoulder->setEngineTaskStatus(true);
-    shoulder->calibrateLoop();
-    shoulder->engineLoop();
-    printf("[DIAG] engineTask: engineLoop returned, back to top\n");
+    // engineLoop() retargets to shoulderYHomeAngle/base from the *last*
+    // successful calibration - if this attempt failed (aborted), those are
+    // stale, and engineLoop() would still immediately drive toward them as
+    // if they were current. Only proceed on success; otherwise loop back
+    // and let the outer gate (sp/pp) decide whether to retry.
+    if (shoulder->calibrateLoop()) {
+      shoulder->engineLoop();
+      LogQueue::Log("[DIAG] engineTask: engineLoop returned, back to top\n");
+    }
     shoulder->setEngineTaskStatus(false);
     shoulder->updateStatuses();
   }
@@ -291,38 +356,73 @@ int ArmShoulder::begin() {
 
 Vector3 ArmShoulder::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
+  // Yaw is extracted absolutely every tick - no discontinuity was ever
+  // observed here, it stayed smooth even while pitch misbehaved.
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
-  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f);
-  Quaternion qSwing = qZ.invert() * qm;
+  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f); // used below for the drift-correction reference
 
-  // Near a zero swing angle, qSwing's vector part is itself near zero, so the
-  // sign twistAngle() picks (from the sign of a dot product against that tiny
-  // vector) is noise-dominated - reproduced live as pitchX suddenly flipping
-  // sign. The rotation *magnitude* stays well-behaved through that zone
-  // (it's derived from the whole unit quaternion, not just the tiny vector
-  // part), so only the sign needs a fallback: below the threshold, carry
-  // forward the last unambiguous sign instead of trusting a fresh noisy one.
-  Quaternion qs = qSwing;
-  if (qs.real < 0) {
-    qs.i = -qs.i; qs.j = -qs.j; qs.k = -qs.k; qs.real = -qs.real;
-  }
-  float vecLen = sqrtf(qs.i * qs.i + qs.j * qs.j + qs.k * qs.k);
-  float magnitude = 2.0f * atan2f(vecLen, qs.real);
-  constexpr float pitchSignAmbiguityThreshold = 0.05f; // ~sin(2.9deg/2) i.e. ~5.7deg swing
-
+  // pitchX used to be re-derived from scratch every tick as an absolute
+  // magnitude+sign off qSwing. That has an inherent problem: it requires a
+  // *discrete* sign decision every tick, and at off-home Z angles the swing
+  // axis isn't pinned to +-Y - it can sweep across the +-Y boundary
+  // (confirmed live at Z=180) or, worse, that decision can go wrong for a
+  // single tick and show up as a large one-tick discontinuity (confirmed
+  // live: IMU jumped ~11.7deg between two prints while physical moved only
+  // ~1.3deg - far more than any real motion could produce). Continuity- and
+  // magnitude-based heuristics narrowed this but couldn't eliminate it,
+  // and it was enough to drive a sustained self-inflicted oscillation.
+  //
+  // Instead, accumulate the small swing rotation between consecutive ticks.
+  // At our ~5ms tick rate the rotation between ticks is always small for any
+  // physically plausible joint speed, so extracting its pitch contribution
+  // never approaches the near-zero-magnitude ambiguity that plagues a fresh
+  // *absolute* extraction - there is no discrete choice to get wrong, only a
+  // small, well-defined increment. Anchored at 0 whenever base is freshly
+  // set (calibration defines the current orientation as the zero point).
+  //
+  // Pure integration drifts, though: every tick's delta carries a little
+  // quantization/sampling noise, and summing thousands of them is a random
+  // walk - confirmed live, ~5.7deg of drift accumulated over 16s (3200+
+  // ticks) while the joint sat still, enough to stall calibration's own
+  // settle-wait (it could never satisfy a 1deg tolerance against a target
+  // that kept wandering). Corrected with a complementary filter: nudge the
+  // accumulator a small fixed fraction toward a fresh absolute extraction
+  // each tick. The gain is small enough that even an occasional bad-sign
+  // absolute sample (the original failure mode) only perturbs the
+  // accumulator by a fraction of a degree - self-corrects within a tick or
+  // two - while still fully cancelling long-term drift within ~1s.
   float pitchX;
-  if (vecLen < pitchSignAmbiguityThreshold) {
-    pitchX = lastPitchXSign * magnitude;
+  if (!qm.isValid()) {
+    // Glitched/missing reading - hold the last known value rather than
+    // integrating garbage into the accumulator (which, unlike a fresh
+    // absolute computation, would corrupt it permanently: NaN + anything
+    // stays NaN forever after).
+    pitchX = accumulatedPitchX;
+  } else if (!pitchIntegrationValid) {
+    pitchX = 0.0f;
+    accumulatedPitchX = 0.0f;
+    pitchIntegrationValid = true;
+    lastOrientation = qm;
   } else {
-    lastPitchXSign = (qs.j >= 0.0f) ? 1.0f : -1.0f;
-    pitchX = lastPitchXSign * magnitude;
+    Quaternion qDelta = lastOrientation.invert() * qm;
+    float deltaYawZ = qDelta.twistAngle({0.0f, 0.0f, 1.0f});
+    Quaternion qDeltaZ = Quaternion::AngleAxis(deltaYawZ, 0.0f, 0.0f, 1.0f);
+    Quaternion qDeltaSwing = qDeltaZ.invert() * qDelta;
+    float deltaPitchX = qDeltaSwing.twistAngle({0.0f, 1.0f, 0.0f});
+    accumulatedPitchX += deltaPitchX;
+
+    constexpr float driftCorrectionAlpha = 0.01f; // ~1s time constant at 5ms/tick
+    Quaternion qSwing = qZ.invert() * qm;
+    float pitchXAbs = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
+    accumulatedPitchX += driftCorrectionAlpha * (pitchXAbs - accumulatedPitchX);
+
+    pitchX = accumulatedPitchX;
+    lastOrientation = qm;
   }
 
   static Periodic axisPrinter(pdMS_TO_TICKS(300));
   axisPrinter.interval([&]() {
-    Axis a = qSwing.getAxis();
-    LogQueue::Log("[DIAG] qSwing axis: x=%.3f y=%.3f z=%.3f len=%.3f pitchX=%.2f yawZ=%.2f\n",
-                  a.x, a.y, a.z, a.length, pitchX * RAD_TO_DEG, yawZ * RAD_TO_DEG);
+    LogQueue::Log("[DIAG] pitchX=%.2f yawZ=%.2f\n", pitchX * RAD_TO_DEG, yawZ * RAD_TO_DEG);
   });
 
   return {0, pitchX, yawZ};

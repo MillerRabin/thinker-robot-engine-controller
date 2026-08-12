@@ -6,12 +6,13 @@ int ArmElbow::updateStatuses() {
   return ArmPart::updateStatuses();
 }
 
-void ArmElbow::calibrateLoop() {
+bool ArmElbow::calibrateLoop() {
   setArmCalibrated(false);
   updateStatuses();
-  calibrateYLoop();
-  setArmCalibrated(true);
+  bool ok = calibrateYLoop();
+  setArmCalibrated(ok);
   updateStatuses();
+  return ok;
 }
 
 bool ArmElbow::settled(bool withinTolerance, TickType_t &stableSince) {
@@ -26,14 +27,63 @@ bool ArmElbow::settled(bool withinTolerance, TickType_t &stableSince) {
   return (xTaskGetTickCount() - stableSince) >= pdMS_TO_TICKS(CALIBRATION_STABLE_TIME_MS);
 }
 
-void ArmElbow::calibrateYLoop() {
+bool ArmElbow::calibrateYLoop() {
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
   setYCalibrating(true);
+
+  // Require a run of consecutive, mutually-close gravity readings before
+  // seeding - the very first raw reading right after a power cycle can be
+  // wildly wrong (observed live: res=217, near the sensor's own range
+  // limit, as the first sample), and elbowY.setIMUAngle() commits whatever
+  // it's given instantly (physicalAngle jumps straight to it, no ramp,
+  // since physicalAngle starts NaN after reset()) - an unvalidated bad seed
+  // produces an uncontrolled physical jerk.
+  constexpr int seedStableSamples = 5;
+  constexpr float seedStableTolerance = 5.0f; // deg
+  float lastSeedSample = NAN;
+  int seedStableCount = 0;
+  while (true) {
+    if (!shoulder.isPositionOK()) {
+      LogQueue::Log("Calibrating Y aborted: shoulder lost position (seeding)\n");
+      setYCalibrating(false);
+      return false;
+    }
+    float gravityY = angleFromGravityY();
+    if (!isnan(gravityY) && !isnan(lastSeedSample) &&
+        fabsf(gravityY - lastSeedSample) <= seedStableTolerance) {
+      seedStableCount++;
+    } else {
+      seedStableCount = isnan(gravityY) ? 0 : 1;
+    }
+    lastSeedSample = gravityY;
+    if (seedStableCount >= seedStableSamples) {
+      break;
+    }
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
+  }
+
   elbowY.reset();
   elbowY.setTargetAngle(90.0f, 1000, ELBOW_DEAD_ZONE);
   TickType_t stableSince = 0;
+  bool ok = true;
   while (true) {
+    if (!shoulder.isPositionOK()) {
+      LogQueue::Log("Calibrating Y aborted: shoulder lost position\n");
+      ok = false;
+      break;
+    }
+    // A frozen (diverging) servo can never satisfy settled() - without this
+    // check the loop spins forever once the guard freezes it (reproduced
+    // live: guard correctly froze at physical=270 with "pinned at limit"
+    // message, but the loop kept spinning for 15+ more iterations reading
+    // wild gravity swings until an unrelated shoulder-position loss finally
+    // broke it out). Same fix as ArmShoulder's calibration loops.
+    if (elbowY.isDiverging()) {
+      LogQueue::Log("Calibrating Y aborted: elbowY diverging\n");
+      ok = false;
+      break;
+    }
     float gravityY = angleFromGravityY();
     printer.interval([&]() {
       LogQueue::Log("Calibrating Y... IMU Y: %.3f, Physical Y: %.3f\n", gravityY, elbowY.getPhysicalAngle());
@@ -46,9 +96,15 @@ void ArmElbow::calibrateYLoop() {
     }
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
-  elbowYHomeAngle = elbowY.getPhysicalAngle();
-  base = imu.quaternion.load().invert();
+  if (ok) {
+    elbowYHomeAngle = elbowY.getPhysicalAngle();
+    base = imu.quaternion.load().invert();
+    pitchIntegrationValid = false; // re-anchor pitchY to 0 at the new base
+  } else {
+    elbowY.reset();
+  }
   setYCalibrating(false);
+  return ok;
 }
 
 
@@ -79,11 +135,17 @@ void ArmElbow::engineTask(void *instance) {
 
     elbow->setEngineTaskStatus(true);
     elbow->updateStatuses();
-    elbow->calibrateLoop();
-    elbow->engineLoop();
+    // engineLoop() retargets to elbowYHomeAngle/base from the *last*
+    // successful calibration - if this attempt failed (aborted), those are
+    // stale, and engineLoop() would still immediately drive toward them as
+    // if they were current. Only proceed on success; otherwise loop back
+    // and let the outer gate (sp/pp) decide whether to retry.
+    if (elbow->calibrateLoop()) {
+      elbow->engineLoop();
+    }
 
     elbow->setEngineTaskStatus(false);
-    elbow->updateStatuses();    
+    elbow->updateStatuses();
   }
 }
 
@@ -115,6 +177,7 @@ void ArmElbow::engineLoop() {
     }
 
     Vector3 physicalAngles = trackTick();
+    angleFromGravityY(); // diagnostic-only call, not used for control here - logs internally
     printer.interval([&]() {
       LogQueue::Log("Y: %.2f, physical: %.2f\n", physicalAngles.y, elbowY.getPhysicalAngle());
     });
@@ -217,11 +280,19 @@ constexpr float ELBOW_GRAVITY_Y_MAX = 220.0f;
 
 float ArmElbow::angleFromGravityY() {
   Accelerometer acc = imu.accelerometer.load();
-  float res = atan2(acc.y, acc.z) * RAD_TO_DEG;
-  res -= shoulderYAngleDeg();
+  float raw = atan2(acc.y, acc.z) * RAD_TO_DEG;
+  float shoulderCorr = shoulderYAngleDeg();
+  float res = raw - shoulderCorr;
   if (res < ELBOW_GRAVITY_UNWRAP_THRESHOLD) {
     res += 360.0f;
   }
+
+  static Periodic gravityPrinter(pdMS_TO_TICKS(300));
+  gravityPrinter.interval([&]() {
+    LogQueue::Log("[DIAG] angleFromGravityY: raw=%.2f shoulderCorr=%.2f res=%.2f physical=%.2f\n",
+                  raw, shoulderCorr, res, elbowY.getPhysicalAngle());
+  });
+
   if (res < ELBOW_GRAVITY_Y_MIN || res > ELBOW_GRAVITY_Y_MAX) {
     return NAN;
   }
@@ -230,9 +301,54 @@ float ArmElbow::angleFromGravityY() {
 
 Vector3 ArmElbow::getIMUAngles() {
   Quaternion qm = base * imu.quaternion.load();
+  // Yaw is extracted absolutely every tick - matches ArmShoulder, where this
+  // never showed the discontinuity described below.
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
-  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f);
-  Quaternion qSwing = qZ.invert() * qm;
-  float pitchY = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
+  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f); // used below for the drift-correction reference
+
+  // pitchY used to be re-derived from scratch every tick as an absolute
+  // twist extraction off qSwing - the same pattern that caused ArmShoulder's
+  // sustained self-inflicted oscillation (a discrete sign/axis decision
+  // every tick can jump discontinuously when the swing axis isn't pinned
+  // near +-Y). Ported the same fix here before making useIMU:use elbow's
+  // default: accumulate the small swing rotation between consecutive ticks
+  // instead - always small/well-defined at our ~5ms tick rate, no discrete
+  // choice to get wrong. Anchored at 0 whenever base is freshly set
+  // (calibration defines the current orientation as the zero point).
+  //
+  // Pure integration drifts (random walk from accumulated per-tick noise,
+  // confirmed live on ArmShoulder: ~5.7deg over 16s/3200+ ticks while
+  // stationary), so also ported ArmShoulder's complementary-filter
+  // correction: nudge the accumulator a small fixed fraction toward a fresh
+  // absolute extraction each tick, small enough that an occasional bad-sign
+  // absolute sample barely perturbs it, but enough to cancel long-term
+  // drift within ~1s.
+  float pitchY;
+  if (!qm.isValid()) {
+    // Glitched/missing reading - hold the last known value rather than
+    // integrating garbage into the accumulator permanently.
+    pitchY = accumulatedPitchY;
+  } else if (!pitchIntegrationValid) {
+    pitchY = 0.0f;
+    accumulatedPitchY = 0.0f;
+    pitchIntegrationValid = true;
+    lastOrientation = qm;
+  } else {
+    Quaternion qDelta = lastOrientation.invert() * qm;
+    float deltaYawZ = qDelta.twistAngle({0.0f, 0.0f, 1.0f});
+    Quaternion qDeltaZ = Quaternion::AngleAxis(deltaYawZ, 0.0f, 0.0f, 1.0f);
+    Quaternion qDeltaSwing = qDeltaZ.invert() * qDelta;
+    float deltaPitchY = qDeltaSwing.twistAngle({0.0f, 1.0f, 0.0f});
+    accumulatedPitchY += deltaPitchY;
+
+    constexpr float driftCorrectionAlpha = 0.01f; // ~1s time constant at 5ms/tick
+    Quaternion qSwing = qZ.invert() * qm;
+    float pitchYAbs = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
+    accumulatedPitchY += driftCorrectionAlpha * (pitchYAbs - accumulatedPitchY);
+
+    pitchY = accumulatedPitchY;
+    lastOrientation = qm;
+  }
+
   return {0, pitchY, 0};
 }

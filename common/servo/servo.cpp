@@ -127,6 +127,7 @@ void Servo::resetDivergence() {
   divergingIntervals = 0;
   diverging = false;
   appliedSpeedDegPerSec = 0.0f;
+  limitPinnedSince = 0;
 }
 
 void Servo::tick() {
@@ -200,6 +201,23 @@ void Servo::tick() {
     LogQueue::Log("Tick: Target: %.2f, IMU: %.2f, Physical: %.2f, Error: %.2f, DesiredSpeed: %.2f, AppliedSpeed: %.2f\n",
                   targetAngle, imuAngle, physicalAngle, error, desiredSpeedDegPerSec, appliedSpeedDegPerSec);
   });
+
+  bool pinnedAtLimit = (nextPhysical <= minDegree && dir < 0.0f) || (nextPhysical >= maxDegree && dir > 0.0f);
+  if (pinnedAtLimit) {
+    if (limitPinnedSince == 0) {
+      limitPinnedSince = now;
+    } else if (absolute_time_diff_us(limitPinnedSince, now) >= limitPinnedMaxUs) {
+      diverging = true;
+      LogQueue::Log("Servo diverging: pinned at limit (%.2f) with error %.2f, freezing\n",
+                    nextPhysical <= minDegree ? minDegree : maxDegree, absError);
+      physicalAngle = std::clamp(nextPhysical, minDegree, maxDegree);
+      setDegreeDirect(physicalAngle);
+      return;
+    }
+  } else {
+    limitPinnedSince = 0;
+  }
+
   physicalAngle = std::clamp(nextPhysical, minDegree, maxDegree);
 
   setDegreeDirect(physicalAngle);

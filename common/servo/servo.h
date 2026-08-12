@@ -88,6 +88,15 @@ private:
   static constexpr int64_t divergenceCheckIntervalUs = 300000;
   static constexpr uint8_t divergenceMaxIntervals = 6;
   static constexpr float divergenceMarginDeg = 2.0f;
+
+  // A stable-but-wrong reading (e.g. a bad calibration seed) produces a
+  // large error that never grows once physicalAngle is clamped at a range
+  // limit, so the growing-error check above never trips - the servo just
+  // sits at the limit commanding full speed indefinitely. Track how long
+  // it's been pinned at a limit while still trying to push past it and
+  // freeze that too, on the same grace period as the growing-error check.
+  absolute_time_t limitPinnedSince = 0;
+  static constexpr int64_t limitPinnedMaxUs = divergenceCheckIntervalUs * divergenceMaxIntervals;
   void resetDivergence();
 
   int getWrapAndDivider(const uint freq, PWMParameters& params) const;
@@ -125,6 +134,11 @@ public:
   void reset() {
     targetAngle = NAN;
     physicalAngle = NAN;
+    // imuAngle must also clear here: setIMUAngle() low-pass filters a fresh
+    // reading against whatever imuAngle already holds, so leaving it stale
+    // across a reset feeds the next seed a blend with the *previous*
+    // calibration's converged value instead of the true current reading.
+    imuAngle = NAN;
   }
 
   bool isPositioned() const;

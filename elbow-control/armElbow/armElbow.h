@@ -19,8 +19,8 @@ private:
   LocalBNO imu;
   static void engineTask(void *instance);
   void busReceiveCallback(can2040_msg frame);
-  void calibrateYLoop();
-  void calibrateLoop();
+  bool calibrateYLoop();
+  bool calibrateLoop();
   void engineLoop();
   Vector3 trackTick();
   bool settled(bool withinTolerance, TickType_t &stableSince);
@@ -29,7 +29,19 @@ private:
   float angleY();
   // Relative-to-shoulder orientation at the moment calibrateYLoop() last converged, so getIMUAngles() reads 0 there.
   Quaternion base;
-  AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_NOT_USE), pdMS_TO_TICKS(500)};
+  // pitchY is tracked by accumulating the small swing rotation between
+  // consecutive ticks (see getIMUAngles()) rather than re-deriving an
+  // absolute magnitude+sign every tick - same fix as ArmShoulder's pitchX,
+  // ported here before making useIMU:use elbow's default. Reset alongside
+  // base whenever calibration re-anchors it.
+  Quaternion lastOrientation;
+  bool pitchIntegrationValid = false;
+  float accumulatedPitchY = 0.0f;
+  // use is the intended default (matches ArmShoulder); not-use is the
+  // emergency fallback, not the normal state. Safe now that getIMUAngles()
+  // has the same delta-integration + drift-correction protection shoulder's
+  // does (see lastOrientation/pitchIntegrationValid/accumulatedPitchY above).
+  AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
   float angleFromGravityY();
   float shoulderYAngleDeg();
   // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical).
