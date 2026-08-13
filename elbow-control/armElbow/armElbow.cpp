@@ -213,7 +213,10 @@ int ArmElbow::begin() {
 }
 
 int ArmElbow::updateQuaternion(IMUBase *position) {
-  Quaternion quat = position->quaternion.load();
+  if (!base.isValid()) {
+    return ERROR_PART_IS_NOT_CALIBRATED;
+  }
+  Quaternion quat = base * position->quaternion.load();
   return ArmPart::updateQuaternion(quat);
 }
 
