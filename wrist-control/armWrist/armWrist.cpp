@@ -82,6 +82,15 @@ bool ArmWrist::calibrateYLoop() {
       setYCalibrating(false);
       return false;
     }
+    // elbow.isPositionOK() doesn't reliably/promptly reflect engines-off (it only tracks elbow's
+    // own calibrated bit, which lags a CAN round-trip behind platform's engines status) - without
+    // this, tick() keeps advancing physicalAngle with no servo power, then snaps to that stale
+    // value once power returns.
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("[DIAG] wrist calibrateYLoop: aborted, engines powered off\n");
+      setYCalibrating(false);
+      return false;
+    }
     float gravityY = angleFromGravityY();
     iterations++;
     printer.interval([&]() {
@@ -118,6 +127,11 @@ bool ArmWrist::calibrateZLoop() {
     updateStatusLed(true);
     if (wristZ.isDiverging()) {
       LogQueue::Log("[DIAG] wrist calibrateZLoop: aborted, wristZ diverging\n");
+      setZCalibrating(false);
+      return false;
+    }
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("[DIAG] wrist calibrateZLoop: aborted, engines powered off\n");
       setZCalibrating(false);
       return false;
     }
@@ -183,6 +197,11 @@ bool ArmWrist::calibrateLoop() {
         ok = false;
         break;
       }
+      if (!platform.getEnginesPowerStatus()) {
+        LogQueue::Log("[DIAG] wrist calibrateLoop: aborted, engines powered off during settle wait\n");
+        ok = false;
+        break;
+      }
       Vector3 physicalAngles = trackTick();
       iterations++;
       bool withinTolerance =
@@ -226,9 +245,10 @@ void ArmWrist::engineLoop() {
     auto sp = imu.isPositionOK();
     auto pp = elbow.isPositionOK();
     auto bp = base.load().isValid();
+    auto ep = platform.getEnginesPowerStatus();
     auto diverging = wristY.isDiverging() || wristZ.isDiverging();
-    if (!sp || !pp || !bp || diverging) {
-      LogQueue::Log("[DIAG] wrist engineLoop: exit (sp=%d pp=%d bp=%d diverging=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, diverging, wristY.getPhysicalAngle(), wristZ.getPhysicalAngle());
+    if (!sp || !pp || !bp || !ep || diverging) {
+      LogQueue::Log("[DIAG] wrist engineLoop: exit (sp=%d pp=%d bp=%d ep=%d diverging=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, ep, diverging, wristY.getPhysicalAngle(), wristZ.getPhysicalAngle());
       wristY.reset();
       wristZ.stop();
       break;

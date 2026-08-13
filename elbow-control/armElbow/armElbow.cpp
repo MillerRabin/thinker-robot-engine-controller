@@ -93,6 +93,15 @@ bool ArmElbow::calibrateYLoop() {
       ok = false;
       break;
     }
+    // shoulder.isPositionOK() doesn't reliably/promptly reflect engines-off (it only tracks
+    // shoulder's own calibrated bit, which lags a CAN round-trip behind platform's engines status) -
+    // without this, tick() keeps advancing physicalAngle with no servo power, then snaps to that
+    // stale value once power returns.
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("Calibrating Y aborted: engines powered off\n");
+      ok = false;
+      break;
+    }
     float gravityY = angleFromGravityY();
     printer.interval([&]() {
       LogQueue::Log("Calibrating Y... IMU Y: %.3f, Physical Y: %.3f\n", gravityY, elbowY.getPhysicalAngle());
@@ -177,8 +186,9 @@ void ArmElbow::engineLoop() {
     updateStatusLed(false);
     auto sp = imu.isPositionOK();
     auto pp = shoulder.isPositionOK();
-    if (!sp || !pp || elbowY.isDiverging()) {
-      LogQueue::Log("Engine is turned off (diverging=%d)\n", elbowY.isDiverging());
+    auto ep = platform.getEnginesPowerStatus();
+    if (!sp || !pp || !ep || elbowY.isDiverging()) {
+      LogQueue::Log("Engine is turned off (sp=%d pp=%d ep=%d diverging=%d)\n", sp, pp, ep, elbowY.isDiverging());
       elbowY.reset();
       break;
     }

@@ -74,6 +74,13 @@ bool ArmShoulder::calibrateYLoop() {
       setYCalibrating(false);
       return false;
     }
+    // Without this, tick() keeps advancing physicalAngle (PWM bookkeeping) toward closing the
+    // error even with no servo power - it then snaps to that stale value once power returns.
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("[DIAG] calibrateYLoop: aborted, engines powered off\n");
+      setYCalibrating(false);
+      return false;
+    }
     float gravityY = angleFromGravityY();
     iterations++;
     printer.interval([&]() {
@@ -111,6 +118,11 @@ bool ArmShoulder::calibrateZLoop() {
     updateStatusLed(true);
     if (shoulderZ.isDiverging()) {
       LogQueue::Log("[DIAG] calibrateZLoop: aborted, shoulderZ diverging\n");
+      setZCalibrating(false);
+      return false;
+    }
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("[DIAG] calibrateZLoop: aborted, engines powered off\n");
       setZCalibrating(false);
       return false;
     }
@@ -168,6 +180,11 @@ bool ArmShoulder::calibrateLoop() {
       updateStatusLed(true);
       if (shoulderY.isDiverging() || shoulderZ.isDiverging()) {
         LogQueue::Log("[DIAG] calibrateLoop: aborted, servo diverging during settle wait\n");
+        ok = false;
+        break;
+      }
+      if (!platform.getEnginesPowerStatus()) {
+        LogQueue::Log("[DIAG] calibrateLoop: aborted, engines powered off during settle wait\n");
         ok = false;
         break;
       }
