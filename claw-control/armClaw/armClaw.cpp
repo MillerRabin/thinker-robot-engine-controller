@@ -227,7 +227,9 @@ int ArmClaw::updateHeight(IMUBase *position) {
   return ArmPart::updateHeight(position->height, position->temperature);
 }
 
-void ArmClaw::busReceiveCallback(can2040_msg frame) {  
+void ArmClaw::busReceiveCallback(can2040_msg frame) {
+  wrist.dispatchMessage(frame);
+
   if (frame.id == CAN_CLAW_SET_XYG_DEGREE) {
     uint32_t raw1 = frame.data32[0];
     uint32_t raw2 = frame.data32[1];
@@ -237,15 +239,21 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     uint16_t timeMS = (raw2 >> 16) & 0xFFFF;
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
 
-    float angleX = (angleXS == PARAMETER_IS_NAN) ? NAN : angleXS / 100.0f;
-    float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 100.0f;
-    float angleG = (angleGS == PARAMETER_IS_NAN) ? NAN : angleGS / 100.0f;
+    // Was /100.0f - host's getAngle() encodes at x10 (same convention as shoulder/elbow/wrist),
+    // so this silently produced a 10x-too-small angle. Never noticed because nothing called
+    // tick() yet to make it observable.
+    float angleX = (angleXS == PARAMETER_IS_NAN) ? NAN : angleXS / 10.0f;
+    float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 10.0f;
+    float angleG = (angleGS == PARAMETER_IS_NAN) ? NAN : angleGS / 10.0f;
 
+    // TEMP for q_corr measurement (see plan): setDegreeDirect bypasses tick()/dead-zone/guard,
+    // since engineLoop() doesn't call tick() yet either way. Revert to setTargetAngle() once the
+    // real engine loop is built.
     if (!isnan(angleX)) {
-      clawX.setTargetAngle(angleX, timeMS, CLAW_DEAD_ZONE);
+      clawX.setDegreeDirect(angleX);
     }
     if (!isnan(angleY)) {
-      clawY.setTargetAngle(angleY, timeMS, CLAW_DEAD_ZONE);
+      clawY.setDegreeDirect(angleY);
     }
     if (!isnan(angleG)) {
       clawGripper.setTargetAngle(angleG, timeMS, CLAW_DEAD_ZONE);
@@ -264,6 +272,12 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
       this->imu.tare();
       // this->imu.saveTare();
     }
+  }
+
+  if (frame.id == CAN_USE_IMU) {
+    uint8_t mode = frame.data32[0] & 0xFF;
+    useIMUMode.store(mode);
+    setUseIMUStatus(mode);
   }
 
   if (frame.id == CAN_CLAW_FIRMWARE_UPGRADE) {

@@ -13,8 +13,7 @@ ls -la /dev/serial/by-id/
 - `E66250758B3D6B21` → shoulder
 - `E66250758B484121` → elbow
 - `E66250758B258926` → wrist
-
-(Claw serial not yet recorded here — add it if you flash that board.)
+- `E66250758B69C227` → claw
 
 ## Building and flashing
 

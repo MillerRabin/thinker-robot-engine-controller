@@ -6,6 +6,7 @@
 #include "../../common/config/config.h"
 #include "../../common/localWitmotion/localWitmotion.h"
 #include "../../common/rangeDetector/rangeDetector.h"
+#include "../../common/remoteWrist/remoteWrist.h"
 #include "../../common/servo/servo.h"
 #include "../../common/statusLed/statusLed.h"
 #include "pico/stdlib.h"
@@ -21,12 +22,19 @@ private:
   void calibrateXLoop();
   void engineLoop();
   TaskHandle_t taskHandle = NULL;
+  RemoteWrist wrist;
   StatusLed statusLed{STATUS_LED_PIN};
   TickType_t lastGuardTripTick = 0;
   void updateStatusLed(bool calibrating);
   float angleY(const Quaternion &q);
   float angleX(const Quaternion &q);
   Quaternion makeRotationX(float angleX);
+  AtomicQuaternion base;
+  AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
+  // Mounting correction: LocalWitmotion has no setRotate() hook, so this is applied manually via
+  // correctedQuat(). Identity until measured live (motor-driven single-axis moves, per wrist's q_corr).
+  Quaternion q_corr{0.0f, 0.0f, 0.0f, 1.0f};
+  Quaternion correctedQuat() { return imu.quaternion.load() * q_corr; }
 
 public:
   Servo clawX;
