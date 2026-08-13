@@ -368,7 +368,6 @@ int ArmShoulder::begin() {
 Vector3 ArmShoulder::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
-  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f); // used below for the drift-correction reference
 
   // pitchX is delta-integrated (drift-corrected below) rather than re-derived absolutely, which caused ~11deg one-tick jumps.
   float pitchX;
@@ -388,9 +387,15 @@ Vector3 ArmShoulder::getIMUAngles() {
     float deltaPitchX = qDeltaSwing.twistAngle({0.0f, 1.0f, 0.0f});
     accumulatedPitchX += deltaPitchX;
 
+    // Gravity-vector-based, not a yaw-strip-then-pitch decomposition of qm - that decomposition
+    // is order-sensitive and breaks under a large yaw change (confirmed live: the same pattern
+    // in ArmElbow::shoulderYAngleDeg() got stuck outputting ~-121deg after a 30deg shoulder-z
+    // move, corrupting elbow's target; this driftCorrectionAlpha-weighted term would have fed
+    // the same kind of bad value into the accumulator here every tick, growing into a real
+    // oscillation). getGravityVector() is yaw-invariant, so this can't happen.
     constexpr float driftCorrectionAlpha = 0.01f; // ~1s time constant at 5ms/tick
-    Quaternion qSwing = qZ.invert() * qm;
-    float pitchXAbs = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
+    Vector3 gAbs = qm.getGravityVector();
+    float pitchXAbs = atan2(-gAbs.x, gAbs.z);
     accumulatedPitchX += driftCorrectionAlpha * (pitchXAbs - accumulatedPitchX);
 
     pitchX = accumulatedPitchX;

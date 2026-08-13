@@ -271,16 +271,18 @@ Vector3 ArmElbow::getPhysicalAngles(Vector3 &imuAngles) {
   return {0, (imuAngles.y * RAD_TO_DEG) + elbowYHomeAngle, 0};
 }
 
+// Uses the gravity vector rather than a yaw-strip-then-pitch-extract decomposition of sq -
+// that decomposition is order-sensitive and gives wildly wrong results under a large yaw
+// change (confirmed live: a 30deg shoulder-z move made this read a stuck ~-121deg instead of
+// a small correction, corrupting elbow's target and causing a real, escalating oscillation).
+// getGravityVector() is yaw-invariant, so this can't happen.
 float ArmElbow::shoulderYAngleDeg() {
   Quaternion sq = shoulder.imu.quaternion.load();
   if (!sq.isValid()) {
     return 0.0f;
   }
-  float yawZ = sq.twistAngle({0.0f, 0.0f, 1.0f});
-  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f);
-  Quaternion qSwing = qZ.invert() * sq;
-  float pitchY = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
-  return pitchY * RAD_TO_DEG;
+  Vector3 g = sq.getGravityVector();
+  return atan2(-g.x, g.z) * RAD_TO_DEG;
 }
 
 // Monotonic across the full 0-270 PWM range once the atan2 +/-180 wrap is undone (confirmed via full-range sweep).
@@ -311,8 +313,6 @@ float ArmElbow::angleFromGravityY() {
 
 Vector3 ArmElbow::getIMUAngles() {
   Quaternion qm = base * imu.quaternion.load();
-  float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
-  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f); // used below for the drift-correction reference
 
   // pitchY is delta-integrated (drift-corrected below) rather than re-derived absolutely, matching ArmShoulder's pitchX fix.
   float pitchY;
@@ -332,9 +332,12 @@ Vector3 ArmElbow::getIMUAngles() {
     float deltaPitchY = qDeltaSwing.twistAngle({0.0f, 1.0f, 0.0f});
     accumulatedPitchY += deltaPitchY;
 
+    // Gravity-vector-based, not a yaw-strip-then-pitch decomposition of qm - see
+    // ArmShoulder::getIMUAngles()'s identical fix for why (order-sensitive, breaks under a
+    // large yaw change).
     constexpr float driftCorrectionAlpha = 0.01f; // ~1s time constant at 5ms/tick
-    Quaternion qSwing = qZ.invert() * qm;
-    float pitchYAbs = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
+    Vector3 gAbs = qm.getGravityVector();
+    float pitchYAbs = atan2(-gAbs.x, gAbs.z);
     accumulatedPitchY += driftCorrectionAlpha * (pitchYAbs - accumulatedPitchY);
 
     pitchY = accumulatedPitchY;

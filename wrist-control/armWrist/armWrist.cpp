@@ -373,7 +373,6 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
 Vector3 ArmWrist::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
-  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f); // used below for the drift-correction reference
 
   // pitchY is delta-integrated (drift-corrected below) rather than re-derived absolutely, matching ArmShoulder's pitchX fix.
   float pitchY;
@@ -393,9 +392,12 @@ Vector3 ArmWrist::getIMUAngles() {
     float deltaPitchY = qDeltaSwing.twistAngle({0.0f, 1.0f, 0.0f});
     accumulatedPitchY += deltaPitchY;
 
+    // Gravity-vector-based, not a yaw-strip-then-pitch decomposition of qm - see
+    // ArmShoulder::getIMUAngles()'s identical fix for why (order-sensitive, breaks under a
+    // large yaw change).
     constexpr float driftCorrectionAlpha = 0.01f; // ~1s time constant at 5ms/tick
-    Quaternion qSwing = qZ.invert() * qm;
-    float pitchYAbs = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
+    Vector3 gAbs = qm.getGravityVector();
+    float pitchYAbs = atan2(-gAbs.x, gAbs.z);
     accumulatedPitchY += driftCorrectionAlpha * (pitchYAbs - accumulatedPitchY);
 
     pitchY = accumulatedPitchY;
@@ -416,16 +418,17 @@ Vector3 ArmWrist::getPhysicalAngles(Vector3 &imuAngles) {
 
 // elbow.imu.quaternion is elbow's base-anchored broadcast (zero at elbow's own calibration),
 // so this tracks elbow's current pitch deviation since then - same pattern as ArmElbow::shoulderYAngleDeg().
+// Uses the gravity vector rather than a yaw-strip-then-pitch-extract decomposition of eq - that
+// decomposition is order-sensitive and breaks under a large yaw change (confirmed live via the
+// same bug in ArmElbow::shoulderYAngleDeg(), which this mirrors). getGravityVector() is
+// yaw-invariant, so this can't happen.
 float ArmWrist::elbowYAngleDeg() {
   Quaternion eq = elbow.imu.quaternion.load();
   if (!eq.isValid()) {
     return 0.0f;
   }
-  float yawZ = eq.twistAngle({0.0f, 0.0f, 1.0f});
-  Quaternion qZ = Quaternion::AngleAxis(yawZ, 0.0f, 0.0f, 1.0f);
-  Quaternion qSwing = qZ.invert() * eq;
-  float pitchY = qSwing.twistAngle({0.0f, 1.0f, 0.0f});
-  return pitchY * RAD_TO_DEG;
+  Vector3 g = eq.getGravityVector();
+  return atan2(-g.x, g.z) * RAD_TO_DEG;
 }
 
 // Uses the quaternion's gravity vector rather than raw accelerometer atan2 (shoulder/elbow's
