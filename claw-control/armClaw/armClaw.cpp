@@ -1,6 +1,26 @@
 #include "armClaw.h"
+#include "../common/periodic/periodic.h"
+#include "../common/quaternion/quaternion.h"
 
-void ArmClaw::updateStatusLed(bool calibrating) {
+bool ArmClaw::settled(bool withinTolerance, TickType_t &stableSince) {
+  if (!withinTolerance) {
+    stableSince = 0;
+    return false;
+  }
+  if (stableSince == 0) {
+    stableSince = xTaskGetTickCount();
+    return false;
+  }
+  return (xTaskGetTickCount() - stableSince) >= pdMS_TO_TICKS(CALIBRATION_STABLE_TIME_MS);
+}
+
+void ArmClaw::updateStatusLed(bool calibrating, bool ready) {
+  bool enginesEnabled = platform.getEnginesPowerStatus();
+  if (lastEnginesEnabled && !enginesEnabled) {
+    onIMUReset();
+  }
+  lastEnginesEnabled = enginesEnabled;
+
   constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
   if (clawX.isDiverging() || clawY.isDiverging() || clawGripper.isDiverging()) {
     lastGuardTripTick = xTaskGetTickCount();
@@ -9,142 +29,288 @@ void ArmClaw::updateStatusLed(bool calibrating) {
       (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
   if (guardTripRecent) {
     statusLed.setState(LedState::GuardTripped);
-  } else if (!platform.getEnginesPowerStatus()) {
+  } else if (!enginesEnabled) {
     statusLed.setState(LedState::EnginesDisabled);
   } else if (calibrating) {
     statusLed.setState(LedState::Calibrating);
+  } else if (ready) {
+    statusLed.setState(LedState::Ready);
   } else {
     statusLed.setState(LedState::Off);
   }
 }
 
-void ArmClaw::calibrateYLoop() {
-  // LogQueue::Log("ArmClaw::calibrateYLoop started\n");
+bool ArmClaw::calibrateXLoop() {
+  LogQueue::Log("[DIAG] claw calibrateXLoop: enter\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
-  setYCalibrating(true);
-  float guessAngle = CLAW_Y_HOME_POSITION;
-  float increment = 90.0f;
-  int maxCounter = 40;
-  Quaternion position = imu.quaternion.load();
-  Quaternion origin = position.invert();
-  for (int i = 0; i < maxCounter; i++) {
-    clawY.setDegreeDirect(guessAngle);
-    //LogQueue::Log("\nIteration %d, prevGuessAngle: %.3f, ", i, guessAngle);
-    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(40));
-    position = imu.quaternion.load();
+  Periodic printer(pdMS_TO_TICKS(500));
 
-    Quaternion delta = origin * position;
-    Vector3 g = delta.getGravityVector();
-
-    if (fabs(g.y) < 0.001f) {
-      updateStatuses();
-      continue;
-    }
-
-    origin = position.invert();
-    float dir = (g.y > 0) ? -1.0f : 1.0f;
-    increment = (increment > 0.1f) ? increment / 2.0f : 0.0f;
-    guessAngle += dir * increment;
-    //LogQueue::Log("currGuessAngle: %.3f, increment: %.3f, y: %.3f", guessAngle, increment, g.y);
-    updateStatuses();
-  }
-  setYCalibrating(false);
-}
-
-void ArmClaw::calibrateXLoop() {    
-  //LogQueue::Log("ArmClaw::calibrateXLoop started\n");
-  TickType_t lastWakeTime = xTaskGetTickCount();
   setXCalibrating(true);
-  float guessAngle = CLAW_X_HOME_POSITION;
-  float increment = 90.0f;
-  int maxCounter = 40;
-  Quaternion position = imu.quaternion.load();
-  Quaternion origin = position.invert();
-  for (int i = 0; i < maxCounter; i++) {
-    clawX.setDegreeDirect(guessAngle);        
-    //LogQueue::Log("\nIteration %d, prevGuessAngle: %.3f, ", i, guessAngle);
-    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(40));
-    position = imu.quaternion.load();
 
-    Quaternion delta = origin * position;
-    Vector3 g = delta.getGravityVector();
-    
-    if (fabs(g.x) < 0.001f) {
-      updateStatuses();
-      continue;
+  // Require stable readings before seeding - a transient first sample caused a jerk elsewhere.
+  constexpr int seedStableSamples = 5;
+  constexpr float seedStableTolerance = 5.0f; // deg
+  float lastSeedSample = NAN;
+  int seedStableCount = 0;
+  while (seedStableCount < seedStableSamples) {
+    updateStatusLed(true);
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("[DIAG] claw calibrateXLoop: aborted, engines powered off (seeding)\n");
+      setXCalibrating(false);
+      return false;
     }
-
-    origin = position.invert();
-    float dir = (g.x < 0) ? -1.0f : 1.0f;
-    increment = (increment > 0.1f) ? increment / 2.0f : 0.0f;
-    guessAngle += dir * increment;
-    //LogQueue::Log("currGuessAngle: %.3f, increment: %.3f, x: %.3f", guessAngle, increment, g.x);
-    updateStatuses();
+    float sample = angleFromGravityX();
+    if (!isnan(sample) && !isnan(lastSeedSample) &&
+        fabsf(sample - lastSeedSample) <= seedStableTolerance) {
+      seedStableCount++;
+    } else {
+      seedStableCount = isnan(sample) ? 0 : 1;
+    }
+    lastSeedSample = sample;
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
+
+  float imuX = std::clamp(angleFromGravityX(), 0.0f, 270.0f);
+  LogQueue::Log("[DIAG] claw calibrateXLoop: seed physicalX=%.2f (raw gravityX=%.2f)\n", imuX, angleFromGravityX());
+  clawX.setDegreeDirect(imuX);
+  vTaskDelay(pdMS_TO_TICKS(2000));
+  clawX.setTargetAngle(CLAW_X_HOME_POSITION, 1000, CLAW_DEAD_ZONE);
+  TickType_t stableSince = 0;
+  uint32_t iterations = 0;
+  while (true) {
+    updateStatusLed(true);
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("[DIAG] claw calibrateXLoop: aborted, engines powered off\n");
+      setXCalibrating(false);
+      return false;
+    }
+    // A frozen servo can never satisfy settled(), so this loop needs its own way out.
+    if (clawX.isDiverging()) {
+      LogQueue::Log("[DIAG] claw calibrateXLoop: aborted, clawX diverging\n");
+      setXCalibrating(false);
+      return false;
+    }
+    float gravityX = angleFromGravityX();
+    iterations++;
+    printer.interval([&]() {
+      LogQueue::Log("[DIAG] claw calibrateXLoop: iter=%lu gravityX=%.3f physicalX=%.3f\n", (unsigned long)iterations, gravityX, clawX.getPhysicalAngle());
+    });
+    clawX.setIMUAngle(gravityX);
+    clawX.tick();
+    updateStatuses();
+    if (settled(fabsf(CLAW_X_HOME_POSITION - gravityX) <= CALIBRATION_SETTLE_TOLERANCE, stableSince)) {
+      break;
+    }
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
+  }
+  clawXHomeAngle = clawX.getPhysicalAngle();
   setXCalibrating(false);
+  LogQueue::Log("[DIAG] claw calibrateXLoop: exit after %lu iterations, clawXHomeAngle=%.2f\n", (unsigned long)iterations, clawXHomeAngle);
+  return true;
 }
 
-void ArmClaw::calibrateLoop() {
+bool ArmClaw::calibrateYLoop() {
+  LogQueue::Log("[DIAG] claw calibrateYLoop: enter\n");
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  Periodic printer(pdMS_TO_TICKS(500));
+
+  setYCalibrating(true);
+
+  constexpr int seedStableSamples = 5;
+  constexpr float seedStableTolerance = 5.0f; // deg
+  float lastSeedSample = NAN;
+  int seedStableCount = 0;
+  while (seedStableCount < seedStableSamples) {
+    updateStatusLed(true);
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("[DIAG] claw calibrateYLoop: aborted, engines powered off (seeding)\n");
+      setYCalibrating(false);
+      return false;
+    }
+    float sample = angleFromGravityY();
+    if (!isnan(sample) && !isnan(lastSeedSample) &&
+        fabsf(sample - lastSeedSample) <= seedStableTolerance) {
+      seedStableCount++;
+    } else {
+      seedStableCount = isnan(sample) ? 0 : 1;
+    }
+    lastSeedSample = sample;
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
+  }
+
+  float imuY = std::clamp(angleFromGravityY(), 0.0f, 180.0f);
+  LogQueue::Log("[DIAG] claw calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f)\n", imuY, angleFromGravityY());
+  clawY.setDegreeDirect(imuY);
+  vTaskDelay(pdMS_TO_TICKS(2000));
+  clawY.setTargetAngle(CLAW_Y_HOME_POSITION, 1000, CLAW_DEAD_ZONE);
+  TickType_t stableSince = 0;
+  uint32_t iterations = 0;
+  while (true) {
+    updateStatusLed(true);
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("[DIAG] claw calibrateYLoop: aborted, engines powered off\n");
+      setYCalibrating(false);
+      return false;
+    }
+    if (clawY.isDiverging()) {
+      LogQueue::Log("[DIAG] claw calibrateYLoop: aborted, clawY diverging\n");
+      setYCalibrating(false);
+      return false;
+    }
+    float gravityY = angleFromGravityY();
+    iterations++;
+    printer.interval([&]() {
+      LogQueue::Log("[DIAG] claw calibrateYLoop: iter=%lu gravityY=%.3f physicalY=%.3f\n", (unsigned long)iterations, gravityY, clawY.getPhysicalAngle());
+    });
+    clawY.setIMUAngle(gravityY);
+    clawY.tick();
+    updateStatuses();
+    if (settled(fabsf(CLAW_Y_HOME_POSITION - gravityY) <= CALIBRATION_SETTLE_TOLERANCE, stableSince)) {
+      break;
+    }
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
+  }
+  clawYHomeAngle = clawY.getPhysicalAngle();
+  setYCalibrating(false);
+  LogQueue::Log("[DIAG] claw calibrateYLoop: exit after %lu iterations, clawYHomeAngle=%.2f\n", (unsigned long)iterations, clawYHomeAngle);
+  return true;
+}
+
+Vector3 ArmClaw::trackTick() {
+  Vector3 imuAngles = getIMUAngles();
+  Vector3 physicalAngles = getPhysicalAngles(imuAngles);
+  if (useIMUMode.load() == USE_IMU_NOT_USE) {
+    clawX.setIMUAngle(clawX.getPhysicalAngle());
+    clawY.setIMUAngle(clawY.getPhysicalAngle());
+  } else {
+    clawX.setIMUAngle(physicalAngles.x);
+    clawY.setIMUAngle(physicalAngles.y);
+  }
+  clawX.tick();
+  clawY.tick();
+  // Gripper isn't IMU-tracked (open/close mechanism, not an orientation axis) - self-referential
+  // so setTargetAngle() commands still ramp via tick().
+  clawGripper.setIMUAngle(clawGripper.getPhysicalAngle());
+  clawGripper.tick();
+  updateStatuses();
+  return physicalAngles;
+}
+
+bool ArmClaw::calibrateLoop() {
+  LogQueue::Log("[DIAG] claw calibrateLoop: enter\n");
   setArmCalibrated(false);
-  LogQueue::Log("Callibration started\n");
   updateStatuses();
-  //calibrateXLoop();
-  //calibrateYLoop();  
-  //setArmCalibrated(true);
+  bool ok = calibrateXLoop(); // rough pass: lift off gravity's resting position, safe for Y to move next
+  if (ok) ok = calibrateYLoop();
+  if (ok) ok = calibrateXLoop(); // Y is home now, so gravityX is no longer skewed by it - refine X
+
+  if (ok) {
+    base.store(correctedQuat().invert());
+    pitchIntegrationValid = false; // re-anchor pitchX/pitchY to 0 at the new base
+    // Retarget to the calibrated home angles (PWM-space) - feedback is PWM-space from here on.
+    clawX.setTargetAngle(clawXHomeAngle, 1000, CLAW_DEAD_ZONE);
+    clawY.setTargetAngle(clawYHomeAngle, 1000, CLAW_DEAD_ZONE);
+    LogQueue::Log("[DIAG] claw calibrateLoop: base refreshed, starting final settle wait\n");
+
+    TickType_t lastWakeTime = xTaskGetTickCount();
+    TickType_t stableSince = 0;
+    Periodic printer(pdMS_TO_TICKS(500));
+    uint32_t iterations = 0;
+    while (true) {
+      updateStatusLed(true);
+      if (clawX.isDiverging() || clawY.isDiverging()) {
+        LogQueue::Log("[DIAG] claw calibrateLoop: aborted, servo diverging during settle wait\n");
+        ok = false;
+        break;
+      }
+      if (!wrist.isPositionOK()) {
+        LogQueue::Log("[DIAG] claw calibrateLoop: aborted, wrist lost position during settle wait\n");
+        ok = false;
+        break;
+      }
+      if (!platform.getEnginesPowerStatus()) {
+        LogQueue::Log("[DIAG] claw calibrateLoop: aborted, engines powered off during settle wait\n");
+        ok = false;
+        break;
+      }
+      Vector3 physicalAngles = trackTick();
+      iterations++;
+      bool withinTolerance =
+          fabsf(clawXHomeAngle - physicalAngles.x) <= CALIBRATION_SETTLE_TOLERANCE &&
+          fabsf(clawYHomeAngle - physicalAngles.y) <= CALIBRATION_SETTLE_TOLERANCE;
+      printer.interval([&]() {
+        LogQueue::Log("[DIAG] claw calibrateLoop: settle iter=%lu physicalX=%.2f physicalY=%.2f withinTolerance=%d\n",
+               (unsigned long)iterations, physicalAngles.x, physicalAngles.y, withinTolerance);
+      });
+      if (settled(withinTolerance, stableSince)) {
+        break;
+      }
+      vTaskDelayUntil(&lastWakeTime, taskInterval);
+    }
+    LogQueue::Log("[DIAG] claw calibrateLoop: exit after %lu settle iterations\n", (unsigned long)iterations);
+  }
+
+  setArmCalibrated(ok);
   updateStatuses();
+  return ok;
 }
 
-float ArmClaw::angleX(const Quaternion &q) {
-  float s = std::fmax(-1.0f, std::fmin(1.0f, 2.0f * (q.real * q.j - q.k * q.i)));
-  return std::asin(s);
+void ArmClaw::onIMUReset() {
+  LogQueue::Log("claw onIMUReset: invalidating base\n");
+  base.store(Quaternion());
+  pitchIntegrationValid = false;
 }
 
-float ArmClaw::angleY(const Quaternion &q) {
-  float s = sqrt(q.i * q.i + q.j * q.j + q.k * q.k);
-  return 2.0 * atan2(s, q.real);
-}
-
-Quaternion ArmClaw::makeRotationX(float angleX) {
-  float h = angleX * 0.5f;
-  return {std::cos(h), 0.0f, std::sin(h), 0.0f};
+int ArmClaw::updateStatuses() {
+  setUseIMUStatus(useIMUMode.load());
+  return ArmPart::updateStatuses();
 }
 
 void ArmClaw::engineLoop() {
+  LogQueue::Log("[DIAG] claw engineLoop: enter\n");
+  clawX.setTargetAngle(clawXHomeAngle, 1000, CLAW_DEAD_ZONE);
+  clawY.setTargetAngle(clawYHomeAngle, 1000, CLAW_DEAD_ZONE);
   TickType_t lastWakeTime = xTaskGetTickCount();
-
-  vTaskDelay(pdMS_TO_TICKS(200));
-  Quaternion origin = imu.quaternion.load().invert();
-  vTaskDelay(pdMS_TO_TICKS(50));
-
-  Quaternion position = imu.quaternion.load();
-  
-  static constexpr Vector3 X_AXIS = {1.0f, 0.0f, 0.0f};
-  static constexpr Vector3 Y_AXIS = {0.0f, 1.0f, 0.0f};
-  static constexpr Vector3 Z_AXIS = {0.0f, 0.0f, 1.0f};
-
+  Periodic printer(pdMS_TO_TICKS(500));
   while (true) {
-    updateStatusLed(false);
-    position = imu.quaternion.load();
-    Quaternion delta = origin * position;
+    updateStatusLed(false, true);
+    auto sp = imu.isPositionOK();
+    auto pp = wrist.isPositionOK();
+    auto bp = base.load().isValid();
+    auto ep = platform.getEnginesPowerStatus();
+    auto diverging = clawX.isDiverging() || clawY.isDiverging();
+    if (!sp || !pp || !bp || !ep || diverging) {
+      LogQueue::Log("[DIAG] claw engineLoop: exit (sp=%d pp=%d bp=%d ep=%d diverging=%d) physicalX=%.2f physicalY=%.2f\n", sp, pp, bp, ep, diverging, clawX.getPhysicalAngle(), clawY.getPhysicalAngle());
+      clawX.reset();
+      clawY.reset();
+      break;
+    }
 
-    Vector3 g = delta.getGravityVector();
-    Vector3 localX = delta.rotate({ 1.0f, 0.0f, 0.0f });
-    //LogQueue::Log("Rotated: X: %.3f, Y: %.3f, Z: %.3f\n", localX.x, localX.y, localX.z);
-
-    vTaskDelay(pdMS_TO_TICKS(500));
+    Vector3 physicalAngles = trackTick();
+    printer.interval([&]() {
+      LogQueue::Log("Claw X: %.2f, Y: %.2f\n", physicalAngles.x, physicalAngles.y);
+    });
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
 }
 
 void ArmClaw::engineTask(void *instance) {
   auto *claw = static_cast<ArmClaw *>(instance);
-  Periodic printer(pdMS_TO_TICKS(1000));
   TickType_t lastWakeTime = xTaskGetTickCount();
+  bool wasOK = false;
+
+  // Window to attach a serial log reader before calibration's first seed happens.
+  vTaskDelay(pdMS_TO_TICKS(3000));
 
   while (true) {
-    auto wp = claw->imu.isPositionOK();
-    auto pp = claw->platform.isPositionOK();    
+    auto sp = claw->imu.isPositionOK();
+    auto pp = claw->wrist.isPositionOK();
 
-    if (!wp || !pp) {
+    if (!sp || !pp) {
+      if (wasOK) {
+        LogQueue::Log("claw engineTask: position NOT OK (sp=%d pp=%d), stopped\n", sp, pp);
+        wasOK = false;
+      }
       claw->updateStatusLed(false);
       claw->setEngineTaskStatus(false);
       claw->updateStatuses();
@@ -152,25 +318,31 @@ void ArmClaw::engineTask(void *instance) {
       continue;
     }
 
-    Quaternion eQuat = claw->imu.quaternion.load();
-    Quaternion pQuat = claw->platform.imu.quaternion.load();
+    Quaternion position = claw->imu.quaternion.load();
+    Quaternion wristPosition = claw->wrist.imu.quaternion.load();
 
-    if (!eQuat.isValid() || !eQuat.isValid()) {
+    if (!position.isValid() || !wristPosition.isValid()) {
+      if (wasOK) {
+        LogQueue::Log("claw engineTask: quaternion invalid (imu=%d wrist=%d), stopped\n", position.isValid(), wristPosition.isValid());
+        wasOK = false;
+      }
       claw->updateStatusLed(false);
       claw->setEngineTaskStatus(false);
       claw->updateStatuses();
-      vTaskDelay(pdMS_TO_TICKS(250));
+      vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
 
+    LogQueue::Log("[DIAG] claw engineTask: position OK -> entering calibrateLoop (physicalX=%.2f physicalY=%.2f)\n", claw->clawX.getPhysicalAngle(), claw->clawY.getPhysicalAngle());
+    wasOK = true;
     claw->setEngineTaskStatus(true);
-    claw->updateStatuses();
-    claw->calibrateLoop();
-    claw->engineLoop();
-
+    // Only proceed on a successful calibration - engineLoop() would otherwise retarget to stale values.
+    if (claw->calibrateLoop()) {
+      claw->engineLoop();
+      LogQueue::Log("[DIAG] claw engineTask: engineLoop returned, back to top\n");
+    }
     claw->setEngineTaskStatus(false);
     claw->updateStatuses();
-    vTaskDelete(NULL);    
   }
 }
 
@@ -182,7 +354,11 @@ ArmClaw::ArmClaw(const uint8_t detectorsSdaPin, const uint8_t detectorsSclPin,
                  const uint8_t memsIntPin, const uint8_t shortDetectorShutPin,
                  const uint8_t longDetectorShutPin)
     : ArmPart(canRxPin, canTxPin),
-      clawX(engineXPin, Range(0, 180), CLAW_X_HOME_POSITION, 100),
+      // clawX's real range is 0-270 (135 is the midpoint) - was Range(0,180), inherited from the
+      // old dead code, which made the Servo class's PWM-to-degree mapping 1.5x too coarse
+      // (confirmed live: gravity-measured rotation was consistently ~1.44-1.5x the commanded
+      // degrees for the same PWM change).
+      clawX(engineXPin, Range(0, 270), CLAW_X_HOME_POSITION, 100),
       clawY(engineYPin, Range(0, 180), CLAW_Y_HOME_POSITION, 100),
       clawGripper(engineGripperPin, Range(0, 180), CLAW_GRIPPER_HOME_POSITION,
                   100),
@@ -206,7 +382,11 @@ ArmClaw::ArmClaw(const uint8_t detectorsSdaPin, const uint8_t detectorsSclPin,
 }
 
 int ArmClaw::updateQuaternion(IMUBase *position) {
-  Quaternion quat = position->quaternion.load();
+  Quaternion baseQ = base.load();
+  if (!baseQ.isValid()) {
+    return ERROR_PART_IS_NOT_CALIBRATED;
+  }
+  Quaternion quat = baseQ * correctedQuat();
   return ArmPart::updateQuaternion(quat);
 }
 
@@ -246,14 +426,11 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 10.0f;
     float angleG = (angleGS == PARAMETER_IS_NAN) ? NAN : angleGS / 10.0f;
 
-    // TEMP for q_corr measurement (see plan): setDegreeDirect bypasses tick()/dead-zone/guard,
-    // since engineLoop() doesn't call tick() yet either way. Revert to setTargetAngle() once the
-    // real engine loop is built.
     if (!isnan(angleX)) {
-      clawX.setDegreeDirect(angleX);
+      clawX.setTargetAngle(angleX, timeMS, CLAW_DEAD_ZONE);
     }
     if (!isnan(angleY)) {
-      clawY.setDegreeDirect(angleY);
+      clawY.setTargetAngle(angleY, timeMS, CLAW_DEAD_ZONE);
     }
     if (!isnan(angleG)) {
       clawGripper.setTargetAngle(angleG, timeMS, CLAW_DEAD_ZONE);
@@ -268,7 +445,7 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     if (clearMask & ARM_CLAW) {
       // this->imu.clearTare();
     }
-    if (tareMask & ARM_CLAW) {    
+    if (tareMask & ARM_CLAW) {
       this->imu.tare();
       // this->imu.saveTare();
     }
@@ -283,4 +460,96 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
   if (frame.id == CAN_CLAW_FIRMWARE_UPGRADE) {
     rebootInBootMode();
   }
+}
+
+Vector3 ArmClaw::getIMUAngles() {
+  Quaternion qm = base.load() * correctedQuat();
+
+  float pitchX, pitchY;
+  if (!qm.isValid()) {
+    // Glitched reading - hold the last value instead of integrating NaN permanently.
+    pitchX = accumulatedPitchX;
+    pitchY = accumulatedPitchY;
+  } else if (!pitchIntegrationValid) {
+    pitchX = 0.0f;
+    pitchY = 0.0f;
+    accumulatedPitchX = 0.0f;
+    accumulatedPitchY = 0.0f;
+    pitchIntegrationValid = true;
+    lastOrientation = qm;
+  } else {
+    // Delta-integrated rather than re-derived absolutely each tick - matches
+    // ArmShoulder/ArmElbow/ArmWrist's fix for the yaw-decomposition-order bug (a sequential
+    // strip-one-axis-then-extract-the-other decomposition is order-sensitive and breaks under a
+    // large single-tick change, but is safe for the small delta between consecutive ticks).
+    Quaternion qDelta = lastOrientation.invert() * qm;
+    float deltaPitchX = qDelta.twistAngle({1.0f, 0.0f, 0.0f});
+    Quaternion qDeltaX = Quaternion::AngleAxis(deltaPitchX, 1.0f, 0.0f, 0.0f);
+    Quaternion qDeltaSwing = qDeltaX.invert() * qDelta;
+    float deltaPitchY = qDeltaSwing.twistAngle({0.0f, 1.0f, 0.0f});
+    accumulatedPitchX += deltaPitchX;
+    accumulatedPitchY += deltaPitchY;
+
+    // Gravity-vector-based, not a decomposition of qm itself - see ArmShoulder::getIMUAngles()'s
+    // identical fix for why (order-sensitive, breaks under a large orientation change).
+    constexpr float driftCorrectionAlpha = 0.01f; // ~1s time constant at 5ms/tick
+    Vector3 gAbs = qm.getGravityVector();
+    float pitchXAbs = atan2(gAbs.y, gAbs.z);
+    float pitchYAbs = atan2(-gAbs.x, gAbs.z);
+    accumulatedPitchX += driftCorrectionAlpha * (pitchXAbs - accumulatedPitchX);
+    accumulatedPitchY += driftCorrectionAlpha * (pitchYAbs - accumulatedPitchY);
+
+    pitchX = accumulatedPitchX;
+    pitchY = accumulatedPitchY;
+    lastOrientation = qm;
+  }
+
+  static Periodic axisPrinter(pdMS_TO_TICKS(300));
+  axisPrinter.interval([&]() {
+    LogQueue::Log("[DIAG] claw pitchX=%.2f pitchY=%.2f\n", pitchX * RAD_TO_DEG, pitchY * RAD_TO_DEG);
+  });
+
+  return {pitchX, pitchY, 0};
+}
+
+Vector3 ArmClaw::getPhysicalAngles(Vector3 &imuAngles) {
+  return { (imuAngles.x * RAD_TO_DEG + clawXHomeAngle), (imuAngles.y * RAD_TO_DEG + clawYHomeAngle), 0 };
+}
+
+// Uses the quaternion's gravity vector (yaw-invariant) rather than a strip-then-extract
+// decomposition of the absolute orientation - see getIMUAngles()'s comment for why. Sign/axis
+// pairing verified live (2026-08-14): commanding clawX from 45->90 produced a positive change
+// here, matching increasing physical angle.
+float ArmClaw::angleFromGravityX() {
+  Quaternion q = correctedQuat();
+  if (!q.isValid()) {
+    return NAN;
+  }
+  Vector3 g = q.getGravityVector();
+  float raw = atan2(g.y, g.z) * RAD_TO_DEG;
+
+  static Periodic gravityPrinter(pdMS_TO_TICKS(300));
+  gravityPrinter.interval([&]() {
+    LogQueue::Log("[DIAG] claw angleFromGravityX: raw=%.2f physical=%.2f\n", raw, clawX.getPhysicalAngle());
+  });
+
+  return raw;
+}
+
+// Sign/axis pairing verified live (2026-08-14): commanding clawY from 90->130 produced a
+// positive change here, matching increasing physical angle.
+float ArmClaw::angleFromGravityY() {
+  Quaternion q = correctedQuat();
+  if (!q.isValid()) {
+    return NAN;
+  }
+  Vector3 g = q.getGravityVector();
+  float raw = atan2(-g.x, g.z) * RAD_TO_DEG;
+
+  static Periodic gravityPrinter(pdMS_TO_TICKS(300));
+  gravityPrinter.interval([&]() {
+    LogQueue::Log("[DIAG] claw angleFromGravityY: raw=%.2f physical=%.2f\n", raw, clawY.getPhysicalAngle());
+  });
+
+  return raw;
 }
