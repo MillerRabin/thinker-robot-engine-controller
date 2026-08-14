@@ -311,6 +311,7 @@ void ArmClaw::engineTask(void *instance) {
         LogQueue::Log("claw engineTask: position NOT OK (sp=%d pp=%d), stopped\n", sp, pp);
         wasOK = false;
       }
+      LogQueue::Log("[DIAG] claw engineTask: waiting sp=%d pp=%d\n", sp, pp);
       claw->updateStatusLed(false);
       claw->setEngineTaskStatus(false);
       claw->updateStatuses();
