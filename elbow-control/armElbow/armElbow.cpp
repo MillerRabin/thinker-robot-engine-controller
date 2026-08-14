@@ -90,7 +90,11 @@ bool ArmElbow::calibrateYLoop() {
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
 
-  elbowY.reset();
+  // Seed explicitly to a known PWM-space value rather than reset()+NaN-fallback - elbowY's PWM
+  // scale and its gravity-angle scale are offset by a fixed amount (not numerically aligned like
+  // wrist/shoulder), so letting setIMUAngle()'s NaN fallback seed physicalAngle to the raw gravity
+  // reading starts it in the wrong frame entirely, which the servo's own lead-clamp then can't recover from.
+  elbowY.setDegreeDirect(elbowYHomeAngle);
   elbowY.setTargetAngle(90.0f, 1000, ELBOW_DEAD_ZONE);
   TickType_t stableSince = 0;
   bool ok = true;
@@ -219,7 +223,12 @@ void ArmElbow::engineLoop() {
 ArmElbow::ArmElbow(const uint memsSdaPin, const uint memsSclPin,
                    const uint memsIntPin, const uint memsRstPin,
                    const uint engineYPin, const uint canRxPin,
-                   const uint canTxPin) : ArmPart(canRxPin, canTxPin), elbowY(engineYPin, Range(0, 270), ELBOW_Y_HOME_POSITION, 100),
+                   // Safe range's floor is 8deg, not 0 - physical low limit is ~5deg (motor ran hot
+                   // sitting at commanded 0, straining against the real mechanical stop), 8deg keeps
+                   // clear margin. Range(0,270) itself must stay the true calibrated span (it sets
+                   // the degree-to-PWM scale); the safe range clamps commands without touching that.
+                   const uint canTxPin) : ArmPart(canRxPin, canTxPin),
+                                          elbowY(engineYPin, Range(0, 270), ELBOW_Y_HOME_POSITION, 100, 0.0005f, 0.0025f, Range(8, 270)),
                                           imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin) {
   // Mounting correction: maps raw IMU axes onto ArmShoulder's Y/Z convention.
   Quaternion q_corr = {-0.314134f, -0.584772f, -0.348743f, 0.661619f};
@@ -309,14 +318,34 @@ float ArmElbow::shoulderYAngleDeg() {
   return atan2(-g.x, g.z) * RAD_TO_DEG;
 }
 
-// Monotonic across the full 0-270 PWM range once the atan2 +/-180 wrap is undone (confirmed via full-range sweep).
-constexpr float ELBOW_GRAVITY_UNWRAP_THRESHOLD = -90.0f;
-constexpr float ELBOW_GRAVITY_Y_MIN = -35.0f;
-constexpr float ELBOW_GRAVITY_Y_MAX = 220.0f;
+// Re-measured live for the new quaternion-based `raw` (2026-08-14): a full hand-swing to both
+// physical hard stops (engines off) observed raw spanning -128.15 to +135.40 - a ~263deg span that
+// fits entirely within atan2's natural +/-180 output without ever needing to wrap. The old
+// threshold/-35/220 bounds were tuned for the previous raw-accelerometer formula's different
+// zero-crossing and put the wrap boundary *inside* the real operating range - confirmed live this
+// produced a ~357deg jump in `res` for a ~3deg real movement crossing raw=-90 (raw=-89.14->-91.94,
+// res=-89.14->268.06). Threshold now sits comfortably below the true minimum so the wrap is
+// effectively inert during normal operation; MIN/MAX bracket the measured extremes with a small margin.
+constexpr float ELBOW_GRAVITY_UNWRAP_THRESHOLD = -150.0f;
+constexpr float ELBOW_GRAVITY_Y_MIN = -132.0f;
+constexpr float ELBOW_GRAVITY_Y_MAX = 139.0f;
 
+// raw is quaternion-based (getGravityVector()), not raw accelerometer - a raw accelerometer can't
+// tell gravity apart from real linear acceleration, so any actual vibration/shake during a fast
+// calibration move gets picked up as a (wrong) tilt change, same class of issue fixed for
+// shoulderYAngleDeg() above and ArmShoulder::angleFromGravityY(). Also: LocalBNO's setRotate()
+// mounting correction (q_corr) only applies to the quaternion, never to raw accelerometer readings
+// (see item 20 in project memory) - so the old raw-accelerometer value here was in an uncorrected
+// frame entirely, a second, independent reason to prefer this. Range constants below (threshold/
+// min/max) were tuned against the OLD formula's output range and MUST be re-verified live against
+// this new one before trusting it to drive real calibration - don't assume they still apply.
 float ArmElbow::angleFromGravityY() {
-  Accelerometer acc = imu.accelerometer.load();
-  float raw = atan2(acc.y, acc.z) * RAD_TO_DEG;
+  Quaternion q = imu.quaternion.load();
+  if (!q.isValid()) {
+    return NAN;
+  }
+  Vector3 g = q.getGravityVector();
+  float raw = atan2(-g.x, g.z) * RAD_TO_DEG;
   float shoulderCorr = shoulderYAngleDeg();
   float res = raw - shoulderCorr;
   if (res < ELBOW_GRAVITY_UNWRAP_THRESHOLD) {

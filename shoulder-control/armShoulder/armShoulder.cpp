@@ -430,6 +430,10 @@ Vector3 ArmShoulder::getIMUAngles() {
   static Periodic axisPrinter(pdMS_TO_TICKS(300));
   axisPrinter.interval([&]() {
     LogQueue::Log("[DIAG] pitchX=%.2f yawZ=%.2f\n", pitchX * RAD_TO_DEG, yawZ * RAD_TO_DEG);
+    // Raw local sensor reading, before any base transform - to distinguish a genuine sensor
+    // glitch (raw i/j/k/real jumps) from a computation issue (raw looks smooth, yawZ doesn't).
+    Quaternion raw = imu.quaternion.load();
+    LogQueue::Log("[DIAG] rawQuat i=%.4f j=%.4f k=%.4f real=%.4f\n", raw.i, raw.j, raw.k, raw.real);
   });
 
   return {0, pitchX, yawZ};
@@ -439,11 +443,31 @@ Vector3 ArmShoulder::getPhysicalAngles(Vector3 &imuAngles) {
   return { 0, (imuAngles.y * RAD_TO_DEG + shoulderYHomeAngle), (imuAngles.z * RAD_TO_DEG + SHOULDER_Z_HOME_POSITION) };
 }
 
+// Quaternion-based (getGravityVector()), not raw accelerometer - a raw accelerometer can't tell
+// gravity apart from real linear acceleration, so it picks up any actual vibration/shake as a
+// (wrong) tilt change. Calibration is exactly when the servo moves fastest/hardest (large error,
+// max commanded speed), so any real mechanical vibration there would corrupt this reading and
+// feed a bogus angle back into the control loop - this was the actual root cause of the repeating
+// chaotic-oscillation-during-calibration incidents (confirmed live: zero jumps/chaos with this
+// formula under real hand-driven motion, vs. constant chaos with the old raw-accelerometer one).
+// PWM_OFFSET: unlike ArmWrist::angleFromGravityY(), this axis's raw atan2 zero-crossing does NOT
+// land at PWM=SHOULDER_Y_HOME_POSITION - measured live (engines off, arm hand-positioned at true
+// vertical): raw read ~-2deg where PWM-space expects 90deg. Baked in here so the function's return
+// value is directly PWM-comparable everywhere else in this file, matching every other module's convention.
+constexpr float SHOULDER_GRAVITY_Y_PWM_OFFSET = 92.0f;
+
 float ArmShoulder::angleFromGravityY() {
-  Accelerometer acc = imu.accelerometer.load();  
-  float res = -1 * atan2(acc.y, acc.x) * RAD_TO_DEG;
-  if (res < -45) {
-    res = 360 + res;
+  Quaternion q = imu.quaternion.load();
+  if (!q.isValid()) {
+    return NAN;
   }
+  Vector3 g = q.getGravityVector();
+  float res = atan2(-g.x, g.z) * RAD_TO_DEG + SHOULDER_GRAVITY_Y_PWM_OFFSET;
+
+  static Periodic gravityPrinter(pdMS_TO_TICKS(300));
+  gravityPrinter.interval([&]() {
+    LogQueue::Log("[DIAG] shoulder angleFromGravityY: res=%.2f physical=%.2f\n", res, shoulderY.getPhysicalAngle());
+  });
+
   return res;
 }
