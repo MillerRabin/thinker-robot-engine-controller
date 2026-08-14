@@ -15,7 +15,13 @@ bool ArmShoulder::settled(bool withinTolerance, TickType_t &stableSince) {
   return (xTaskGetTickCount() - stableSince) >= pdMS_TO_TICKS(CALIBRATION_STABLE_TIME_MS);
 }
 
-void ArmShoulder::updateStatusLed(bool calibrating) {
+void ArmShoulder::updateStatusLed(bool calibrating, bool ready) {
+  bool enginesEnabled = platform.getEnginesPowerStatus();
+  if (lastEnginesEnabled && !enginesEnabled) {
+    onIMUReset();
+  }
+  lastEnginesEnabled = enginesEnabled;
+
   constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
   if (shoulderY.isDiverging() || shoulderZ.isDiverging()) {
     lastGuardTripTick = xTaskGetTickCount();
@@ -24,10 +30,12 @@ void ArmShoulder::updateStatusLed(bool calibrating) {
       (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
   if (guardTripRecent) {
     statusLed.setState(LedState::GuardTripped);
-  } else if (!platform.getEnginesPowerStatus()) {
+  } else if (!enginesEnabled) {
     statusLed.setState(LedState::EnginesDisabled);
   } else if (calibrating) {
     statusLed.setState(LedState::Calibrating);
+  } else if (ready) {
+    statusLed.setState(LedState::Ready);
   } else {
     statusLed.setState(LedState::Off);
   }
@@ -227,7 +235,7 @@ void ArmShoulder::engineLoop() {
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
   while (true) {
-    updateStatusLed(false);
+    updateStatusLed(false, true);
     auto sp = imu.isPositionOK();
     auto pp = platform.isPositionOK();
     auto bp = base.load().isValid();

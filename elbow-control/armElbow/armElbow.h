@@ -27,7 +27,10 @@ private:
   StatusLed statusLed{STATUS_LED_PIN};
   // Latched, not live isDiverging() - a trip can self-clear within one tick, too fast to see.
   TickType_t lastGuardTripTick = 0;
-  void updateStatusLed(bool calibrating);
+  void updateStatusLed(bool calibrating, bool ready = false);
+  // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively
+  // invalidates base/pitchIntegrationValid rather than waiting for the next calibration.
+  bool lastEnginesEnabled = true;
   bool settled(bool withinTolerance, TickType_t &stableSince);
   TaskHandle_t taskHandle = NULL;
   RemoteShoulder shoulder;
@@ -59,6 +62,7 @@ private:
     int updateAccuracy(IMUBase * position);
     int begin();
     int updateStatuses();
+    void onIMUReset();
     Vector3 getIMUAngles();
     Vector3 getPhysicalAngles(Vector3 & imuAngles);
   };

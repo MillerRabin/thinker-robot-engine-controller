@@ -29,7 +29,10 @@ private:
   StatusLed statusLed{STATUS_LED_PIN};
   // Latched, not live isDiverging() - a trip can self-clear within one tick, too fast to see.
   TickType_t lastGuardTripTick = 0;
-  void updateStatusLed(bool calibrating);
+  void updateStatusLed(bool calibrating, bool ready = false);
+  // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively
+  // invalidates base/pitchIntegrationValid rather than waiting for the next calibration.
+  bool lastEnginesEnabled = true;
   AtomicQuaternion base;
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
   // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical); base is relative to this.

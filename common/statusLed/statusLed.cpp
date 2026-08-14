@@ -40,5 +40,8 @@ void StatusLed::setState(LedState newState) {
     case LedState::EnginesDisabled:
       putPixel(0, 0, 80);
       break;
+    case LedState::Ready:
+      putPixel(0, 60, 0);
+      break;
   }
 }

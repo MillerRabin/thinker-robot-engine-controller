@@ -9,6 +9,7 @@ enum class LedState : uint8_t {
   Calibrating,
   GuardTripped,
   EnginesDisabled,
+  Ready,
 };
 
 class StatusLed {

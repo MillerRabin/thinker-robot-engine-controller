@@ -15,7 +15,19 @@ bool ArmElbow::calibrateLoop() {
   return ok;
 }
 
-void ArmElbow::updateStatusLed(bool calibrating) {
+void ArmElbow::onIMUReset() {
+  LogQueue::Log("elbow onIMUReset: invalidating base\n");
+  base = Quaternion();
+  pitchIntegrationValid = false;
+}
+
+void ArmElbow::updateStatusLed(bool calibrating, bool ready) {
+  bool enginesEnabled = platform.getEnginesPowerStatus();
+  if (lastEnginesEnabled && !enginesEnabled) {
+    onIMUReset();
+  }
+  lastEnginesEnabled = enginesEnabled;
+
   constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
   if (elbowY.isDiverging()) {
     lastGuardTripTick = xTaskGetTickCount();
@@ -24,10 +36,12 @@ void ArmElbow::updateStatusLed(bool calibrating) {
       (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
   if (guardTripRecent) {
     statusLed.setState(LedState::GuardTripped);
-  } else if (!platform.getEnginesPowerStatus()) {
+  } else if (!enginesEnabled) {
     statusLed.setState(LedState::EnginesDisabled);
   } else if (calibrating) {
     statusLed.setState(LedState::Calibrating);
+  } else if (ready) {
+    statusLed.setState(LedState::Ready);
   } else {
     statusLed.setState(LedState::Off);
   }
@@ -183,7 +197,7 @@ void ArmElbow::engineLoop() {
   Periodic printer(pdMS_TO_TICKS(500));
   elbowY.setTargetAngle(elbowYHomeAngle, 500, ELBOW_DEAD_ZONE);
   while (true) {
-    updateStatusLed(false);
+    updateStatusLed(false, true);
     auto sp = imu.isPositionOK();
     auto pp = shoulder.isPositionOK();
     auto ep = platform.getEnginesPowerStatus();
