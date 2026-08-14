@@ -89,21 +89,72 @@ private:
   // Catches the case a growing-error check misses: pinned at a limit with a large but non-growing error.
   absolute_time_t limitPinnedSince = 0;
   static constexpr int64_t limitPinnedMaxUs = divergenceCheckIntervalUs * divergenceMaxIntervals;
+
+  // Anchor pair, captured once per move (cleared in resetDivergence(), lazily re-captured on the
+  // first tick() after). physicalAngle and imuAngle are NOT assumed to share the same numeric
+  // frame/zero-point - confirmed live: true for shoulder/wrist (same scale), but NOT for elbow,
+  // which has a large, legitimate, fixed offset between its PWM scale and its gravity-sensed scale.
+  // Both checks below compare physicalAngle against how far it *should* have moved given imuAngle's
+  // own real progress since this anchor, not against imuAngle's raw value - this generalizes
+  // correctly to any fixed per-joint offset, since only relative progress is ever compared.
+  float leadAnchorPhysical = NAN;
+  float leadAnchorImu = NAN;
+
+  // Catches a third case neither check above sees: a persistent (not growing) small bias in
+  // imuAngle relative to targetAngle - error stays small and non-growing, so the checks above
+  // never trip, but tick() still nudges physicalAngle a little further every tick since it never
+  // exactly reaches the (tight) dead zone. Nothing ties physicalAngle's own displacement back to
+  // imuAngle's real progress, so it can drift unboundedly - confirmed live (shoulder ran
+  // physicalAngle from ~91 to its 180 range limit over several seconds while imuAngle sat at a
+  // near-constant ~90). Sustained, not instantaneous - a single-tick gap right after a fresh seed
+  // is expected and must not trip this; only a gap that persists is the real failure signature.
+  absolute_time_t physicalImuGapSince = 0;
+  static constexpr float maxPhysicalImuGapDeg = 20.0f;
+  static constexpr int64_t physicalImuGapMaxUs = divergenceCheckIntervalUs * divergenceMaxIntervals;
+
+  // Soft rate limit, checked every tick (not just after the fact like the guard above): never let
+  // physicalAngle get more than this far ahead of where imuAngle's own progress says it should be.
+  // The deadline-driven speed calc above only reacts to error vs targetAngle, so if imuAngle can't
+  // keep up (real torque limit, filter lag) it just commands more speed instead of backing off -
+  // this clamp is what actually stops physicalAngle from racing ahead, rather than freezing after
+  // it already has. Kept comfortably under maxPhysicalImuGapDeg so the hard guard stays a rare backstop.
+  static constexpr float maxLeadDeg = 10.0f;
+
+  // With physicalAngle now rate-limited to follow imuAngle, a genuinely stuck joint (imuAngle not
+  // advancing - real mechanical stall, not just lag) no longer produces a growing physical-imu gap
+  // to catch - it would sit quietly forever instead. Catch that directly: imuAngle must move at
+  // least minProgressDeg over each check window while error is still outside the dead zone.
+  // Window is deliberately longer than the other guards' 1.8s: confirmed live (shoulderY, no
+  // mechanical resistance by hand) that closing the last few degrees under the new maxLeadDeg
+  // clamp is legitimately slower than the old deadline-chasing ramp - 1.8s falsely caught that
+  // as "stuck". 5s gives real (if unhurried) convergence room while still catching an actual stall.
+  absolute_time_t progressCheckTime = 0;
+  float progressCheckImuAngle = NAN;
+  static constexpr float minProgressDeg = 1.0f;
+  static constexpr int64_t progressCheckIntervalUs = 5000000;
+
   void resetDivergence();
 
   int getWrapAndDivider(const uint freq, PWMParameters& params) const;
   uint16_t getSlices(const float targetPeriod, const float period, const uint32_t wrap) const;
   Periodic printer;
 
-public:  
+public:
   const float maxDegree;
   const float minDegree;
+  // Software-enforced safety limits, separate from minDegree/maxDegree: those two calibrate the
+  // degree-to-PWM-pulse-width scale (pulseStep) and must stay equal to the servo's true full
+  // mechanical span, or the whole degree scale silently distorts. Pass safeRange to the constructor
+  // instead to keep commands away from a physical stop found empirically - it clamps without
+  // touching pulseStep. Defaults to the full degreeRange (no extra restriction) when omitted.
+  const float safeMinDegree;
+  const float safeMaxDegree;
   int setDegreeDirect(const float degree);
   int setFrequency(const uint freq);
 
   Servo(const uint pin, Range degreeRange, const float homePosition,
         const float freq = 50, const float lowPeriod = 0.0005f,
-        const float highPeriod = 0.0025f);
+        const float highPeriod = 0.0025f, Range safeRange = Range(NAN, NAN));
   bool setTargetAngle(const float angle, uint16_t timeMS, float deadZone);
   float getTargetAngle() const { return targetAngle; }
 

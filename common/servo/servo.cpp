@@ -1,8 +1,10 @@
 #include "servo.h"
 
 Servo::Servo(const uint pin, Range degreeRange, const float homePosition,
-             const float freq, const float lowPeriod, const float highPeriod)
+             const float freq, const float lowPeriod, const float highPeriod, Range safeRange)
     : pin(pin), minDegree(degreeRange.from), maxDegree(degreeRange.to),
+      safeMinDegree(isnan(safeRange.from) ? degreeRange.from : std::clamp(safeRange.from, degreeRange.from, degreeRange.to)),
+      safeMaxDegree(isnan(safeRange.to) ? degreeRange.to : std::clamp(safeRange.to, degreeRange.from, degreeRange.to)),
       lowPeriod(lowPeriod), highPeriod(highPeriod), physicalAngle(homePosition),
       printer(pdMS_TO_TICKS(1000)) {
   gpio_set_function(pin, GPIO_FUNC_PWM);
@@ -90,10 +92,10 @@ int Servo::setDegreeDirect(const float degree) {
   if (isnan(degree)) {
     return SERVO_DEGREE_IS_NAN;
   }
-  if (degree < minDegree) {
+  if (degree < safeMinDegree) {
     return SERVO_DEGREE_IS_BELOW_MINIMUM;
   }
-  if (degree > maxDegree) {
+  if (degree > safeMaxDegree) {
     return SERVO_DEGREE_IS_ABOVE_MAXIMUM;
   }
 
@@ -111,7 +113,7 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
                            float newDeadZone) {
   if (isnan(angle))
     return false;
-  if (angle < minDegree || angle > maxDegree)
+  if (angle < safeMinDegree || angle > safeMaxDegree)
     return false;
 
   targetAngle = angle;
@@ -128,6 +130,11 @@ void Servo::resetDivergence() {
   diverging = false;
   appliedSpeedDegPerSec = 0.0f;
   limitPinnedSince = 0;
+  physicalImuGapSince = 0;
+  progressCheckTime = 0;
+  progressCheckImuAngle = NAN;
+  leadAnchorPhysical = NAN;
+  leadAnchorImu = NAN;
 }
 
 void Servo::tick() {
@@ -146,6 +153,30 @@ void Servo::tick() {
 
   if (diverging)
     return;
+
+  // Anchor physicalAngle/imuAngle's relationship at the start of this move rather than assuming
+  // they share a numeric frame - some joints do (shoulder/wrist), some don't (elbow, which has a
+  // large fixed offset between its PWM scale and its gravity-sensed scale). Comparing against how
+  // far imuAngle has genuinely progressed since the anchor, instead of against imuAngle's raw
+  // value, makes both checks below correct regardless of that offset.
+  if (isnan(leadAnchorImu)) {
+    leadAnchorImu = imuAngle;
+    leadAnchorPhysical = physicalAngle;
+  }
+  const float allowedCenter = leadAnchorPhysical + (imuAngle - leadAnchorImu);
+
+  if (fabsf(physicalAngle - allowedCenter) > maxPhysicalImuGapDeg) {
+    if (physicalImuGapSince == 0) {
+      physicalImuGapSince = now;
+    } else if (absolute_time_diff_us(physicalImuGapSince, now) >= physicalImuGapMaxUs) {
+      diverging = true;
+      LogQueue::Log("Servo diverging: physicalAngle (%.2f) diverged from imuAngle-implied position (%.2f) by more than %.1fdeg, freezing\n",
+                    physicalAngle, allowedCenter, maxPhysicalImuGapDeg);
+      return;
+    }
+  } else {
+    physicalImuGapSince = 0;
+  }
 
   const float error = targetAngle - imuAngle;
   const float absError = fabsf(error);
@@ -174,6 +205,23 @@ void Servo::tick() {
     divergenceCheckTime = now;
   }
 
+  // Real mechanical stall check - imuAngle itself must be making progress, independent of the
+  // physicalAngle/imuAngle lead clamp below (which, by design, keeps physicalAngle from racing
+  // ahead and would otherwise mask a stuck joint that never trips the checks above).
+  if (isnan(progressCheckImuAngle)) {
+    progressCheckImuAngle = imuAngle;
+    progressCheckTime = now;
+  } else if (absolute_time_diff_us(progressCheckTime, now) >= progressCheckIntervalUs) {
+    if (fabsf(imuAngle - progressCheckImuAngle) < minProgressDeg) {
+      diverging = true;
+      LogQueue::Log("Servo diverging: imuAngle stuck near %.2f (target %.2f), freezing\n",
+                    imuAngle, targetAngle);
+      return;
+    }
+    progressCheckImuAngle = imuAngle;
+    progressCheckTime = now;
+  }
+
   float dtSec = dtUs / 1000000.0f;
   dtSec = std::min(dtSec, 0.01f);
 
@@ -194,20 +242,25 @@ void Servo::tick() {
 
   float increment = appliedSpeedDegPerSec * dtSec;
   float nextPhysical = physicalAngle + increment;
+  // Rate-limit physicalAngle's lead over where imuAngle's own progress says it should be (allowedCenter,
+  // computed above) - the deadline-driven speed above only reacts to error vs targetAngle, so without
+  // this, a joint that can't keep up gets commanded even faster instead of slower. This is what actually
+  // prevents the runaway, not just the guard that catches it.
+  nextPhysical = std::clamp(nextPhysical, allowedCenter - maxLeadDeg, allowedCenter + maxLeadDeg);
   printer.interval([&]() {
     LogQueue::Log("Tick: Target: %.2f, IMU: %.2f, Physical: %.2f, Error: %.2f, DesiredSpeed: %.2f, AppliedSpeed: %.2f\n",
                   targetAngle, imuAngle, physicalAngle, error, desiredSpeedDegPerSec, appliedSpeedDegPerSec);
   });
 
-  bool pinnedAtLimit = (nextPhysical <= minDegree && dir < 0.0f) || (nextPhysical >= maxDegree && dir > 0.0f);
+  bool pinnedAtLimit = (nextPhysical <= safeMinDegree && dir < 0.0f) || (nextPhysical >= safeMaxDegree && dir > 0.0f);
   if (pinnedAtLimit) {
     if (limitPinnedSince == 0) {
       limitPinnedSince = now;
     } else if (absolute_time_diff_us(limitPinnedSince, now) >= limitPinnedMaxUs) {
       diverging = true;
       LogQueue::Log("Servo diverging: pinned at limit (%.2f) with error %.2f, freezing\n",
-                    nextPhysical <= minDegree ? minDegree : maxDegree, absError);
-      physicalAngle = std::clamp(nextPhysical, minDegree, maxDegree);
+                    nextPhysical <= safeMinDegree ? safeMinDegree : safeMaxDegree, absError);
+      physicalAngle = std::clamp(nextPhysical, safeMinDegree, safeMaxDegree);
       setDegreeDirect(physicalAngle);
       return;
     }
@@ -215,7 +268,7 @@ void Servo::tick() {
     limitPinnedSince = 0;
   }
 
-  physicalAngle = std::clamp(nextPhysical, minDegree, maxDegree);
+  physicalAngle = std::clamp(nextPhysical, safeMinDegree, safeMaxDegree);
 
   setDegreeDirect(physicalAngle);
 }
