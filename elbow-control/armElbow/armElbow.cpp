@@ -25,10 +25,13 @@ void ArmElbow::updateStatusLed(bool calibrating, bool ready) {
   bool enginesEnabled = platform.getEnginesPowerStatus();
   if (lastEnginesEnabled && !enginesEnabled) {
     onIMUReset();
-    // The one place the servo goes limp: everywhere else reset() keeps holding (see Servo::reset()).
-    elbowY.release();
   }
   lastEnginesEnabled = enginesEnabled;
+  // The one place the servo goes limp: everywhere else reset() keeps holding (see Servo::reset()).
+  // Not on the edge above - that also fires when platform status just stops arriving.
+  if (platform.enginesOffEdge()) {
+    elbowY.release();
+  }
 
   constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
   if (elbowY.isDiverging()) {

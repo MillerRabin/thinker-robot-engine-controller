@@ -164,9 +164,11 @@
 // Was 30, far outside the travel. Only the servo's starting physicalAngle - open-loop, so the first
 // commanded move after power-up jumps here first; mid-travel keeps that jump smallest.
 #define CLAW_GRIPPER_HOME_POSITION 130
-// Gripper is open-loop (self-referential imuAngle), so the dead zone is pure stopping precision -
-// CLAW_DEAD_ZONE's 2deg would stop every gripper move 2deg short.
-#define CLAW_GRIPPER_DEAD_ZONE 0.3f
+// Open-loop axes (self-referential imuAngle: the gripper always, X/Y in manual mode) - the dead zone
+// is pure stopping precision there, and CLAW_DEAD_ZONE's 2deg would stop every move 2deg short.
+#define CLAW_OPEN_LOOP_DEAD_ZONE 0.3f
+// Manual mode's first pulse for an unpowered clawY: limp, it rests on its 180 stop (user, 2026-10-31).
+#define CLAW_Y_MANUAL_START 178.0f
 #define CLAW_DEAD_ZONE 2.0f
 
 #define SERVO_DEAD_ZONE 0.3f

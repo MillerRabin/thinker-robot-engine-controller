@@ -23,6 +23,11 @@ class ArmPlatform {
   TickType_t offSince = 0;
   bool lastConfirmedEnginesOn = false;
   const TickType_t offDebounceInterval = pdMS_TO_TICKS(200);
+  // isEnginesOffConfirmed() state - see there.
+  TickType_t explicitOffSince = 0;
+  TickType_t offlineSince = 0;
+  bool lastEnginesOffConfirmed = false;
+  const TickType_t offlineReleaseInterval = pdMS_TO_TICKS(10000);
   SemaphoreHandle_t quaternionSemaphore;
   ArmPart* part;
 public:
@@ -36,6 +41,8 @@ public:
   void updateEnginesPowerTime(uint32_t status);
   bool isOnline();
   bool getEnginesPowerStatus();
+  bool isEnginesOffConfirmed();
+  bool enginesOffEdge();
   bool getCameraPowerStatus();
   bool getDetectorsPowerStatus();
   bool getCPUPowerStatus();

@@ -18,12 +18,15 @@ void ArmClaw::updateStatusLed(bool calibrating, bool ready) {
   bool enginesEnabled = platform.getEnginesPowerStatus();
   if (lastEnginesEnabled && !enginesEnabled) {
     onIMUReset();
-    // The one place servos go limp: everywhere else reset() keeps holding (see Servo::reset()).
+  }
+  lastEnginesEnabled = enginesEnabled;
+  // The one place servos go limp: everywhere else reset() keeps holding (see Servo::reset()). Not on
+  // the edge above - that also fires when platform status just stops arriving.
+  if (platform.enginesOffEdge()) {
     clawX.release();
     clawY.release();
     clawGripper.release();
   }
-  lastEnginesEnabled = enginesEnabled;
 
   constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
   if (clawX.isDiverging() || clawY.isDiverging() || clawGripper.isDiverging()) {
@@ -325,24 +328,46 @@ void ArmClaw::engineTask(void *instance) {
       claw->updateStatusLed(false);
       claw->setEngineTaskStatus(false);
       claw->updateStatuses();
-      // The gripper is open-loop (no IMU, nothing to calibrate), so it can follow explicit host
-      // commands (/set "claw-gripper") even with claw calibration disabled - needed to find its
-      // real open/closed angles live. Nothing moves without such a command: no target, no pulse.
+      // Manual mode: X, Y and the gripper follow explicit host commands (/set "claw-x", "claw-y",
+      // "claw-gripper") open-loop, on their own servo position, with claw calibration disabled -
+      // how the gripper's travel was found, and how X/Y's PWM-vs-gravity mapping gets measured
+      // before their real calibration is trusted. An axis gets no pulse until it's commanded.
       // Runs at the normal tick rate while a move is in flight - tick() assumes ~5ms ticks (dt is
       // capped at 10ms), so the 250ms idle cadence would crawl and trip the stall check.
-      if (claw->platform.getEnginesPowerStatus() && !isnan(claw->clawGripper.getTargetAngle()) &&
-          isnan(claw->clawGripper.getPhysicalAngle())) {
-        // Released by an engines-off cycle: open-loop, so nothing knows where it is - restart from
-        // mid-travel, exactly what a fresh boot's first move does.
-        claw->clawGripper.setDegreeDirect(CLAW_GRIPPER_HOME_POSITION);
+      struct ManualAxis {
+        Servo &servo;
+        float start;
+      };
+      // First pulse goes to `start` (nothing knows where an unpowered axis is): Y rests limp on its
+      // 180 stop, so 178 keeps that first pulse a no-move instead of a ~90deg jump to home.
+      ManualAxis axes[] = {{claw->clawX, CLAW_X_HOME_POSITION},
+                           {claw->clawY, CLAW_Y_MANUAL_START},
+                           {claw->clawGripper, CLAW_GRIPPER_HOME_POSITION}};
+      auto moving = [](Servo &s) {
+        return !isnan(s.getTargetAngle()) && !s.isPositioned() && !s.isDiverging();
+      };
+      TickType_t manualWakeTime = xTaskGetTickCount();
+      while (claw->platform.getEnginesPowerStatus()) {
+        bool anyMoving = false;
+        for (auto &axis : axes) {
+          if (!isnan(axis.servo.getTargetAngle()) && !axis.servo.isHolding()) {
+            axis.servo.setDegreeDirect(axis.start);
+          }
+          if (moving(axis.servo)) {
+            anyMoving = true;
+            axis.servo.setIMUAngle(axis.servo.getPhysicalAngle());
+            axis.servo.tick();
+          }
+        }
+        if (!anyMoving) {
+          break;
+        }
+        vTaskDelayUntil(&manualWakeTime, taskInterval);
       }
-      TickType_t gripperWakeTime = xTaskGetTickCount();
-      while (claw->platform.getEnginesPowerStatus() && !isnan(claw->clawGripper.getTargetAngle()) &&
-             !claw->clawGripper.isPositioned() && !claw->clawGripper.isDiverging()) {
-        claw->clawGripper.setIMUAngle(claw->clawGripper.getPhysicalAngle());
-        claw->clawGripper.tick();
-        vTaskDelayUntil(&gripperWakeTime, taskInterval);
-      }
+      // Both log raw gravity next to the axis's physicalAngle on their own 300ms printers - the
+      // data the X/Y mapping is measured from.
+      claw->angleFromGravityX();
+      claw->angleFromGravityY();
       static Periodic gripperPrinter(pdMS_TO_TICKS(1000));
       gripperPrinter.interval([&]() {
         LogQueue::Log("[DIAG] claw gripper: target=%.2f physical=%.2f diverging=%d\n",
@@ -476,15 +501,17 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     float angleX = (angleXS == PARAMETER_IS_NAN) ? NAN : angleXS / 10.0f;
     float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 10.0f;
     float angleG = (angleGS == PARAMETER_IS_NAN) ? NAN : angleGS / 10.0f;
+    // Manual mode runs X/Y open-loop, where the dead zone is pure stopping precision.
+    float axisDeadZone = TEMP_SEQUENTIAL_CALIBRATION_ENABLED ? CLAW_DEAD_ZONE : CLAW_OPEN_LOOP_DEAD_ZONE;
 
     if (!isnan(angleX)) {
-      clawX.setTargetAngle(angleX, timeMS, CLAW_DEAD_ZONE);
+      clawX.setTargetAngle(angleX, timeMS, axisDeadZone);
     }
     if (!isnan(angleY)) {
-      clawY.setTargetAngle(angleY, timeMS, CLAW_DEAD_ZONE);
+      clawY.setTargetAngle(angleY, timeMS, axisDeadZone);
     }
     if (!isnan(angleG)) {
-      clawGripper.setTargetAngle(angleG, timeMS, CLAW_GRIPPER_DEAD_ZONE);
+      clawGripper.setTargetAngle(angleG, timeMS, CLAW_OPEN_LOOP_DEAD_ZONE);
     }
   }
 

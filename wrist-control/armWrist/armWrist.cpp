@@ -18,11 +18,14 @@ void ArmWrist::updateStatusLed(bool calibrating, bool ready) {
   bool enginesEnabled = platform.getEnginesPowerStatus();
   if (lastEnginesEnabled && !enginesEnabled) {
     onIMUReset();
-    // The one place servos go limp: everywhere else reset() keeps holding (see Servo::reset()).
+  }
+  lastEnginesEnabled = enginesEnabled;
+  // The one place servos go limp: everywhere else reset() keeps holding (see Servo::reset()). Not on
+  // the edge above - that also fires when platform status just stops arriving.
+  if (platform.enginesOffEdge()) {
     wristY.release();
     wristZ.release();
   }
-  lastEnginesEnabled = enginesEnabled;
 
   constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
   if (wristY.isDiverging() || wristZ.isDiverging()) {
