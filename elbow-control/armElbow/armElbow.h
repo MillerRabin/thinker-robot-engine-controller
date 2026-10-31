@@ -39,6 +39,8 @@ private:
   Quaternion base;
   bool pitchIntegrationValid = false;
   float accumulatedPitchY = 0.0f;
+  // Absolute gravity pitch (rad) captured when pitchIntegrationValid re-anchors - see getIMUAngles().
+  float gravityPitchAtBase = 0.0f;
   // use is the intended default; not-use is the emergency fallback.
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
   float angleFromGravityY();

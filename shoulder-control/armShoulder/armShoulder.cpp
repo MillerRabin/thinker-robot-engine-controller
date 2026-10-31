@@ -88,6 +88,10 @@ bool ArmShoulder::calibrateYLoop() {
   bool holding = shoulderY.isHolding();
   float imuY = holding ? shoulderY.getPhysicalAngle() : std::clamp(lastSeedSample, 0.0f, 180.0f);
   LogQueue::Log("[DIAG] calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f, holding=%d)\n", imuY, lastSeedSample, holding);
+  if (!holding && fabsf(imuY - lastSeedSample) > 1.0f) {
+    LogQueue::Log("[DIAG] calibrateYLoop: arm is outside the servo's 0-180 range, seed clamped - expect a %.1fdeg jump\n",
+                  fabsf(imuY - lastSeedSample));
+  }
   shoulderY.setDegreeDirect(imuY);
 
   // Same power check during the post-seed settle delay - a cut here left the seed just as stale.
@@ -468,9 +472,22 @@ Vector3 ArmShoulder::getIMUAngles() {
   // absolute formula already trusted for calibration (angleFromGravityY(), calibrateYLoop()) and
   // for this function's own former drift-correction term - getGravityVector() is yaw-invariant, so
   // it can't suffer this order-sensitivity, and it needs no delta/integration state at all.
+  // Taken from the ABSOLUTE quaternion's gravity as a delta from calibration, not from qm's - qm's
+  // "gravity" is the calibration pose's body z-axis, which only stands for gravity if that was
+  // vertical. Close to true here (raw ~-2deg at vertical), but not on the wrist, where a shoulder-z
+  // turn read as fake pitch live (2026-10-31) - kept identical across modules.
   float pitchX;
-  Vector3 gAbs = qm.getGravityVector();
-  float pitchXAbs = atan2(-gAbs.x, gAbs.z);
+  Quaternion qAbs = imu.quaternion.load();
+  Vector3 gAbs = qAbs.getGravityVector();
+  float gravityPitch = atan2(-gAbs.x, gAbs.z);
+  float pitchXAbs = NAN;
+  if (qAbs.isValid() && !isnan(gravityPitch)) {
+    if (!pitchIntegrationValid) {
+      gravityPitchAtBase = gravityPitch;
+    }
+    float d = gravityPitch - gravityPitchAtBase;
+    pitchXAbs = atan2f(sinf(d), cosf(d));
+  }
   if (!qm.isValid() || isnan(pitchXAbs)) {
     // Glitched reading - hold the last value instead of feeding NaN/garbage forward.
     pitchX = accumulatedPitchX;
@@ -527,7 +544,11 @@ constexpr float SHOULDER_GRAVITY_Y_PWM_OFFSET = 92.0f;
 // version of this comment misdiagnosed that jump as landing in "wrapped garbage" when the jump
 // destination was actually close to the correct value and the readings before it were the glitch.
 // MIN/MAX now cover the true valid range with margin, not a guessed "safe middle."
-constexpr float SHOULDER_GRAVITY_Y_MIN = -15.0f;
+// MIN widened from -15 (2026-10-31): unpowered, the arm's weight back-drives the servo past its
+// commandable 0 down to the joint's real mechanical stop at ~-23 (confirmed live by the user) - with
+// -15 every sample there was rejected and calibration silently never started. The seed still clamps
+// to 0, so starting from there is one deliberate jump up to PWM 0 (logged in calibrateYLoop()).
+constexpr float SHOULDER_GRAVITY_Y_MIN = -35.0f;
 constexpr float SHOULDER_GRAVITY_Y_MAX = 195.0f;
 // Tick-to-tick glitch filter, mirroring getIMUAngles()'s sanity clamp - time-aware rather than a
 // flat per-call threshold, since this function is called from both a tight ~5ms tracking loop and

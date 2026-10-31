@@ -39,6 +39,8 @@ private:
   float shoulderYHomeAngle = SHOULDER_Y_HOME_POSITION;
   bool pitchIntegrationValid = false;
   float accumulatedPitchX = 0.0f;
+  // Absolute gravity pitch (rad) captured when pitchIntegrationValid re-anchors - see getIMUAngles().
+  float gravityPitchAtBase = 0.0f;
   // Last trusted angleFromGravityY() reading and when it was taken, for its own glitch filter -
   // time-aware because this function is called from both a tight ~5ms tracking loop and a slower
   // ~250ms idle-diagnostic loop, so a flat per-call jump threshold would be wrong for one of them.

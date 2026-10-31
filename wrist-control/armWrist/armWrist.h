@@ -45,6 +45,8 @@ private:
   float wristYHomeAngle = WRIST_Y_PWM_AT_VERTICAL;
   bool pitchIntegrationValid = false;
   float accumulatedPitchY = 0.0f;
+  // Absolute gravity pitch (rad) captured when pitchIntegrationValid re-anchors - see getIMUAngles().
+  float gravityPitchAtBase = 0.0f;
   float angleFromGravityY();
   float elbowYAngleDeg();
   // Last trusted angleFromGravityY() reading and when it was taken, for its own glitch filter -

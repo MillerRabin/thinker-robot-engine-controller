@@ -482,9 +482,24 @@ Vector3 ArmWrist::getIMUAngles() {
   // has never been live-tested with this code path active). Fixed the same way as shoulder/elbow:
   // use the absolute, yaw-invariant gravity-vector formula directly (already computed as the drift-
   // correction term below), no delta/integration state needed.
+  // Measured from the ABSOLUTE quaternion's gravity, as a delta from its value at calibration - not
+  // from qm's: qm's "gravity" is really the calibration pose's body z-axis, which only stands for
+  // gravity if it was vertical then. Wrist's isn't (this axis reads ~90 at vertical, so body z is
+  // horizontal), so a rotation about the vertical turned into a fake pitch - confirmed live
+  // (2026-10-31): a 15-20deg shoulder-z turn read as 4-6deg of wrist pitch, and tracking really
+  // tilted the wrist chasing it. Gravity in the body frame can't change under that rotation at all.
   float pitchY;
-  Vector3 gAbs = qm.getGravityVector();
-  float pitchYAbs = atan2(-gAbs.x, gAbs.z);
+  Quaternion qAbs = imu.quaternion.load();
+  Vector3 gAbs = qAbs.getGravityVector();
+  float gravityPitch = atan2(-gAbs.x, gAbs.z);
+  float pitchYAbs = NAN;
+  if (qAbs.isValid() && !isnan(gravityPitch)) {
+    if (!pitchIntegrationValid) {
+      gravityPitchAtBase = gravityPitch;
+    }
+    float d = gravityPitch - gravityPitchAtBase;
+    pitchYAbs = atan2f(sinf(d), cosf(d));
+  }
   if (!qm.isValid() || isnan(pitchYAbs)) {
     // Glitched reading - hold the last value instead of feeding NaN/garbage forward.
     pitchY = accumulatedPitchY;
