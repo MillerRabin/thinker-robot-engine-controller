@@ -11,11 +11,18 @@ class ArmPart;
 
 class ArmPlatform {
   uint64_t status;
-  TickType_t lastUpdated = 0;  
+  TickType_t lastUpdated = 0;
   TickType_t lastEnginesPowerOn = 0;
   Quaternion lastQuaternion;
   const TickType_t maxInterval = pdMS_TO_TICKS(500);
   const TickType_t powerEnginesInterval = pdMS_TO_TICKS(1000);
+  // Debounce for the ON->OFF transition only - confirmed live (2026-08-25) that a single corrupted
+  // CAN_PLATFORM_STATUS frame (misread ENGINES_ON bit, plausibly CAN noise from the nearby servo
+  // PWM) reads as instantaneous "off" and was enough to trigger a full engine-loop reset/jerk even
+  // though engines power never actually dropped. See getEnginesPowerStatus().
+  TickType_t offSince = 0;
+  bool lastConfirmedEnginesOn = false;
+  const TickType_t offDebounceInterval = pdMS_TO_TICKS(200);
   SemaphoreHandle_t quaternionSemaphore;
   ArmPart* part;
 public:

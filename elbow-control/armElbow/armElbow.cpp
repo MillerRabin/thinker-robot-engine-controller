@@ -25,6 +25,8 @@ void ArmElbow::updateStatusLed(bool calibrating, bool ready) {
   bool enginesEnabled = platform.getEnginesPowerStatus();
   if (lastEnginesEnabled && !enginesEnabled) {
     onIMUReset();
+    // The one place the servo goes limp: everywhere else reset() keeps holding (see Servo::reset()).
+    elbowY.release();
   }
   lastEnginesEnabled = enginesEnabled;
 
@@ -76,6 +78,15 @@ bool ArmElbow::calibrateYLoop() {
       setYCalibrating(false);
       return false;
     }
+    // Matching ArmShoulder::calibrateYLoop()'s identical fix: this loop used to only check
+    // shoulder's status, not engines power directly - a drop here went undetected until the settle
+    // loop below, by which point setDegreeDirect() (an unramped, instant PWM command) may already
+    // have committed to a stale/mid-transition seed.
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("Calibrating Y aborted: engines powered off (seeding)\n");
+      setYCalibrating(false);
+      return false;
+    }
     float gravityY = angleFromGravityY();
     if (!isnan(gravityY) && !isnan(lastSeedSample) &&
         fabsf(gravityY - lastSeedSample) <= seedStableTolerance) {
@@ -90,12 +101,53 @@ bool ArmElbow::calibrateYLoop() {
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
 
-  // Seed explicitly to a known PWM-space value rather than reset()+NaN-fallback - elbowY's PWM
-  // scale and its gravity-angle scale are offset by a fixed amount (not numerically aligned like
-  // wrist/shoulder), so letting setIMUAngle()'s NaN fallback seed physicalAngle to the raw gravity
-  // reading starts it in the wrong frame entirely, which the servo's own lead-clamp then can't recover from.
-  elbowY.setDegreeDirect(elbowYHomeAngle);
-  elbowY.setTargetAngle(90.0f, 1000, ELBOW_DEAD_ZONE);
+  // Seed from the freshly-measured gravity reading, mapped into PWM-space through elbowYHomeAngle
+  // (the PWM the last calibration actually held at gravity's 90). Two earlier versions were each
+  // wrong in a different way, both confirmed live as a visible jerk at calibration start:
+  // - elbowYHomeAngle alone (2026-08-25): stale whenever the arm moved since the last calibration
+  //   (engines-off droop, a fresh boot, manual repositioning).
+  // - the gravity reading alone (2026-10-31): angleFromGravityY() is NOT PWM-comparable -
+  //   ELBOW_GRAVITY_Y_PWM_OFFSET only makes 90 mean vertical, while the servo holds vertical at
+  //   PWM ~138-146 - so every seed commanded the servo ~50deg below where it physically was.
+  // Clamped to the servo's actual safe range (8-270), not the full mechanical range (0-270).
+  // Confirmed live (2026-08-25 and again 2026-08-26) as a real bug: when the arm's real position put
+  // lastSeedSample below 8 (e.g. -35.63), clamping only to 0 let seedY through as 0.0, and
+  // setDegreeDirect() silently rejects anything below safeMinDegree (returns an error code that
+  // wasn't checked) - physicalAngle was left at its stale prior value instead of the seed, so the
+  // very next tick computed error against the wrong baseline and drove a visibly too-fast initial
+  // move once the real IMU reading came in far from that stale value.
+  // A servo still holding (engines never went off, e.g. it froze while shoulder recalibrated) is
+  // seeded where it already is instead.
+  bool holding = elbowY.isHolding();
+  float seedY = holding ? elbowY.getPhysicalAngle()
+                        : std::clamp(elbowYHomeAngle + (lastSeedSample - 90.0f), elbowY.safeMinDegree, elbowY.safeMaxDegree);
+  LogQueue::Log("[DIAG] calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f, home=%.2f, holding=%d)\n", seedY, lastSeedSample, elbowYHomeAngle, holding);
+  elbowY.setDegreeDirect(seedY);
+
+  // Same power check during the post-seed settle delay - matching ArmShoulder::calibrateYLoop()'s
+  // identical fix. A drop here left the just-committed seed just as stale as one during seeding.
+  for (int i = 0; i < 20; i++) {
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("Calibrating Y aborted: engines powered off (post-seed delay)\n");
+      setYCalibrating(false);
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  // Recovery time scaled to the actual seed error, not the fixed 1000ms constant - matching
+  // ArmShoulder::calibrateYLoop()'s identical fix. 1000ms was even more aggressive than shoulder's
+  // old 4000ms, so a large seed error here demanded near-max speed even sooner. Capped at 18deg/s
+  // (vs the normal 60deg/s ceiling) - conservative on purpose for a not-yet-verified start position.
+  constexpr float ELBOW_Y_MAX_RECOVERY_SPEED = 18.0f; // deg/s
+  constexpr uint16_t ELBOW_Y_BASE_RECOVERY_TIME_MS = 1000;
+  // Gravity-space, like the target - seedY is PWM-space and offset from it.
+  float seedError = fabsf(90.0f - lastSeedSample);
+  uint16_t recoveryTimeMs = (uint16_t)std::clamp(
+      (seedError / ELBOW_Y_MAX_RECOVERY_SPEED) * 1000.0f,
+      (float)ELBOW_Y_BASE_RECOVERY_TIME_MS, 10000.0f);
+  LogQueue::Log("[DIAG] calibrateYLoop: seedError=%.2f recoveryTimeMs=%u\n", seedError, recoveryTimeMs);
+  elbowY.setTargetAngle(90.0f, recoveryTimeMs, ELBOW_DEAD_ZONE);
   TickType_t stableSince = 0;
   bool ok = true;
   while (true) {
@@ -144,14 +196,37 @@ bool ArmElbow::calibrateYLoop() {
 }
 
 
+// TEMP (2026-08-24): sequential-calibration safety testing after a cascading-chaos incident (see
+// project memory item 63) - flip to true only for the one module currently being verified in
+// isolation, keep every other module false so it stays permanently idle (never calibrates/moves)
+// regardless of its own IMU/parent status. Remove this whole mechanism once all four modules have
+// been confirmed stable, one at a time, and can safely calibrate together again.
+constexpr bool TEMP_SEQUENTIAL_CALIBRATION_ENABLED = true;
+
 void ArmElbow::engineTask(void *instance) {
-  auto *elbow = static_cast<ArmElbow *>(instance);  
+  auto *elbow = static_cast<ArmElbow *>(instance);
   TickType_t lastWakeTime = xTaskGetTickCount();
 
   while (true) {
+    if (!TEMP_SEQUENTIAL_CALIBRATION_ENABLED) {
+      // TEMP DIAG (2026-08-24): unambiguous boot identity, repeated (not one-shot) so it doesn't
+      // race a log reader attaching - needed after a flashing mixup risk (bootloader mode doesn't
+      // expose per-board serial, so multiple boards in BOOTSEL at once could get crossed).
+      static Periodic identityPrinter(pdMS_TO_TICKS(2000));
+      identityPrinter.interval([&]() {
+        LogQueue::Log("=== ArmElbow alive (calibration disabled) ===\n");
+      });
+      elbow->updateStatusLed(false);
+      elbow->setEngineTaskStatus(false);
+      elbow->updateStatuses();
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
+    }
+
     auto sp = elbow->imu.isPositionOK();
     auto pp = elbow->shoulder.isPositionOK();
     if (!sp || !pp ) {
+      elbow->angleFromGravityY(); // DIAG: measure PWM/gravity offset by hand-positioning at true vertical, remove after
       elbow->updateStatusLed(false);
       elbow->setEngineTaskStatus(false);
       elbow->updateStatuses();
@@ -159,7 +234,7 @@ void ArmElbow::engineTask(void *instance) {
       vTaskDelay(pdMS_TO_TICKS(250));
       continue;
     }
-    
+
     Quaternion eQuat = elbow->imu.quaternion.load();
     Quaternion sQuat = elbow->shoulder.imu.quaternion.load();
 
@@ -232,6 +307,15 @@ ArmElbow::ArmElbow(const uint memsSdaPin, const uint memsSclPin,
                                           imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin) {
   // Mounting correction: maps raw IMU axes onto ArmShoulder's Y/Z convention.
   Quaternion q_corr = {-0.314134f, -0.584772f, -0.348743f, 0.661619f};
+  // Tried (2026-08-24) composing a small residual correction directly into q_corr instead of as a
+  // formula-level offset, on the theory that the residual is a real mounting-alignment error and
+  // belongs here. Reverted: live-tested, and composing an extra rotation on top of q_corr's own
+  // already-large rotation did not behave as a simple, predictable local-axis adjustment (measured
+  // result went to roughly -94deg instead of the intended ~0deg) - q_corr's own rotation is large
+  // enough that "local Y after q_corr" isn't intuitive to reason about by hand. Not safe to keep
+  // guessing signs/axes on live hardware for a mounting-correction quaternion used everywhere -
+  // back to the plain formula-level offset (see ELBOW_GRAVITY_Y_PWM_OFFSET below), which is simple,
+  // already verified working, and only affects this one function.
   imu.setRotate(q_corr);
 }
 
@@ -318,17 +402,25 @@ float ArmElbow::shoulderYAngleDeg() {
   return atan2(-g.x, g.z) * RAD_TO_DEG;
 }
 
-// Re-measured live for the new quaternion-based `raw` (2026-08-14): a full hand-swing to both
-// physical hard stops (engines off) observed raw spanning -128.15 to +135.40 - a ~263deg span that
-// fits entirely within atan2's natural +/-180 output without ever needing to wrap. The old
-// threshold/-35/220 bounds were tuned for the previous raw-accelerometer formula's different
-// zero-crossing and put the wrap boundary *inside* the real operating range - confirmed live this
-// produced a ~357deg jump in `res` for a ~3deg real movement crossing raw=-90 (raw=-89.14->-91.94,
-// res=-89.14->268.06). Threshold now sits comfortably below the true minimum so the wrap is
-// effectively inert during normal operation; MIN/MAX bracket the measured extremes with a small margin.
-constexpr float ELBOW_GRAVITY_UNWRAP_THRESHOLD = -150.0f;
-constexpr float ELBOW_GRAVITY_Y_MIN = -132.0f;
-constexpr float ELBOW_GRAVITY_Y_MAX = 139.0f;
+// Re-measured live for the quaternion-based `raw` (2026-08-14): a full hand-swing to both physical
+// hard stops (engines off) observed raw (pre-offset) spanning -128.15 to +135.40 - a ~263deg span
+// that fits entirely within atan2's natural +/-180 output without ever needing to wrap. Threshold/
+// MIN/MAX below are shifted by ELBOW_GRAVITY_Y_PWM_OFFSET from that measurement so they still
+// correctly bracket the (now offset) real range - confirmed live this produced a ~357deg jump in
+// `res` for a ~3deg real movement crossing the wrap boundary before it was pushed safely below the
+// true minimum; keep it there if the offset ever changes.
+// PWM_OFFSET: calibrateYLoop() targets a hardcoded 90.0f in this function's output space, intended
+// to mean "true vertical" (matching ArmShoulder's convention) - measured live (engines off, elbow
+// hand-positioned at true vertical) that raw read ~7.3deg there, not 90, so calibration was
+// converging to a real but wrong pose (confirmed live: LED green/stable, but physically ~180deg
+// off). Offset baked in here (not in q_corr - see the constructor comment on why that was tried
+// and reverted) to keep "90 = vertical" consistent with every other module's convention.
+// Despite the name, this does NOT make the output PWM-comparable (the servo holds vertical at PWM
+// ~138-146, not 90) - calibrateYLoop()'s seed maps it through elbowYHomeAngle for that.
+constexpr float ELBOW_GRAVITY_Y_PWM_OFFSET = 82.65f;
+constexpr float ELBOW_GRAVITY_UNWRAP_THRESHOLD = -150.0f + ELBOW_GRAVITY_Y_PWM_OFFSET;
+constexpr float ELBOW_GRAVITY_Y_MIN = -132.0f + ELBOW_GRAVITY_Y_PWM_OFFSET;
+constexpr float ELBOW_GRAVITY_Y_MAX = 139.0f + ELBOW_GRAVITY_Y_PWM_OFFSET;
 
 // raw is quaternion-based (getGravityVector()), not raw accelerometer - a raw accelerometer can't
 // tell gravity apart from real linear acceleration, so any actual vibration/shake during a fast
@@ -336,16 +428,14 @@ constexpr float ELBOW_GRAVITY_Y_MAX = 139.0f;
 // shoulderYAngleDeg() above and ArmShoulder::angleFromGravityY(). Also: LocalBNO's setRotate()
 // mounting correction (q_corr) only applies to the quaternion, never to raw accelerometer readings
 // (see item 20 in project memory) - so the old raw-accelerometer value here was in an uncorrected
-// frame entirely, a second, independent reason to prefer this. Range constants below (threshold/
-// min/max) were tuned against the OLD formula's output range and MUST be re-verified live against
-// this new one before trusting it to drive real calibration - don't assume they still apply.
+// frame entirely, a second, independent reason to prefer this.
 float ArmElbow::angleFromGravityY() {
   Quaternion q = imu.quaternion.load();
   if (!q.isValid()) {
     return NAN;
   }
   Vector3 g = q.getGravityVector();
-  float raw = atan2(-g.x, g.z) * RAD_TO_DEG;
+  float raw = atan2(-g.x, g.z) * RAD_TO_DEG + ELBOW_GRAVITY_Y_PWM_OFFSET;
   float shoulderCorr = shoulderYAngleDeg();
   float res = raw - shoulderCorr;
   if (res < ELBOW_GRAVITY_UNWRAP_THRESHOLD) {
@@ -367,34 +457,32 @@ float ArmElbow::angleFromGravityY() {
 Vector3 ArmElbow::getIMUAngles() {
   Quaternion qm = base * imu.quaternion.load();
 
-  // pitchY is delta-integrated (drift-corrected below) rather than re-derived absolutely, matching ArmShoulder's pitchX fix.
+  // pitchY used to be delta-integrated via a per-tick yaw-strip-then-swing decomposition of the
+  // quaternion delta (qDeltaSwing.twistAngle({0,1,0})) - order-sensitive, breaks under a large
+  // rotation between ticks. A comment here used to claim this already matched
+  // ArmShoulder::getIMUAngles()'s fix for the identical bug, but the fix was never actually applied
+  // to this function - only the comment was added. Confirmed live (2026-08-25) as a real incident:
+  // elbow reached vertical correctly, then suddenly snapped down and hit the table, repeatedly.
+  // Fixed the same way as shoulder: use the absolute, yaw-invariant gravity-vector formula directly
+  // (this was already computed as the drift-correction term), no delta/integration state needed.
   float pitchY;
-  if (!qm.isValid()) {
-    // Glitched reading - hold the last value instead of integrating NaN permanently.
+  Vector3 gAbs = qm.getGravityVector();
+  float pitchYAbs = atan2(-gAbs.x, gAbs.z);
+  if (!qm.isValid() || isnan(pitchYAbs)) {
+    // Glitched reading - hold the last value instead of feeding NaN/garbage forward.
     pitchY = accumulatedPitchY;
   } else if (!pitchIntegrationValid) {
-    pitchY = 0.0f;
-    accumulatedPitchY = 0.0f;
+    pitchY = pitchYAbs;
+    accumulatedPitchY = pitchYAbs;
     pitchIntegrationValid = true;
-    lastOrientation = qm;
   } else {
-    Quaternion qDelta = lastOrientation.invert() * qm;
-    float deltaYawZ = qDelta.twistAngle({0.0f, 0.0f, 1.0f});
-    Quaternion qDeltaZ = Quaternion::AngleAxis(deltaYawZ, 0.0f, 0.0f, 1.0f);
-    Quaternion qDeltaSwing = qDeltaZ.invert() * qDelta;
-    float deltaPitchY = qDeltaSwing.twistAngle({0.0f, 1.0f, 0.0f});
-    accumulatedPitchY += deltaPitchY;
-
-    // Gravity-vector-based, not a yaw-strip-then-pitch decomposition of qm - see
-    // ArmShoulder::getIMUAngles()'s identical fix for why (order-sensitive, breaks under a
-    // large yaw change).
-    constexpr float driftCorrectionAlpha = 0.01f; // ~1s time constant at 5ms/tick
-    Vector3 gAbs = qm.getGravityVector();
-    float pitchYAbs = atan2(-gAbs.x, gAbs.z);
-    accumulatedPitchY += driftCorrectionAlpha * (pitchYAbs - accumulatedPitchY);
-
+    // Sanity clamp, not a control filter: real per-tick motion is bounded by servo speed, so an
+    // implausibly large single-sample jump is treated as a glitch and capped rather than trusted
+    // outright - matching ArmShoulder::getIMUAngles()'s guard.
+    constexpr float maxPlausibleDeltaRad = 10.0f * DEG_TO_RAD;
+    float delta = std::clamp(pitchYAbs - accumulatedPitchY, -maxPlausibleDeltaRad, maxPlausibleDeltaRad);
+    accumulatedPitchY += delta;
     pitchY = accumulatedPitchY;
-    lastOrientation = qm;
   }
 
   return {0, pitchY, 0};

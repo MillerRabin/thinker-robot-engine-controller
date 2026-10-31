@@ -33,24 +33,39 @@ void LocalWitmotion::readDetectorTask(void* instance) {
 
 void LocalWitmotion::init(void* instance) {
   auto *imu = static_cast<LocalWitmotion*>(instance);
-  uint32_t scanResult = AutoScanSensor();
-  if (scanResult == 0) {
-    printf("No sensor found\n");
-    vTaskDelete(NULL);
-    return;
-  }
-    
-  printf("Sensor found at baud rate: %lu\n", scanResult);
-  imu->setRefreshRate();
-  imu->setBandwidth();
-  imu->set6AxisMode();
+  // DIAG: uses LogQueue::Log (bounded, non-blocking), not printf() - a blocking printf() with no
+  // USB CDC reader attached at boot can wedge this task forever (same root cause as an earlier,
+  // already-fixed shoulder issue - see project memory item #2), which would silently prevent the
+  // sensor from ever initializing on every subsequent boot too, since this task only used to run once.
+  // DIAG: retries indefinitely on failure instead of a single attempt-then-delete - a one-shot
+  // attempt made it impossible to observe (had to win a race attaching a log reader before the task
+  // gave up and deleted itself) and meant a transient/intermittent connection issue at boot would
+  // permanently disable the sensor for that whole power cycle. Remove the retry loop once claw's
+  // IMU connection issue is confirmed fixed and this is no longer needed for diagnosis.
+  uint32_t attempt = 0;
+  while (true) {
+    attempt++;
+    LogQueue::Log("LocalWitmotion::init: attempt %lu, starting AutoScanSensor\n", attempt);
+    uint32_t scanResult = AutoScanSensor();
+    if (scanResult == 0) {
+      LogQueue::Log("LocalWitmotion::init: attempt %lu, no sensor found, retrying in 3s\n", attempt);
+      Delayms(3000);
+      continue;
+    }
 
-  if (WitSetContent( RSW_ACC | RSW_GYRO | RSW_PRESS | RSW_Q) != WIT_HAL_OK) {
-    printf("Set RSW Error\n");
-    vTaskDelete(NULL);
-    return;
-  }    
-  printf("Set content Mode Success\n");
+    LogQueue::Log("LocalWitmotion::init: attempt %lu, sensor found at baud rate: %lu\n", attempt, scanResult);
+    imu->setRefreshRate();
+    imu->setBandwidth();
+    imu->set6AxisMode();
+
+    if (WitSetContent( RSW_ACC | RSW_GYRO | RSW_PRESS | RSW_Q) != WIT_HAL_OK) {
+      LogQueue::Log("LocalWitmotion::init: attempt %lu, Set RSW Error, retrying in 3s\n", attempt);
+      Delayms(3000);
+      continue;
+    }
+    LogQueue::Log("LocalWitmotion::init: attempt %lu, Set content Mode Success\n", attempt);
+    break;
+  }
   vTaskDelete(NULL);
 }
 
@@ -124,16 +139,18 @@ void LocalWitmotion::Delayms(uint16_t usMs) {
 	vTaskDelay(pdMS_TO_TICKS(usMs));
 }
 
-uint32_t LocalWitmotion::AutoScanSensor(void) {	
-  int i, iRetry;  
-	for(i = 1; i < 10; i++) {      
+uint32_t LocalWitmotion::AutoScanSensor(void) {
+  int i, iRetry;
+	for(i = 1; i < 10; i++) {
 		uart_set_baudrate(MEMS_UART_ID, c_uiBaud[i]);
 		iRetry = 2;
 		do {
 			dataAvailable = false;
 			WitReadReg(AX, 3);
 			Delayms(100);
-			if (dataAvailable) {				
+			LogQueue::Log("LocalWitmotion::AutoScanSensor: baud=%lu try=%d dataAvailable=%d\n",
+			              c_uiBaud[i], 2 - iRetry, dataAvailable);
+			if (dataAvailable) {
         return c_uiBaud[i];
       }
 			iRetry--;
@@ -157,6 +174,8 @@ LocalWitmotion::LocalWitmotion(ArmPart *armPart, const uint memsRxPin, const uin
   gpio_init(memsRstPin);
   gpio_set_dir(memsRstPin, GPIO_OUT);
   gpio_put(memsRstPin, 1);
+  LogQueue::Log("LocalWitmotion: constructed, rxPin=%u txPin=%u rstPin=%u, reset pin driven high\n",
+                memsRxPin, memsTxPin, memsRstPin);
 
   if (LocalWitmotion::readTaskHandle == NULL) {
     if (xTaskCreateAffinitySet(LocalWitmotion::readDetectorTask,
@@ -164,13 +183,17 @@ LocalWitmotion::LocalWitmotion(ArmPart *armPart, const uint memsRxPin, const uin
                                5, IMU_CORE,
                                &LocalWitmotion::readTaskHandle) != pdPASS) {
       LogQueue::Log("LocalWitmotion::readTaskHandle creation failed\n");
+    } else {
+      LogQueue::Log("LocalWitmotion::readTaskHandle created\n");
     }
   }
-  
+
   if (LocalWitmotion::initTaskHandle == NULL) {
     if (xTaskCreateAffinitySet(LocalWitmotion::init, "LocalWitmotion::initTask", 1024, this, 5,IMU_CORE,
                                &LocalWitmotion::initTaskHandle) != pdPASS) {
       LogQueue::Log("LocalWitmotion::initTaskHandle creation failed\n");
+    } else {
+      LogQueue::Log("LocalWitmotion::initTaskHandle created\n");
     }
   }
 }
@@ -201,13 +224,13 @@ void LocalWitmotion::set9AxisMode() {
 
 void LocalWitmotion::setRefreshRate() {
   if (WitSetOutputRate(RRATE_200HZ) != WIT_HAL_OK) {
-    printf("Failed to set rate\n");
+    LogQueue::Log("LocalWitmotion::setRefreshRate: Failed to set rate\n");
   } else {
-    printf("Output rate set to 200Hz. Saving settings\n");
+    LogQueue::Log("LocalWitmotion::setRefreshRate: Output rate set to 200Hz. Saving settings\n");
     if (WitWriteReg(SAVE, 0x00) != WIT_HAL_OK) {
-      printf("Failed to save settings\n");
+      LogQueue::Log("LocalWitmotion::setRefreshRate: Failed to save settings\n");
     } else {
-      printf("Settings saved\n");
+      LogQueue::Log("LocalWitmotion::setRefreshRate: Settings saved\n");
     }
     Delayms(100);
   }
@@ -215,9 +238,9 @@ void LocalWitmotion::setRefreshRate() {
 
 void LocalWitmotion::setBandwidth() {
   if (WitWriteReg(BANDWIDTH, BANDWIDTH_94HZ) != WIT_HAL_OK) {
-    printf("Failed to set bandwidth\n");
+    LogQueue::Log("LocalWitmotion::setBandwidth: Failed to set bandwidth\n");
   } else {
-    printf("Bandwidth set to 94Hz\n");
+    LogQueue::Log("LocalWitmotion::setBandwidth: Bandwidth set to 94Hz\n");
     WitWriteReg(SAVE, 0x00);
     Delayms(100);
   }

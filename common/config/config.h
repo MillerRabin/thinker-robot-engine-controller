@@ -145,9 +145,28 @@
 #define WRIST_Y_HOME_POSITION 90
 #define WRIST_DEAD_ZONE 0.3f
 #define WRIST_Y_RECOVERY_TIME_MS 4000
+// PWM each servo holds at gravity-verified vertical (gravity reading 90), from live calibrations
+// (2026-08-25..10-31: elbow 138-146, wrist 134-140). Only the boot-time default for
+// elbowYHomeAngle/wristYHomeAngle - every successful calibration overwrites it with where it landed.
+#define ELBOW_Y_PWM_AT_VERTICAL 142.0f
+#define WRIST_Y_PWM_AT_VERTICAL 137.0f
 #define CLAW_X_HOME_POSITION 135
 #define CLAW_Y_HOME_POSITION 90
-#define CLAW_GRIPPER_HOME_POSITION 30
+// Gripper travel measured live 2026-10-31 (command -> jaw gap): 175 closed and straining (servo
+// hums), 174 closed without load, 172 ~1mm, 160 ~20mm, 150 ~32mm, 140 ~46mm, 130 ~57mm,
+// 120 ~67mm, 110 ~74mm, 100 ~80mm, 95 ~83mm, 90 ~83.5mm, 85 ~84mm = the mechanical open stop (no
+// hum yet). OPEN keeps 5deg off that stop for ~the same opening; SAFE_MAX keeps 175 so it can
+// squeeze an object, nothing past it.
+#define CLAW_GRIPPER_CLOSED 174.0f
+#define CLAW_GRIPPER_OPEN 90.0f
+#define CLAW_GRIPPER_SAFE_MIN 85.0f
+#define CLAW_GRIPPER_SAFE_MAX 175.0f
+// Was 30, far outside the travel. Only the servo's starting physicalAngle - open-loop, so the first
+// commanded move after power-up jumps here first; mid-travel keeps that jump smallest.
+#define CLAW_GRIPPER_HOME_POSITION 130
+// Gripper is open-loop (self-referential imuAngle), so the dead zone is pure stopping precision -
+// CLAW_DEAD_ZONE's 2deg would stop every gripper move 2deg short.
+#define CLAW_GRIPPER_DEAD_ZONE 0.3f
 #define CLAW_DEAD_ZONE 2.0f
 
 #define SERVO_DEAD_ZONE 0.3f

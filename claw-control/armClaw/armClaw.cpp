@@ -18,6 +18,10 @@ void ArmClaw::updateStatusLed(bool calibrating, bool ready) {
   bool enginesEnabled = platform.getEnginesPowerStatus();
   if (lastEnginesEnabled && !enginesEnabled) {
     onIMUReset();
+    // The one place servos go limp: everywhere else reset() keeps holding (see Servo::reset()).
+    clawX.release();
+    clawY.release();
+    clawGripper.release();
   }
   lastEnginesEnabled = enginesEnabled;
 
@@ -294,6 +298,13 @@ void ArmClaw::engineLoop() {
   }
 }
 
+// TEMP (2026-08-24): sequential-calibration safety testing after a cascading-chaos incident (see
+// project memory item 63) - flip to true only for the one module currently being verified in
+// isolation, keep every other module false so it stays permanently idle (never calibrates/moves)
+// regardless of its own IMU/parent status. Remove this whole mechanism once all four modules have
+// been confirmed stable, one at a time, and can safely calibrate together again.
+constexpr bool TEMP_SEQUENTIAL_CALIBRATION_ENABLED = false;
+
 void ArmClaw::engineTask(void *instance) {
   auto *claw = static_cast<ArmClaw *>(instance);
   TickType_t lastWakeTime = xTaskGetTickCount();
@@ -303,6 +314,45 @@ void ArmClaw::engineTask(void *instance) {
   vTaskDelay(pdMS_TO_TICKS(3000));
 
   while (true) {
+    if (!TEMP_SEQUENTIAL_CALIBRATION_ENABLED) {
+      // TEMP DIAG (2026-08-24): unambiguous boot identity, repeated (not one-shot) so it doesn't
+      // race a log reader attaching - needed after a flashing mixup risk (bootloader mode doesn't
+      // expose per-board serial, so multiple boards in BOOTSEL at once could get crossed).
+      static Periodic identityPrinter(pdMS_TO_TICKS(2000));
+      identityPrinter.interval([&]() {
+        LogQueue::Log("=== ArmClaw alive (calibration disabled) ===\n");
+      });
+      claw->updateStatusLed(false);
+      claw->setEngineTaskStatus(false);
+      claw->updateStatuses();
+      // The gripper is open-loop (no IMU, nothing to calibrate), so it can follow explicit host
+      // commands (/set "claw-gripper") even with claw calibration disabled - needed to find its
+      // real open/closed angles live. Nothing moves without such a command: no target, no pulse.
+      // Runs at the normal tick rate while a move is in flight - tick() assumes ~5ms ticks (dt is
+      // capped at 10ms), so the 250ms idle cadence would crawl and trip the stall check.
+      if (claw->platform.getEnginesPowerStatus() && !isnan(claw->clawGripper.getTargetAngle()) &&
+          isnan(claw->clawGripper.getPhysicalAngle())) {
+        // Released by an engines-off cycle: open-loop, so nothing knows where it is - restart from
+        // mid-travel, exactly what a fresh boot's first move does.
+        claw->clawGripper.setDegreeDirect(CLAW_GRIPPER_HOME_POSITION);
+      }
+      TickType_t gripperWakeTime = xTaskGetTickCount();
+      while (claw->platform.getEnginesPowerStatus() && !isnan(claw->clawGripper.getTargetAngle()) &&
+             !claw->clawGripper.isPositioned() && !claw->clawGripper.isDiverging()) {
+        claw->clawGripper.setIMUAngle(claw->clawGripper.getPhysicalAngle());
+        claw->clawGripper.tick();
+        vTaskDelayUntil(&gripperWakeTime, taskInterval);
+      }
+      static Periodic gripperPrinter(pdMS_TO_TICKS(1000));
+      gripperPrinter.interval([&]() {
+        LogQueue::Log("[DIAG] claw gripper: target=%.2f physical=%.2f diverging=%d\n",
+                      claw->clawGripper.getTargetAngle(), claw->clawGripper.getPhysicalAngle(),
+                      claw->clawGripper.isDiverging());
+      });
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
+    }
+
     auto sp = claw->imu.isPositionOK();
     auto pp = claw->wrist.isPositionOK();
 
@@ -362,7 +412,7 @@ ArmClaw::ArmClaw(const uint8_t detectorsSdaPin, const uint8_t detectorsSclPin,
       clawX(engineXPin, Range(0, 270), CLAW_X_HOME_POSITION, 100),
       clawY(engineYPin, Range(0, 180), CLAW_Y_HOME_POSITION, 100),
       clawGripper(engineGripperPin, Range(0, 180), CLAW_GRIPPER_HOME_POSITION,
-                  100),
+                  100, 0.0005f, 0.0025f, Range(CLAW_GRIPPER_SAFE_MIN, CLAW_GRIPPER_SAFE_MAX)),
       imu(this, memsRxPin, memsTxPin, memsRstPin),
       rangeDetector(this, i2c1, longDetectorShutPin, shortDetectorShutPin) {
   i2c_init(i2c1, 400 * 1000);
@@ -434,7 +484,7 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
       clawY.setTargetAngle(angleY, timeMS, CLAW_DEAD_ZONE);
     }
     if (!isnan(angleG)) {
-      clawGripper.setTargetAngle(angleG, timeMS, CLAW_DEAD_ZONE);
+      clawGripper.setTargetAngle(angleG, timeMS, CLAW_GRIPPER_DEAD_ZONE);
     }
   }
 

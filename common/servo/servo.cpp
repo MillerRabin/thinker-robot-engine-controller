@@ -102,6 +102,7 @@ int Servo::setDegreeDirect(const float degree) {
   uint16_t slices =
       lowSlices + (uint16_t)roundf((degree - minDegree) * pulseStep);
   pwm_set_chan_level(slice, channel, slices);
+  outputActive = true;
   if (positionTime == 0) {
     positionTime = xTaskGetTickCount();
   }
@@ -121,6 +122,7 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
   setTimeMS(newTimeMS);
   moveStarted = get_absolute_time();
   resetDivergence();
+  fineAnchorPhysical = NAN;
   return true;
 }
 
@@ -130,11 +132,9 @@ void Servo::resetDivergence() {
   diverging = false;
   appliedSpeedDegPerSec = 0.0f;
   limitPinnedSince = 0;
-  physicalImuGapSince = 0;
   progressCheckTime = 0;
   progressCheckImuAngle = NAN;
-  leadAnchorPhysical = NAN;
-  leadAnchorImu = NAN;
+  coarseSince = 0;
 }
 
 void Servo::tick() {
@@ -153,30 +153,6 @@ void Servo::tick() {
 
   if (diverging)
     return;
-
-  // Anchor physicalAngle/imuAngle's relationship at the start of this move rather than assuming
-  // they share a numeric frame - some joints do (shoulder/wrist), some don't (elbow, which has a
-  // large fixed offset between its PWM scale and its gravity-sensed scale). Comparing against how
-  // far imuAngle has genuinely progressed since the anchor, instead of against imuAngle's raw
-  // value, makes both checks below correct regardless of that offset.
-  if (isnan(leadAnchorImu)) {
-    leadAnchorImu = imuAngle;
-    leadAnchorPhysical = physicalAngle;
-  }
-  const float allowedCenter = leadAnchorPhysical + (imuAngle - leadAnchorImu);
-
-  if (fabsf(physicalAngle - allowedCenter) > maxPhysicalImuGapDeg) {
-    if (physicalImuGapSince == 0) {
-      physicalImuGapSince = now;
-    } else if (absolute_time_diff_us(physicalImuGapSince, now) >= physicalImuGapMaxUs) {
-      diverging = true;
-      LogQueue::Log("Servo diverging: physicalAngle (%.2f) diverged from imuAngle-implied position (%.2f) by more than %.1fdeg, freezing\n",
-                    physicalAngle, allowedCenter, maxPhysicalImuGapDeg);
-      return;
-    }
-  } else {
-    physicalImuGapSince = 0;
-  }
 
   const float error = targetAngle - imuAngle;
   const float absError = fabsf(error);
@@ -205,10 +181,19 @@ void Servo::tick() {
     divergenceCheckTime = now;
   }
 
-  // Real mechanical stall check - imuAngle itself must be making progress, independent of the
-  // physicalAngle/imuAngle lead clamp below (which, by design, keeps physicalAngle from racing
-  // ahead and would otherwise mask a stuck joint that never trips the checks above).
-  if (isnan(progressCheckImuAngle)) {
+  // Real mechanical stall check - imuAngle itself must be making progress. Relationship-agnostic
+  // by design (see the header comment) - doesn't compare against physicalAngle at all.
+  // Skipped when absError is already below minProgressDeg: confirmed live (2026-08-25) that this
+  // was tripping on completely successful, stable holding just outside the (much tighter) dead zone
+  // - imuAngle correctly wasn't moving because there was nothing meaningful left to correct, not
+  // because anything was stuck. Every one of those trips forced a full reset+recalibration on
+  // shoulder, which cascaded into elbow (whose engineLoop depends on shoulder.isPositionOK()) also
+  // resetting and re-seeding - a real, visible several-tens-of-degrees move each time, causing a
+  // repeating "settles, then jerks" pattern neither joint's own numbers looked wrong enough to catch.
+  if (absError < minProgressDeg) {
+    progressCheckTime = 0;
+    progressCheckImuAngle = NAN;
+  } else if (isnan(progressCheckImuAngle)) {
     progressCheckImuAngle = imuAngle;
     progressCheckTime = now;
   } else if (absolute_time_diff_us(progressCheckTime, now) >= progressCheckIntervalUs) {
@@ -232,7 +217,25 @@ void Servo::tick() {
 
   float timeLeftSec = std::max(remainingUs / 1000000.0f, 0.001f);
   float desiredSpeedDegPerSec = absError / timeLeftSec;
-  float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, maxAngularSpeed);
+  // Past the nominal deadline, remainingUs is pinned at stabilizationTimeUs regardless of how large
+  // absError still is - so desiredSpeedDegPerSec no longer reflects genuine urgency, just "how much
+  // time is left in an artificial floor," which demands near-maxAngularSpeed for any uncorrected
+  // error indefinitely rather than settling. Combined with real mechanical/sensor lag, that turned
+  // into a sustained, undamped oscillation instead of convergence (confirmed live 2026-08-26:
+  // shoulder swinging ~30-145deg for many cycles, never settling).
+  //
+  // Once past the deadline, switch to a gradient proportional to absError instead - a flat cap
+  // (first tried) was safe but felt too slow recovering from a real external disturbance (someone
+  // rotating the whole arm by hand); scaling with error size gives a faster response to a large
+  // disturbance while a small residual still corrects gently. Clamped at stabilizationSpeed, well
+  // under maxAngularSpeed - there's no genuine reason to match the original urgency once the
+  // schedule itself has already been missed.
+  bool pastDeadline = remainingUs <= (int64_t)stabilizationTimeUs;
+  if (pastDeadline) {
+    desiredSpeedDegPerSec = absError * stabilizationGainPerSec;
+  }
+  float speedCeiling = pastDeadline ? stabilizationSpeed : maxAngularSpeed;
+  float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, speedCeiling);
 
   // Ramp toward the desired speed instead of jumping to it - a noisy/moving target otherwise looks jerky.
   float desiredSignedSpeed = limitedSpeedDegPerSec * dir;
@@ -242,14 +245,59 @@ void Servo::tick() {
 
   float increment = appliedSpeedDegPerSec * dtSec;
   float nextPhysical = physicalAngle + increment;
-  // Rate-limit physicalAngle's lead over where imuAngle's own progress says it should be (allowedCenter,
-  // computed above) - the deadline-driven speed above only reacts to error vs targetAngle, so without
-  // this, a joint that can't keep up gets commanded even faster instead of slower. This is what actually
-  // prevents the runaway, not just the guard that catches it.
-  nextPhysical = std::clamp(nextPhysical, allowedCenter - maxLeadDeg, allowedCenter + maxLeadDeg);
+
+  // Anti-windup (opt-in, see setMaxLead()): physicalAngle may advance at most maxLeadDeg ahead of
+  // imuAngle in the direction of travel. Confirmed from live logs (2026-08-25..31): when the arm
+  // can't keep up with the commanded speed (shoulder lifting from a droop moved 0-4deg/s while
+  // commanded 10-27deg/s), physicalAngle ran 25-70deg ahead, kept integrating past the target, and
+  // then dragged the arm through it - every 17-23deg growing-error trip had that shape. Only ever
+  // holds physicalAngle back, never moves it toward imuAngle, so a wrong offset assumption can at
+  // worst stop the advance (caught by the stall check), not chase a predicted position.
+  bool leadLimited = false;
+  if (!isnan(maxLeadDeg) && dir * increment > 0.0f) {
+    float maxAdvance = imuAngle + dir * maxLeadDeg;
+    if (dir * (nextPhysical - maxAdvance) > 0.0f) {
+      nextPhysical = (dir * (maxAdvance - physicalAngle) > 0.0f) ? maxAdvance : physicalAngle;
+      // Keep the ramp's state honest, or it resumes at the windup speed once the arm catches up.
+      appliedSpeedDegPerSec = (nextPhysical - physicalAngle) / dtSec;
+      leadLimited = true;
+    }
+  }
+
+  // Fine-correction budget: below minProgressDeg, physicalAngle may move at most
+  // fineCorrectionBudgetDeg from where it was when the error first got that small. Confirmed live
+  // (2026-10-31): with the error parked just outside the dead zone (0.2-0.5deg - a bias, or a joint
+  // that doesn't answer sub-degree commands), the gradient kept integrating ~0.15deg/s for minutes -
+  // shoulder Z's command crept 133->127.7 and wrist Y's 132->129 with both IMU readings flat, and the
+  // stall check never fires there because it skips errors under minProgressDeg. Left alone, that
+  // windup releases as one sudden move. Only clamps within the band, so it can't create motion.
+  // The anchor is released only after absError has stayed >= minProgressDeg for fineReleaseUs:
+  // releasing it the moment the error crossed 2deg (first version) let shoulder Z's +/-2.5deg yaw
+  // noise re-arm the budget over and over, ratcheting the command 135->177 in ~8deg steps (2026-10-31).
+  if (absError < minProgressDeg) {
+    coarseSince = 0;
+    if (isnan(fineAnchorPhysical)) {
+      fineAnchorPhysical = physicalAngle;
+    }
+  } else if (coarseSince == 0) {
+    coarseSince = now;
+  } else if (absolute_time_diff_us(coarseSince, now) >= fineReleaseUs) {
+    fineAnchorPhysical = NAN;
+  }
+  bool fineLimited = false;
+  if (!isnan(fineAnchorPhysical)) {
+    float clamped = std::clamp(nextPhysical, fineAnchorPhysical - fineCorrectionBudgetDeg,
+                               fineAnchorPhysical + fineCorrectionBudgetDeg);
+    if (clamped != nextPhysical) {
+      nextPhysical = clamped;
+      appliedSpeedDegPerSec = (nextPhysical - physicalAngle) / dtSec;
+      fineLimited = true;
+    }
+  }
+
   printer.interval([&]() {
-    LogQueue::Log("Tick: Target: %.2f, IMU: %.2f, Physical: %.2f, Error: %.2f, DesiredSpeed: %.2f, AppliedSpeed: %.2f\n",
-                  targetAngle, imuAngle, physicalAngle, error, desiredSpeedDegPerSec, appliedSpeedDegPerSec);
+    LogQueue::Log("Tick: Target: %.2f, IMU: %.2f, Physical: %.2f, Error: %.2f, DesiredSpeed: %.2f, AppliedSpeed: %.2f, LeadLimited: %d, FineLimited: %d\n",
+                  targetAngle, imuAngle, physicalAngle, error, desiredSpeedDegPerSec, appliedSpeedDegPerSec, leadLimited, fineLimited);
   });
 
   bool pinnedAtLimit = (nextPhysical <= safeMinDegree && dir < 0.0f) || (nextPhysical >= safeMaxDegree && dir > 0.0f);

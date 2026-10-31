@@ -37,10 +37,13 @@ private:
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
   // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical); base is relative to this.
   float shoulderYHomeAngle = SHOULDER_Y_HOME_POSITION;
-  // Delta-integrated per tick rather than re-derived absolutely - see getIMUAngles().
-  Quaternion lastOrientation;
   bool pitchIntegrationValid = false;
   float accumulatedPitchX = 0.0f;
+  // Last trusted angleFromGravityY() reading and when it was taken, for its own glitch filter -
+  // time-aware because this function is called from both a tight ~5ms tracking loop and a slower
+  // ~250ms idle-diagnostic loop, so a flat per-call jump threshold would be wrong for one of them.
+  float lastGoodGravityY = NAN;
+  absolute_time_t lastGoodGravityYTime = 0;
   float angleFromGravityY();
 public:
   Servo shoulderZ;

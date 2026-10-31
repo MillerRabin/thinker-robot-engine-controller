@@ -37,16 +37,15 @@ private:
   float angleY();
   // Relative-to-shoulder orientation at the moment calibrateYLoop() last converged, so getIMUAngles() reads 0 there.
   Quaternion base;
-  // Delta-integrated per tick rather than re-derived absolutely - see getIMUAngles().
-  Quaternion lastOrientation;
   bool pitchIntegrationValid = false;
   float accumulatedPitchY = 0.0f;
   // use is the intended default; not-use is the emergency fallback.
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};
   float angleFromGravityY();
   float shoulderYAngleDeg();
-  // PWM angle calibrateYLoop() last landed on (accelerometer-verified vertical).
-  float elbowYHomeAngle = ELBOW_Y_HOME_POSITION;
+  // PWM angle calibrateYLoop() last landed on (gravity-verified vertical) - also maps the gravity
+  // reading into PWM-space for the next seed, see calibrateYLoop().
+  float elbowYHomeAngle = ELBOW_Y_PWM_AT_VERTICAL;
   public:
     Servo elbowY;
     ArmElbow(uint memsSdaPin, uint memsSclPin, uint memsIntPin, uint memsRstPin,

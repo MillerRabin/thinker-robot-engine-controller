@@ -18,6 +18,9 @@ void ArmWrist::updateStatusLed(bool calibrating, bool ready) {
   bool enginesEnabled = platform.getEnginesPowerStatus();
   if (lastEnginesEnabled && !enginesEnabled) {
     onIMUReset();
+    // The one place servos go limp: everywhere else reset() keeps holding (see Servo::reset()).
+    wristY.release();
+    wristZ.release();
   }
   lastEnginesEnabled = enginesEnabled;
 
@@ -59,6 +62,15 @@ bool ArmWrist::calibrateYLoop() {
       setYCalibrating(false);
       return false;
     }
+    // Matching ArmShoulder::calibrateYLoop()'s identical fix: elbow.isPositionOK() alone doesn't
+    // reliably/promptly reflect engines-off, so a drop here went undetected until the settle loop
+    // below, by which point setDegreeDirect() (an unramped, instant PWM command) may already have
+    // committed to a stale/mid-transition seed.
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("Wrist calibrating Y aborted: engines powered off (seeding)\n");
+      setYCalibrating(false);
+      return false;
+    }
     float sample = angleFromGravityY();
     if (!isnan(sample) && !isnan(lastSeedSample) &&
         fabsf(sample - lastSeedSample) <= seedStableTolerance) {
@@ -70,11 +82,44 @@ bool ArmWrist::calibrateYLoop() {
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
 
-  float imuY = std::clamp(angleFromGravityY(), 0.0f, 270.0f);
-  LogQueue::Log("[DIAG] wrist calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f)\n", imuY, angleFromGravityY());
-  wristY.setDegreeDirect(imuY);
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  wristY.setTargetAngle(WRIST_Y_HOME_POSITION, WRIST_Y_RECOVERY_TIME_MS, WRIST_DEAD_ZONE);
+  // Reuse lastSeedSample (guaranteed non-NaN and stable) instead of a fresh angleFromGravityY()
+  // call - matching ArmShoulder::calibrateYLoop()'s identical fix. A fresh call can race into the
+  // glitch filter's own rejection and return NaN, and std::clamp() on NaN is unspecified/
+  // implementation-defined rather than being caught.
+  // Mapped into PWM-space through wristYHomeAngle (the PWM the last calibration actually held at
+  // gravity's 90), not used as-is: the servo holds vertical at PWM ~134-140, so seeding PWM = the
+  // gravity reading commanded it ~45deg away from where it physically was - a real jerk at every
+  // seed (confirmed live 2026-10-31). Clamped to the safe range so setDegreeDirect() can't reject it.
+  // A servo still holding (engines never went off) is seeded where it already is instead.
+  bool holding = wristY.isHolding();
+  float seedY = holding ? wristY.getPhysicalAngle()
+                        : std::clamp(wristYHomeAngle + (lastSeedSample - WRIST_Y_HOME_POSITION), wristY.safeMinDegree, wristY.safeMaxDegree);
+  LogQueue::Log("[DIAG] wrist calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f, home=%.2f, holding=%d)\n", seedY, lastSeedSample, wristYHomeAngle, holding);
+  wristY.setDegreeDirect(seedY);
+
+  // Same power check during the post-seed settle delay - matching ArmShoulder::calibrateYLoop().
+  for (int i = 0; i < 20; i++) {
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("Wrist calibrating Y aborted: engines powered off (post-seed delay)\n");
+      setYCalibrating(false);
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  // Recovery time scaled to the actual seed error, not the fixed WRIST_Y_RECOVERY_TIME_MS constant -
+  // matching ArmShoulder::calibrateYLoop()'s identical fix. A fixed short recovery time makes the
+  // speed formula (error/timeLeft) demand near-maxAngularSpeed almost immediately for a large seed
+  // error. Capped at 18deg/s (vs the normal 60deg/s ceiling) - conservative on purpose for wrist's
+  // first-ever live test, where the seed-to-target error could be large and completely unverified.
+  constexpr float WRIST_Y_MAX_RECOVERY_SPEED = 18.0f; // deg/s
+  // Gravity-space, like the target - seedY is PWM-space and offset from it.
+  float seedError = fabsf(WRIST_Y_HOME_POSITION - lastSeedSample);
+  uint16_t recoveryTimeMs = (uint16_t)std::clamp(
+      (seedError / WRIST_Y_MAX_RECOVERY_SPEED) * 1000.0f,
+      (float)WRIST_Y_RECOVERY_TIME_MS, 10000.0f);
+  LogQueue::Log("[DIAG] wrist calibrateYLoop: seedError=%.2f recoveryTimeMs=%u\n", seedError, recoveryTimeMs);
+  wristY.setTargetAngle(WRIST_Y_HOME_POSITION, recoveryTimeMs, WRIST_DEAD_ZONE);
   TickType_t stableSince = 0;
   uint32_t iterations = 0;
   while (true) {
@@ -163,11 +208,12 @@ Vector3 ArmWrist::trackTick() {
   Vector3 physicalAngles = getPhysicalAngles(imuAngles);
   if (useIMUMode.load() == USE_IMU_NOT_USE) {
     wristY.setIMUAngle(wristY.getPhysicalAngle());
-    wristZ.setIMUAngle(wristZ.getPhysicalAngle());
   } else {
     wristY.setIMUAngle(physicalAngles.y);
-    wristZ.setIMUAngle(physicalAngles.z);
   }
+  // Z always on the servo's own position, never yawZ - same unobservable-yaw windup as
+  // ArmShoulder::trackTick()'s Z (seen here too, 2026-10-31: command 153 vs yaw-based 136).
+  wristZ.setIMUAngle(wristZ.getPhysicalAngle());
   wristY.tick();
   wristZ.tick();
   updateStatuses();
@@ -214,7 +260,7 @@ bool ArmWrist::calibrateLoop() {
       iterations++;
       bool withinTolerance =
           fabsf(wristYHomeAngle - physicalAngles.y) <= CALIBRATION_SETTLE_TOLERANCE &&
-          fabsf(WRIST_Z_HOME_POSITION - physicalAngles.z) <= CALIBRATION_SETTLE_TOLERANCE;
+          fabsf(WRIST_Z_HOME_POSITION - wristZ.getPhysicalAngle()) <= CALIBRATION_SETTLE_TOLERANCE; // matches trackTick()'s Z
       printer.interval([&]() {
         LogQueue::Log("[DIAG] wrist calibrateLoop: settle iter=%lu physicalY=%.2f physicalZ=%.2f withinTolerance=%d\n",
                (unsigned long)iterations, physicalAngles.y, physicalAngles.z, withinTolerance);
@@ -270,6 +316,13 @@ void ArmWrist::engineLoop() {
   }
 }
 
+// TEMP (2026-08-24): sequential-calibration safety testing after a cascading-chaos incident (see
+// project memory item 63) - flip to true only for the one module currently being verified in
+// isolation, keep every other module false so it stays permanently idle (never calibrates/moves)
+// regardless of its own IMU/parent status. Remove this whole mechanism once all four modules have
+// been confirmed stable, one at a time, and can safely calibrate together again.
+constexpr bool TEMP_SEQUENTIAL_CALIBRATION_ENABLED = true;
+
 void ArmWrist::engineTask(void *instance) {
   auto *wrist = static_cast<ArmWrist *>(instance);
   TickType_t lastWakeTime = xTaskGetTickCount();
@@ -279,6 +332,25 @@ void ArmWrist::engineTask(void *instance) {
   vTaskDelay(pdMS_TO_TICKS(3000));
 
   while (true) {
+    if (!TEMP_SEQUENTIAL_CALIBRATION_ENABLED) {
+      // TEMP DIAG (2026-08-24): unambiguous boot identity, repeated (not one-shot) so it doesn't
+      // race a log reader attaching - needed after a flashing mixup risk (bootloader mode doesn't
+      // expose per-board serial, so multiple boards in BOOTSEL at once could get crossed).
+      static Periodic identityPrinter(pdMS_TO_TICKS(2000));
+      identityPrinter.interval([&]() {
+        LogQueue::Log("=== ArmWrist alive (calibration disabled) ===\n");
+      });
+      // TEMP DIAG (2026-08-31): passively observe angleFromGravityY() while calibration is disabled,
+      // to measure the PWM offset (matching how ArmElbow's was measured) without needing to enable
+      // engines/calibration first. Matches ArmShoulder's identical diagnostic call in this branch.
+      wrist->angleFromGravityY();
+      wrist->updateStatusLed(false);
+      wrist->setEngineTaskStatus(false);
+      wrist->updateStatuses();
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
+    }
+
     auto sp = wrist->imu.isPositionOK();
     auto pp = wrist->elbow.isPositionOK();
 
@@ -402,34 +474,32 @@ Vector3 ArmWrist::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
 
-  // pitchY is delta-integrated (drift-corrected below) rather than re-derived absolutely, matching ArmShoulder's pitchX fix.
+  // pitchY used to be delta-integrated via a per-tick yaw-strip-then-swing decomposition of the
+  // quaternion delta (qDeltaSwing.twistAngle({0,1,0})) - order-sensitive, breaks under a large
+  // rotation between ticks. A comment here claimed this already matched ArmShoulder's fix for the
+  // identical bug, but the fix was never actually applied to this function - only the comment was
+  // copied (confirmed live 2026-08-25 as a real incident on ArmElbow's identical copy-paste; wrist
+  // has never been live-tested with this code path active). Fixed the same way as shoulder/elbow:
+  // use the absolute, yaw-invariant gravity-vector formula directly (already computed as the drift-
+  // correction term below), no delta/integration state needed.
   float pitchY;
-  if (!qm.isValid()) {
-    // Glitched reading - hold the last value instead of integrating NaN permanently.
+  Vector3 gAbs = qm.getGravityVector();
+  float pitchYAbs = atan2(-gAbs.x, gAbs.z);
+  if (!qm.isValid() || isnan(pitchYAbs)) {
+    // Glitched reading - hold the last value instead of feeding NaN/garbage forward.
     pitchY = accumulatedPitchY;
   } else if (!pitchIntegrationValid) {
-    pitchY = 0.0f;
-    accumulatedPitchY = 0.0f;
+    pitchY = pitchYAbs;
+    accumulatedPitchY = pitchYAbs;
     pitchIntegrationValid = true;
-    lastOrientation = qm;
   } else {
-    Quaternion qDelta = lastOrientation.invert() * qm;
-    float deltaYawZ = qDelta.twistAngle({0.0f, 0.0f, 1.0f});
-    Quaternion qDeltaZ = Quaternion::AngleAxis(deltaYawZ, 0.0f, 0.0f, 1.0f);
-    Quaternion qDeltaSwing = qDeltaZ.invert() * qDelta;
-    float deltaPitchY = qDeltaSwing.twistAngle({0.0f, 1.0f, 0.0f});
-    accumulatedPitchY += deltaPitchY;
-
-    // Gravity-vector-based, not a yaw-strip-then-pitch decomposition of qm - see
-    // ArmShoulder::getIMUAngles()'s identical fix for why (order-sensitive, breaks under a
-    // large yaw change).
-    constexpr float driftCorrectionAlpha = 0.01f; // ~1s time constant at 5ms/tick
-    Vector3 gAbs = qm.getGravityVector();
-    float pitchYAbs = atan2(-gAbs.x, gAbs.z);
-    accumulatedPitchY += driftCorrectionAlpha * (pitchYAbs - accumulatedPitchY);
-
+    // Sanity clamp, not a control filter: real per-tick motion is bounded by servo speed, so an
+    // implausibly large single-sample jump is treated as a glitch and capped rather than trusted
+    // outright - matching ArmShoulder::getIMUAngles()'s guard.
+    constexpr float maxPlausibleDeltaRad = 10.0f * DEG_TO_RAD;
+    float delta = std::clamp(pitchYAbs - accumulatedPitchY, -maxPlausibleDeltaRad, maxPlausibleDeltaRad);
+    accumulatedPitchY += delta;
     pitchY = accumulatedPitchY;
-    lastOrientation = qm;
   }
 
   static Periodic axisPrinter(pdMS_TO_TICKS(300));
@@ -463,6 +533,20 @@ float ArmWrist::elbowYAngleDeg() {
 // approach) - unlike accelerometer readings, the quaternion already has q_corr applied, so this
 // reuses the mounting correction already verified live instead of needing a fresh raw-axis fit.
 // Sign/wrap constants are a starting point - verify live like ELBOW_GRAVITY_* was tuned.
+// Glitch filter added 2026-08-31, matching ArmShoulder::angleFromGravityY()'s identical fix - a
+// tick-to-tick jump filter that's time-aware (called from both a tight tracking loop and a slower
+// idle-diagnostic loop) rather than a flat per-call threshold. No absolute MIN/MAX range check yet
+// (unlike shoulder) - that requires hand-verified reference points across wrist's real range, which
+// haven't been measured (wrist has never been live-tested). Add one once that measurement is done.
+constexpr float WRIST_GRAVITY_Y_MAX_DEG_PER_SEC = 120.0f;
+constexpr float WRIST_GRAVITY_Y_MIN_JUMP_FLOOR = 5.0f; // deg, for back-to-back calls
+// res is a difference of two atan2 angles, so it can land on the wrong side of the +/-180 wrap even
+// when both inputs are fine - confirmed live (2026-10-31): the wrist, folded ~183deg relative to the
+// elbow, read -176.91, which clamped to a PWM 0 seed ~230deg from where it physically was. Split the
+// circle inside the servo's unreachable arc instead: res = PWM + (90 - WRIST_Y_PWM_AT_VERTICAL), and
+// PWM 0..270 leaves 270..360 unreachable, centered on PWM 315 (= -45).
+constexpr float WRIST_GRAVITY_Y_WRAP_LOW = -45.0f + (WRIST_Y_HOME_POSITION - WRIST_Y_PWM_AT_VERTICAL);
+
 float ArmWrist::angleFromGravityY() {
   Quaternion q = imu.quaternion.load();
   if (!q.isValid()) {
@@ -472,6 +556,11 @@ float ArmWrist::angleFromGravityY() {
   float raw = atan2(-g.x, g.z) * RAD_TO_DEG;
   float elbowCorr = elbowYAngleDeg();
   float res = raw - elbowCorr;
+  if (res < WRIST_GRAVITY_Y_WRAP_LOW) {
+    res += 360.0f;
+  } else if (res >= WRIST_GRAVITY_Y_WRAP_LOW + 360.0f) {
+    res -= 360.0f;
+  }
 
   static Periodic gravityPrinter(pdMS_TO_TICKS(300));
   gravityPrinter.interval([&]() {
@@ -479,5 +568,16 @@ float ArmWrist::angleFromGravityY() {
                   raw, elbowCorr, res, wristY.getPhysicalAngle());
   });
 
+  absolute_time_t now = get_absolute_time();
+  if (!isnan(lastGoodGravityY)) {
+    float elapsedSec = absolute_time_diff_us(lastGoodGravityYTime, now) / 1000000.0f;
+    float maxPlausibleJump = std::max(WRIST_GRAVITY_Y_MAX_DEG_PER_SEC * elapsedSec, WRIST_GRAVITY_Y_MIN_JUMP_FLOOR);
+    if (fabsf(res - lastGoodGravityY) > maxPlausibleJump) {
+      return NAN;
+    }
+  }
+
+  lastGoodGravityY = res;
+  lastGoodGravityYTime = now;
   return res;
 }

@@ -52,10 +52,27 @@ bool ArmPlatform::isPositionOK() {
 }
 
 bool ArmPlatform::getEnginesPowerStatus() {
-  if (!isOnline()) return false;  
-  if ((status & PLATFORM_STATUS_ENGINES_ON) == 0) return false;
-  auto diff = xTaskGetTickCount() - lastEnginesPowerOn;  
-  return (diff > powerEnginesInterval);
+  bool rawOn = isOnline() && ((status & PLATFORM_STATUS_ENGINES_ON) != 0);
+
+  if (rawOn) {
+    offSince = 0;
+    auto diff = xTaskGetTickCount() - lastEnginesPowerOn;
+    lastConfirmedEnginesOn = (diff > powerEnginesInterval);
+    return lastConfirmedEnginesOn;
+  }
+
+  // A single bad reading (stale CAN / a misread status bit) isn't trusted as a real power-off until
+  // it persists past offDebounceInterval - bridges over a brief glitch by holding the last confirmed
+  // value instead. Never defaults to "on": if engines were never confirmed on in the first place,
+  // lastConfirmedEnginesOn is already false here.
+  if (offSince == 0) {
+    offSince = xTaskGetTickCount();
+  }
+  if (xTaskGetTickCount() - offSince < offDebounceInterval) {
+    return lastConfirmedEnginesOn;
+  }
+  lastConfirmedEnginesOn = false;
+  return false;
 }
 
 bool ArmPlatform::getCameraPowerStatus() {

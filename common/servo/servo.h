@@ -59,8 +59,14 @@ private:
   // =========================================================
   float deadZone = 1.0f; // допустимая ошибка по углу (deg)
   const uint64_t stabilizationTimeUs = 500000;
-  
-  float stabilizationSpeed = 1.0f; // deg/s
+
+  // Past-deadline speed is gradient-based (proportional to absError), not flat - a flat 1deg/s felt
+  // too slow recovering from a real external disturbance (someone rotating the whole arm), but
+  // going back to the plain error/timeLeft formula reproduced the original sustained oscillation
+  // (see tick()'s comment). stabilizationSpeed is the ceiling that gradient is clamped to - same
+  // ceiling already proven safe for initial-seed-recovery scaling elsewhere.
+  const float stabilizationGainPerSec = 0.5f; // deg/s per deg of error
+  float stabilizationSpeed = 18.0f; // deg/s ceiling
 
   const float maxAngularSpeed = 60.0f;   // deg/s
   float maxAngularAccelerationCmd = 180.0f; // deg/s^2
@@ -90,48 +96,57 @@ private:
   absolute_time_t limitPinnedSince = 0;
   static constexpr int64_t limitPinnedMaxUs = divergenceCheckIntervalUs * divergenceMaxIntervals;
 
-  // Anchor pair, captured once per move (cleared in resetDivergence(), lazily re-captured on the
-  // first tick() after). physicalAngle and imuAngle are NOT assumed to share the same numeric
-  // frame/zero-point - confirmed live: true for shoulder/wrist (same scale), but NOT for elbow,
-  // which has a large, legitimate, fixed offset between its PWM scale and its gravity-sensed scale.
-  // Both checks below compare physicalAngle against how far it *should* have moved given imuAngle's
-  // own real progress since this anchor, not against imuAngle's raw value - this generalizes
-  // correctly to any fixed per-joint offset, since only relative progress is ever compared.
-  float leadAnchorPhysical = NAN;
-  float leadAnchorImu = NAN;
+  // REMOVED (2026-08-24): a "lead clamp" + hard physicalAngle-vs-imuAngle gap guard used to live
+  // here, meant to stop physicalAngle from racing ahead of imuAngle. Both versions tried (an
+  // absolute-gap version, then an anchored-relative-progress version) assumed some fixed
+  // correspondence between physicalAngle's scale and imuAngle's scale - offset-only, then
+  // offset-plus-1:1-slope. BOTH assumptions were confirmed wrong for elbow, the second time by
+  // causing a REAL, physically-observed dangerous oscillation live (elbow commanded to swing
+  // between its 0 and 270deg Range limits during calibration, chasing a mathematically-predicted
+  // physicalAngle that didn't correspond to reality - see project memory item 57 for the full
+  // incident). Do not reintroduce a check that assumes a specific physicalAngle-vs-imuAngle
+  // relationship without solid, full-range live-measured evidence it holds for every joint that
+  // will use it - it doesn't for elbow, and there's no guarantee it holds for future joints either.
+  // The progress check below (relationship-agnostic - it only ever looks at imuAngle by itself)
+  // covers the actual danger this was trying to catch: see its comment.
 
-  // Catches a third case neither check above sees: a persistent (not growing) small bias in
-  // imuAngle relative to targetAngle - error stays small and non-growing, so the checks above
-  // never trip, but tick() still nudges physicalAngle a little further every tick since it never
-  // exactly reaches the (tight) dead zone. Nothing ties physicalAngle's own displacement back to
-  // imuAngle's real progress, so it can drift unboundedly - confirmed live (shoulder ran
-  // physicalAngle from ~91 to its 180 range limit over several seconds while imuAngle sat at a
-  // near-constant ~90). Sustained, not instantaneous - a single-tick gap right after a fresh seed
-  // is expected and must not trip this; only a gap that persists is the real failure signature.
-  absolute_time_t physicalImuGapSince = 0;
-  static constexpr float maxPhysicalImuGapDeg = 20.0f;
-  static constexpr int64_t physicalImuGapMaxUs = divergenceCheckIntervalUs * divergenceMaxIntervals;
-
-  // Soft rate limit, checked every tick (not just after the fact like the guard above): never let
-  // physicalAngle get more than this far ahead of where imuAngle's own progress says it should be.
-  // The deadline-driven speed calc above only reacts to error vs targetAngle, so if imuAngle can't
-  // keep up (real torque limit, filter lag) it just commands more speed instead of backing off -
-  // this clamp is what actually stops physicalAngle from racing ahead, rather than freezing after
-  // it already has. Kept comfortably under maxPhysicalImuGapDeg so the hard guard stays a rare backstop.
-  static constexpr float maxLeadDeg = 10.0f;
-
-  // With physicalAngle now rate-limited to follow imuAngle, a genuinely stuck joint (imuAngle not
-  // advancing - real mechanical stall, not just lag) no longer produces a growing physical-imu gap
-  // to catch - it would sit quietly forever instead. Catch that directly: imuAngle must move at
-  // least minProgressDeg over each check window while error is still outside the dead zone.
-  // Window is deliberately longer than the other guards' 1.8s: confirmed live (shoulderY, no
-  // mechanical resistance by hand) that closing the last few degrees under the new maxLeadDeg
-  // clamp is legitimately slower than the old deadline-chasing ramp - 1.8s falsely caught that
-  // as "stuck". 5s gives real (if unhurried) convergence room while still catching an actual stall.
+  // Catches a persistent windup: imuAngle isn't making real progress toward targetAngle while
+  // physicalAngle keeps getting commanded further - confirmed live as the actual shoulder incident
+  // this was built for ("physicalAngle ran from ~91 to its 180 range limit over several seconds
+  // while imuAngle sat at a near-constant ~90"). Deliberately doesn't look at physicalAngle at all -
+  // only checks that imuAngle itself is moving, which needs no assumption about how physicalAngle's
+  // scale relates to imuAngle's scale (see the removed lead-clamp comment above for why that
+  // assumption is unsafe). The existing growing-error check above and pinned-at-limit check below
+  // are equally relationship-agnostic and remain as-is; together the three cover: wrong direction
+  // (growing error), stuck at a hard limit (pinned), and stuck anywhere else (this one).
+  // 5s window (not 1.8s, matching the other checks): confirmed live that closing the last few
+  // degrees of a real, unhurried convergence can legitimately take longer than 1.8s (false-tripped
+  // once on shoulderY with no mechanical resistance) - 5s gives real convergence room while still
+  // catching an actual stall in bounded time.
   absolute_time_t progressCheckTime = 0;
   float progressCheckImuAngle = NAN;
-  static constexpr float minProgressDeg = 1.0f;
+  // Widened from 1.0 (2026-08-31): a real 1.17deg residual on elbow tripped this, since it sat just
+  // above the old threshold - same false-positive class as tick()'s absError-skip guard (stable
+  // holding just outside the dead zone, correctly not "making progress" because there's nothing
+  // meaningful left to correct). 2.0 gives that a comfortable margin.
+  static constexpr float minProgressDeg = 2.0f;
   static constexpr int64_t progressCheckIntervalUs = 5000000;
+
+  // Opt-in anti-windup limit (deg), NAN = disabled - see setMaxLead() and tick().
+  float maxLeadDeg = NAN;
+
+  // Fine-correction budget - see tick(). Reset only by a new target (setTargetAngle()/reset()), not
+  // by resetDivergence(), which also runs on every dead-zone dip.
+  float fineAnchorPhysical = NAN;
+  static constexpr float fineCorrectionBudgetDeg = 3.0f;
+  // When absError first went >= minProgressDeg, 0 while below - the anchor is only released once
+  // that lasts fineReleaseUs (see tick()).
+  absolute_time_t coarseSince = 0;
+  static constexpr int64_t fineReleaseUs = 1000000;
+
+  // True while the PWM output carries a real commanded pulse (set by setDegreeDirect(), cleared by
+  // release()) - the constructor's homePosition is bookkeeping only, nothing is output until then.
+  bool outputActive = false;
 
   void resetDivergence();
 
@@ -167,20 +182,52 @@ public:
   // Config setters
   // =========================================================
   void setTimeMS(uint16_t timeMS);
-  void setDeadZone(float dz);  
+  void setDeadZone(float dz);
+  // Only for a joint whose physicalAngle and imuAngle are verified to share one scale (offset ~0,
+  // slope ~1) - elbow's didn't when a relationship-assuming check was last tried (see the removed
+  // lead-clamp comment above). Unlike that check, this one only ever holds physicalAngle back.
+  void setMaxLead(float deg) { maxLeadDeg = deg; }
   void tick();
 
   void stop() {
     targetAngle = NAN;
   }
 
+  // Stops control but keeps holding: the PWM output stays at the last commanded position, and
+  // physicalAngle keeps describing it, so the next calibration can seed from it with no jump (see
+  // isHolding()). For a guard trip or a lost parent while engines stay on - the previous version
+  // also cut the output (release()), so every shoulder recalibration dropped a limp elbow and wrist
+  // under gravity (confirmed live 2026-10-31: the wrist "lost vertical" in one such cascade).
   void reset() {
     targetAngle = NAN;
-    physicalAngle = NAN;
+    fineAnchorPhysical = NAN;
+    coarseSince = 0;
     // Must also clear here - setIMUAngle() low-pass filters against a stale imuAngle otherwise.
     imuAngle = NAN;
   }
 
+  // reset() plus cutting the output - only for engines going off, see each module's updateStatusLed().
+  void release() {
+    reset();
+    physicalAngle = NAN;
+    outputActive = false;
+    // Clearing the software state alone leaves the PWM peripheral outputting whatever duty cycle it
+    // was last set to - RP2040 PWM slices hold their last level indefinitely with no software
+    // refresh needed, and that keeps driving the servo even through an engines-off period (only the
+    // servo's own power rail is cut, not RP2040 logic). Confirmed live (2026-08-26): the servo
+    // mechanically snaps to that stale leftover signal the instant power returns - before any
+    // calibration/seeding logic even runs - which looked like an uncontrolled jerk toward the old
+    // target. Level 0 removes the pulses entirely so there's nothing to snap to; setDegreeDirect()
+    // writes a real level again the moment a real, intentional position is next commanded.
+    // Not pwm_set_enabled(false) (the first version of this fix): disabling a slice halts its
+    // counter with the pin frozen high or low depending on exactly when it stopped (pico-sdk
+    // pwm_set_enabled() docs) - at a ~50% duty pulse that's a coin flip on leaving a constant-high
+    // line on the servo input. Level 0 is a clean constant low, and only touches this channel.
+    pwm_set_chan_level(slice, channel, 0);
+  }
+
   bool isPositioned() const;
   bool isDiverging() const { return diverging; }
+  // Actively outputting physicalAngle - the servo is physically there (within backlash/sag).
+  bool isHolding() const { return outputActive && !isnan(physicalAngle); }
 };
