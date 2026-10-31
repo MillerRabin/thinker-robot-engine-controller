@@ -165,11 +165,22 @@
 // commanded move after power-up jumps here first; mid-travel keeps that jump smallest.
 #define CLAW_GRIPPER_HOME_POSITION 130
 // Open-loop axes (self-referential imuAngle: the gripper always, X/Y in manual mode) - the dead zone
-// is pure stopping precision there, and CLAW_DEAD_ZONE's 2deg would stop every move 2deg short.
+// is pure stopping precision there (the old shared 2deg claw dead zone stopped every move 2deg short).
 #define CLAW_OPEN_LOOP_DEAD_ZONE 0.3f
-// Manual mode's first pulse for an unpowered clawY: limp, it rests on its 180 stop (user, 2026-10-31).
-#define CLAW_Y_MANUAL_START 178.0f
-#define CLAW_DEAD_ZONE 2.0f
+// Claw mapping, measured live 2026-10-31 (manual mode). clawY: PWM 178 = horizontal, ~90 = vertical,
+// 1:1; a stop ~14deg past vertical (~PWM 81), so commands stay >= 85. Unpowered, the claw is light
+// enough to stay at whatever angle it was left - nothing can be assumed about where it is.
+// clawX (roll of the jaws, 1:1): jaws level at PWM 130, where its gravity roll reads ~64.5deg with
+// clawY horizontal (the IMU is fixed to the jaws; the user remounted them as level as mechanically
+// possible). Only boot defaults for clawYHomeAngle/clawXHomeAngle - calibration overwrites them.
+#define CLAW_Y_PWM_AT_VERTICAL 90.0f
+#define CLAW_Y_SAFE_MIN 85.0f
+#define CLAW_Y_PWM_HORIZONTAL 178.0f
+#define CLAW_X_PWM_AT_LEVEL 130.0f
+#define CLAW_X_ROLL_AT_LEVEL 64.5f
+// Calibration dead zone for X/Y (IMU-closed): must stay under CALIBRATION_SETTLE_TOLERANCE, or the
+// settle check can never pass (the old shared 2deg claw dead zone was twice that tolerance).
+#define CLAW_CALIBRATION_DEAD_ZONE 0.5f
 
 #define SERVO_DEAD_ZONE 0.3f
 

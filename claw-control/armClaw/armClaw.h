@@ -37,9 +37,16 @@ private:
   // LocalWitmotion has no setRotate() hook, so this is applied manually via correctedQuat().
   Quaternion q_corr{0.573523f, 0.608072f, -0.360074f, -0.414326f};
   Quaternion correctedQuat() { return imu.quaternion.load() * q_corr; }
-  // PWM angle calibrateXLoop()/calibrateYLoop() last landed on (gravity-verified).
-  float clawXHomeAngle = CLAW_X_HOME_POSITION;
-  float clawYHomeAngle = CLAW_Y_HOME_POSITION;
+  // PWM angle calibrateXLoop()/calibrateYLoop() last landed on (gravity-verified) - also maps each
+  // axis's gravity reading into PWM-space for the next seed.
+  float clawXHomeAngle = CLAW_X_PWM_AT_LEVEL;
+  float clawYHomeAngle = CLAW_Y_PWM_AT_VERTICAL;
+  float clawYReading();
+  float clawXReading();
+  bool moveYOpenLoop(float pwm);
+  bool calibrationInterrupted(const char *phase);
+  bool calibrateAxis(const char *phase, Servo &servo, float (ArmClaw::*reading)(), float readingAtHome,
+                     float &homeAngle);
   // Delta-integrated per tick rather than re-derived absolutely - see getIMUAngles().
   Quaternion lastOrientation;
   bool pitchIntegrationValid = false;

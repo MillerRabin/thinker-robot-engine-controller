@@ -47,26 +47,42 @@ void ArmClaw::updateStatusLed(bool calibrating, bool ready) {
   }
 }
 
-bool ArmClaw::calibrateXLoop() {
-  LogQueue::Log("[DIAG] claw calibrateXLoop: enter\n");
+// Common abort checks for every calibration phase below - engines power in each one (a cut mid-seed
+// left a stale seed on the other modules), and losing the wrist (its recalibration moves the claw's
+// base); the old loops only checked the wrist in their final settle wait.
+bool ArmClaw::calibrationInterrupted(const char *phase) {
+  if (!platform.getEnginesPowerStatus()) {
+    LogQueue::Log("[DIAG] claw %s: aborted, engines powered off\n", phase);
+    return true;
+  }
+  if (!wrist.isPositionOK()) {
+    LogQueue::Log("[DIAG] claw %s: aborted, wrist lost position\n", phase);
+    return true;
+  }
+  return false;
+}
+
+// One IMU-closed calibration pass for X or Y, the same steps every other module's calibrateYLoop()
+// takes: a stable reading is seeded into PWM-space through homeAngle (the PWM at which the reading
+// last equalled readingAtHome) - reused, never re-read, since a fresh read can return NaN - or from
+// where the servo is already holding; recovery time scaled to the error at <= 18deg/s; then the loop
+// closes on the reading until it settles at readingAtHome, and homeAngle takes the PWM it landed on.
+bool ArmClaw::calibrateAxis(const char *phase, Servo &servo, float (ArmClaw::*reading)(),
+                            float readingAtHome, float &homeAngle) {
+  LogQueue::Log("[DIAG] claw %s: enter\n", phase);
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
 
-  setXCalibrating(true);
-
-  // Require stable readings before seeding - a transient first sample caused a jerk elsewhere.
   constexpr int seedStableSamples = 5;
   constexpr float seedStableTolerance = 5.0f; // deg
   float lastSeedSample = NAN;
   int seedStableCount = 0;
   while (seedStableCount < seedStableSamples) {
     updateStatusLed(true);
-    if (!platform.getEnginesPowerStatus()) {
-      LogQueue::Log("[DIAG] claw calibrateXLoop: aborted, engines powered off (seeding)\n");
-      setXCalibrating(false);
+    if (calibrationInterrupted(phase)) {
       return false;
     }
-    float sample = angleFromGravityX();
+    float sample = (this->*reading)();
     if (!isnan(sample) && !isnan(lastSeedSample) &&
         fabsf(sample - lastSeedSample) <= seedStableTolerance) {
       seedStableCount++;
@@ -77,128 +93,111 @@ bool ArmClaw::calibrateXLoop() {
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
 
-  float imuX = std::clamp(angleFromGravityX(), 0.0f, 270.0f);
-  LogQueue::Log("[DIAG] claw calibrateXLoop: seed physicalX=%.2f (raw gravityX=%.2f)\n", imuX, angleFromGravityX());
-  clawX.setDegreeDirect(imuX);
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  clawX.setTargetAngle(CLAW_X_HOME_POSITION, 1000, CLAW_DEAD_ZONE);
+  bool holding = servo.isHolding();
+  float seed = holding ? servo.getPhysicalAngle()
+                       : std::clamp(homeAngle + (lastSeedSample - readingAtHome), servo.safeMinDegree, servo.safeMaxDegree);
+  LogQueue::Log("[DIAG] claw %s: seed physical=%.2f (reading=%.2f, home=%.2f, holding=%d)\n",
+                phase, seed, lastSeedSample, homeAngle, holding);
+  servo.setDegreeDirect(seed);
+
+  for (int i = 0; i < 20; i++) {
+    if (calibrationInterrupted(phase)) {
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  constexpr float CLAW_MAX_RECOVERY_SPEED = 18.0f; // deg/s
+  float seedError = fabsf(readingAtHome - lastSeedSample);
+  uint16_t recoveryTimeMs = (uint16_t)std::clamp((seedError / CLAW_MAX_RECOVERY_SPEED) * 1000.0f, 1000.0f, 10000.0f);
+  servo.setTargetAngle(readingAtHome, recoveryTimeMs, CLAW_CALIBRATION_DEAD_ZONE);
   TickType_t stableSince = 0;
   uint32_t iterations = 0;
   while (true) {
     updateStatusLed(true);
-    if (!platform.getEnginesPowerStatus()) {
-      LogQueue::Log("[DIAG] claw calibrateXLoop: aborted, engines powered off\n");
-      setXCalibrating(false);
+    if (calibrationInterrupted(phase)) {
       return false;
     }
     // A frozen servo can never satisfy settled(), so this loop needs its own way out.
-    if (clawX.isDiverging()) {
-      LogQueue::Log("[DIAG] claw calibrateXLoop: aborted, clawX diverging\n");
-      setXCalibrating(false);
+    if (servo.isDiverging()) {
+      LogQueue::Log("[DIAG] claw %s: aborted, servo diverging\n", phase);
       return false;
     }
-    float gravityX = angleFromGravityX();
+    float r = (this->*reading)();
     iterations++;
     printer.interval([&]() {
-      LogQueue::Log("[DIAG] claw calibrateXLoop: iter=%lu gravityX=%.3f physicalX=%.3f\n", (unsigned long)iterations, gravityX, clawX.getPhysicalAngle());
+      LogQueue::Log("[DIAG] claw %s: iter=%lu reading=%.3f physical=%.3f\n", phase, (unsigned long)iterations, r, servo.getPhysicalAngle());
     });
-    clawX.setIMUAngle(gravityX);
-    clawX.tick();
+    servo.setIMUAngle(r);
+    servo.tick();
     updateStatuses();
-    if (settled(fabsf(CLAW_X_HOME_POSITION - gravityX) <= CALIBRATION_SETTLE_TOLERANCE, stableSince)) {
+    if (settled(fabsf(readingAtHome - r) <= CALIBRATION_SETTLE_TOLERANCE, stableSince)) {
       break;
     }
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
-  clawXHomeAngle = clawX.getPhysicalAngle();
-  setXCalibrating(false);
-  LogQueue::Log("[DIAG] claw calibrateXLoop: exit after %lu iterations, clawXHomeAngle=%.2f\n", (unsigned long)iterations, clawXHomeAngle);
+  homeAngle = servo.getPhysicalAngle();
+  LogQueue::Log("[DIAG] claw %s: exit after %lu iterations, home=%.2f\n", phase, (unsigned long)iterations, homeAngle);
   return true;
 }
 
+// Roll pass - only valid with the claw parked horizontal (see clawXReading()).
+bool ArmClaw::calibrateXLoop() {
+  setXCalibrating(true);
+  bool ok = calibrateAxis("calibrateXLoop", clawX, &ArmClaw::clawXReading, CLAW_X_PWM_AT_LEVEL, clawXHomeAngle);
+  setXCalibrating(false);
+  return ok;
+}
+
+// Target 90 = vertical in clawYReading()'s space.
 bool ArmClaw::calibrateYLoop() {
-  LogQueue::Log("[DIAG] claw calibrateYLoop: enter\n");
-  TickType_t lastWakeTime = xTaskGetTickCount();
-  Periodic printer(pdMS_TO_TICKS(500));
-
   setYCalibrating(true);
+  bool ok = calibrateAxis("calibrateYLoop", clawY, &ArmClaw::clawYReading, 90.0f, clawYHomeAngle);
+  setYCalibrating(false);
+  return ok;
+}
 
-  constexpr int seedStableSamples = 5;
-  constexpr float seedStableTolerance = 5.0f; // deg
-  float lastSeedSample = NAN;
-  int seedStableCount = 0;
-  while (seedStableCount < seedStableSamples) {
+// Open-loop move of clawY on its own servo position - parks the claw horizontal for the X pass,
+// where no Y reading is needed.
+bool ArmClaw::moveYOpenLoop(float pwm) {
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  float distance = fabsf(pwm - clawY.getPhysicalAngle());
+  uint16_t timeMs = (uint16_t)std::clamp((distance / 18.0f) * 1000.0f, 1000.0f, 10000.0f);
+  clawY.setTargetAngle(pwm, timeMs, CLAW_OPEN_LOOP_DEAD_ZONE);
+  while (!clawY.isPositioned()) {
     updateStatusLed(true);
-    if (!platform.getEnginesPowerStatus()) {
-      LogQueue::Log("[DIAG] claw calibrateYLoop: aborted, engines powered off (seeding)\n");
-      setYCalibrating(false);
-      return false;
-    }
-    float sample = angleFromGravityY();
-    if (!isnan(sample) && !isnan(lastSeedSample) &&
-        fabsf(sample - lastSeedSample) <= seedStableTolerance) {
-      seedStableCount++;
-    } else {
-      seedStableCount = isnan(sample) ? 0 : 1;
-    }
-    lastSeedSample = sample;
-    vTaskDelayUntil(&lastWakeTime, taskInterval);
-  }
-
-  float imuY = std::clamp(angleFromGravityY(), 0.0f, 180.0f);
-  LogQueue::Log("[DIAG] claw calibrateYLoop: seed physicalY=%.2f (raw gravityY=%.2f)\n", imuY, angleFromGravityY());
-  clawY.setDegreeDirect(imuY);
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  clawY.setTargetAngle(CLAW_Y_HOME_POSITION, 1000, CLAW_DEAD_ZONE);
-  TickType_t stableSince = 0;
-  uint32_t iterations = 0;
-  while (true) {
-    updateStatusLed(true);
-    if (!platform.getEnginesPowerStatus()) {
-      LogQueue::Log("[DIAG] claw calibrateYLoop: aborted, engines powered off\n");
-      setYCalibrating(false);
+    if (calibrationInterrupted("moveYOpenLoop")) {
       return false;
     }
     if (clawY.isDiverging()) {
-      LogQueue::Log("[DIAG] claw calibrateYLoop: aborted, clawY diverging\n");
-      setYCalibrating(false);
+      LogQueue::Log("[DIAG] claw moveYOpenLoop: aborted, clawY diverging\n");
       return false;
     }
-    float gravityY = angleFromGravityY();
-    iterations++;
-    printer.interval([&]() {
-      LogQueue::Log("[DIAG] claw calibrateYLoop: iter=%lu gravityY=%.3f physicalY=%.3f\n", (unsigned long)iterations, gravityY, clawY.getPhysicalAngle());
-    });
-    clawY.setIMUAngle(gravityY);
+    clawY.setIMUAngle(clawY.getPhysicalAngle());
     clawY.tick();
     updateStatuses();
-    if (settled(fabsf(CLAW_Y_HOME_POSITION - gravityY) <= CALIBRATION_SETTLE_TOLERANCE, stableSince)) {
-      break;
-    }
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
-  clawYHomeAngle = clawY.getPhysicalAngle();
-  setYCalibrating(false);
-  LogQueue::Log("[DIAG] claw calibrateYLoop: exit after %lu iterations, clawYHomeAngle=%.2f\n", (unsigned long)iterations, clawYHomeAngle);
+  vTaskDelay(pdMS_TO_TICKS(1000)); // let it settle before the X pass reads gravity
   return true;
 }
 
 Vector3 ArmClaw::trackTick() {
   Vector3 imuAngles = getIMUAngles();
   Vector3 physicalAngles = getPhysicalAngles(imuAngles);
-  if (useIMUMode.load() == USE_IMU_NOT_USE) {
-    clawX.setIMUAngle(clawX.getPhysicalAngle());
-    clawY.setIMUAngle(clawY.getPhysicalAngle());
-  } else {
-    clawX.setIMUAngle(physicalAngles.x);
-    clawY.setIMUAngle(physicalAngles.y);
+  // X, Y and the gripper all track open-loop on their own servo position - the IMU only calibrates.
+  // Its frame turns with clawX, so once the host moves X off home a Y reading built from it is
+  // wrong, and closing a loop on a reading another axis can corrupt is what tilted the wrist chasing
+  // a fake pitch (2026-10-31). The claw is light and its servos hold position precisely.
+  // The gripper isn't calibrated, so its first commanded move (fresh boot or after a release) starts
+  // from mid-travel, exactly like manual mode's.
+  if (!isnan(clawGripper.getTargetAngle()) && !clawGripper.isHolding()) {
+    clawGripper.setDegreeDirect(CLAW_GRIPPER_HOME_POSITION);
   }
-  clawX.tick();
-  clawY.tick();
-  // Gripper isn't IMU-tracked (open/close mechanism, not an orientation axis) - self-referential
-  // so setTargetAngle() commands still ramp via tick().
-  clawGripper.setIMUAngle(clawGripper.getPhysicalAngle());
-  clawGripper.tick();
+  for (Servo *servo : {&clawX, &clawY, &clawGripper}) {
+    servo->setIMUAngle(servo->getPhysicalAngle());
+    servo->tick();
+  }
   updateStatuses();
   return physicalAngles;
 }
@@ -207,54 +206,20 @@ bool ArmClaw::calibrateLoop() {
   LogQueue::Log("[DIAG] claw calibrateLoop: enter\n");
   setArmCalibrated(false);
   updateStatuses();
-  bool ok = calibrateXLoop(); // rough pass: lift off gravity's resting position, safe for Y to move next
+  // Y -> X -> Y (the user's plan, 2026-10-31): clawX rolls the jaws about the claw's own axis, which
+  // gravity can't see while the claw points up - so Y first, then the claw parked horizontal where
+  // the roll is measurable, then Y again, since clawYReading() is only exact with X home.
+  bool ok = calibrateYLoop();
+  if (ok) ok = moveYOpenLoop(CLAW_Y_PWM_HORIZONTAL);
+  if (ok) ok = calibrateXLoop();
   if (ok) ok = calibrateYLoop();
-  if (ok) ok = calibrateXLoop(); // Y is home now, so gravityX is no longer skewed by it - refine X
 
   if (ok) {
     base.store(correctedQuat().invert());
     pitchIntegrationValid = false; // re-anchor pitchX/pitchY to 0 at the new base
-    // Retarget to the calibrated home angles (PWM-space) - feedback is PWM-space from here on.
-    clawX.setTargetAngle(clawXHomeAngle, 1000, CLAW_DEAD_ZONE);
-    clawY.setTargetAngle(clawYHomeAngle, 1000, CLAW_DEAD_ZONE);
-    LogQueue::Log("[DIAG] claw calibrateLoop: base refreshed, starting final settle wait\n");
-
-    TickType_t lastWakeTime = xTaskGetTickCount();
-    TickType_t stableSince = 0;
-    Periodic printer(pdMS_TO_TICKS(500));
-    uint32_t iterations = 0;
-    while (true) {
-      updateStatusLed(true);
-      if (clawX.isDiverging() || clawY.isDiverging()) {
-        LogQueue::Log("[DIAG] claw calibrateLoop: aborted, servo diverging during settle wait\n");
-        ok = false;
-        break;
-      }
-      if (!wrist.isPositionOK()) {
-        LogQueue::Log("[DIAG] claw calibrateLoop: aborted, wrist lost position during settle wait\n");
-        ok = false;
-        break;
-      }
-      if (!platform.getEnginesPowerStatus()) {
-        LogQueue::Log("[DIAG] claw calibrateLoop: aborted, engines powered off during settle wait\n");
-        ok = false;
-        break;
-      }
-      Vector3 physicalAngles = trackTick();
-      iterations++;
-      bool withinTolerance =
-          fabsf(clawXHomeAngle - physicalAngles.x) <= CALIBRATION_SETTLE_TOLERANCE &&
-          fabsf(clawYHomeAngle - physicalAngles.y) <= CALIBRATION_SETTLE_TOLERANCE;
-      printer.interval([&]() {
-        LogQueue::Log("[DIAG] claw calibrateLoop: settle iter=%lu physicalX=%.2f physicalY=%.2f withinTolerance=%d\n",
-               (unsigned long)iterations, physicalAngles.x, physicalAngles.y, withinTolerance);
-      });
-      if (settled(withinTolerance, stableSince)) {
-        break;
-      }
-      vTaskDelayUntil(&lastWakeTime, taskInterval);
-    }
-    LogQueue::Log("[DIAG] claw calibrateLoop: exit after %lu settle iterations\n", (unsigned long)iterations);
+    clawX.setTargetAngle(clawXHomeAngle, 1000, CLAW_OPEN_LOOP_DEAD_ZONE);
+    clawY.setTargetAngle(clawYHomeAngle, 1000, CLAW_OPEN_LOOP_DEAD_ZONE);
+    LogQueue::Log("[DIAG] claw calibrateLoop: done, clawXHomeAngle=%.2f clawYHomeAngle=%.2f\n", clawXHomeAngle, clawYHomeAngle);
   }
 
   setArmCalibrated(ok);
@@ -275,8 +240,8 @@ int ArmClaw::updateStatuses() {
 
 void ArmClaw::engineLoop() {
   LogQueue::Log("[DIAG] claw engineLoop: enter\n");
-  clawX.setTargetAngle(clawXHomeAngle, 1000, CLAW_DEAD_ZONE);
-  clawY.setTargetAngle(clawYHomeAngle, 1000, CLAW_DEAD_ZONE);
+  clawX.setTargetAngle(clawXHomeAngle, 1000, CLAW_OPEN_LOOP_DEAD_ZONE);
+  clawY.setTargetAngle(clawYHomeAngle, 1000, CLAW_OPEN_LOOP_DEAD_ZONE);
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
   while (true) {
@@ -306,7 +271,7 @@ void ArmClaw::engineLoop() {
 // isolation, keep every other module false so it stays permanently idle (never calibrates/moves)
 // regardless of its own IMU/parent status. Remove this whole mechanism once all four modules have
 // been confirmed stable, one at a time, and can safely calibrate together again.
-constexpr bool TEMP_SEQUENTIAL_CALIBRATION_ENABLED = false;
+constexpr bool TEMP_SEQUENTIAL_CALIBRATION_ENABLED = true;
 
 void ArmClaw::engineTask(void *instance) {
   auto *claw = static_cast<ArmClaw *>(instance);
@@ -338,19 +303,25 @@ void ArmClaw::engineTask(void *instance) {
         Servo &servo;
         float start;
       };
-      // First pulse goes to `start` (nothing knows where an unpowered axis is): Y rests limp on its
-      // 180 stop, so 178 keeps that first pulse a no-move instead of a ~90deg jump to home.
-      ManualAxis axes[] = {{claw->clawX, CLAW_X_HOME_POSITION},
-                           {claw->clawY, CLAW_Y_MANUAL_START},
+      // First pulse goes to `start`: X and the gripper to their home (nothing knows where an
+      // unpowered open-loop axis is), Y to where its gravity reading says it already is - the claw is
+      // light enough to stay at any angle unpowered (user, 2026-10-31), so no fixed start is safe; an
+      // earlier fixed 178 jumped ~100deg twice. NAN (no reading) means no pulse yet.
+      float yReading = claw->clawYReading();
+      float yStart = isnan(yReading) ? NAN
+                                     : std::clamp(claw->clawYHomeAngle + (yReading - 90.0f),
+                                                  claw->clawY.safeMinDegree, claw->clawY.safeMaxDegree);
+      ManualAxis axes[] = {{claw->clawX, CLAW_X_PWM_AT_LEVEL},
+                           {claw->clawY, yStart},
                            {claw->clawGripper, CLAW_GRIPPER_HOME_POSITION}};
       auto moving = [](Servo &s) {
-        return !isnan(s.getTargetAngle()) && !s.isPositioned() && !s.isDiverging();
+        return s.isHolding() && !isnan(s.getTargetAngle()) && !s.isPositioned() && !s.isDiverging();
       };
       TickType_t manualWakeTime = xTaskGetTickCount();
       while (claw->platform.getEnginesPowerStatus()) {
         bool anyMoving = false;
         for (auto &axis : axes) {
-          if (!isnan(axis.servo.getTargetAngle()) && !axis.servo.isHolding()) {
+          if (!isnan(axis.servo.getTargetAngle()) && !axis.servo.isHolding() && !isnan(axis.start)) {
             axis.servo.setDegreeDirect(axis.start);
           }
           if (moving(axis.servo)) {
@@ -435,7 +406,7 @@ ArmClaw::ArmClaw(const uint8_t detectorsSdaPin, const uint8_t detectorsSclPin,
       // (confirmed live: gravity-measured rotation was consistently ~1.44-1.5x the commanded
       // degrees for the same PWM change).
       clawX(engineXPin, Range(0, 270), CLAW_X_HOME_POSITION, 100),
-      clawY(engineYPin, Range(0, 180), CLAW_Y_HOME_POSITION, 100),
+      clawY(engineYPin, Range(0, 180), CLAW_Y_HOME_POSITION, 100, 0.0005f, 0.0025f, Range(CLAW_Y_SAFE_MIN, 180)),
       clawGripper(engineGripperPin, Range(0, 180), CLAW_GRIPPER_HOME_POSITION,
                   100, 0.0005f, 0.0025f, Range(CLAW_GRIPPER_SAFE_MIN, CLAW_GRIPPER_SAFE_MAX)),
       imu(this, memsRxPin, memsTxPin, memsRstPin),
@@ -501,8 +472,8 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     float angleX = (angleXS == PARAMETER_IS_NAN) ? NAN : angleXS / 10.0f;
     float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 10.0f;
     float angleG = (angleGS == PARAMETER_IS_NAN) ? NAN : angleGS / 10.0f;
-    // Manual mode runs X/Y open-loop, where the dead zone is pure stopping precision.
-    float axisDeadZone = TEMP_SEQUENTIAL_CALIBRATION_ENABLED ? CLAW_DEAD_ZONE : CLAW_OPEN_LOOP_DEAD_ZONE;
+    // X/Y track open-loop (manual mode and engineLoop alike), so the dead zone is stopping precision.
+    float axisDeadZone = CLAW_OPEN_LOOP_DEAD_ZONE;
 
     if (!isnan(angleX)) {
       clawX.setTargetAngle(angleX, timeMS, axisDeadZone);
@@ -630,4 +601,44 @@ float ArmClaw::angleFromGravityY() {
   });
 
   return raw;
+}
+
+// clawY in "gravity-space" - 90 = vertical, 180 = horizontal on the PWM-178 side, rising with PWM like
+// every other joint's reading. Not atan2(-g.x, g.z) like angleFromGravityY(): in this IMU's frame
+// gravity lies mostly along body y and clawY turns about ~(-0.074, 0.428, -0.901), so that formula
+// roughly doubled the angle (live 2026-10-31: 10deg of claw-y read as 19.6). Measured instead as the
+// gravity direction's angle about that axis, fitted from live sweeps with clawX home (1:1 with the
+// command there). The axis turns with clawX (the IMU sits on the jaws), so it's only exact with clawX
+// home - calibrateLoop() does Y again after X for that reason.
+constexpr float CLAW_Y_REF[3] = {0.0322f, 0.9038f, 0.4268f};   // gravity at PWM 178 (horizontal), perpendicular to the axis
+constexpr float CLAW_Y_PERP[3] = {0.9967f, 0.0026f, -0.0806f}; // axis x CLAW_Y_REF - gravity at vertical lies here
+
+float ArmClaw::clawYReading() {
+  Quaternion q = correctedQuat();
+  if (!q.isValid()) {
+    return NAN;
+  }
+  Vector3 g = q.getGravityVector();
+  float alongRef = g.x * CLAW_Y_REF[0] + g.y * CLAW_Y_REF[1] + g.z * CLAW_Y_REF[2];
+  float alongPerp = g.x * CLAW_Y_PERP[0] + g.y * CLAW_Y_PERP[1] + g.z * CLAW_Y_PERP[2];
+  float fromHorizontal = atan2f(alongPerp, alongRef) * RAD_TO_DEG; // 0 horizontal, 90 vertical
+  float res = 180.0f - fromHorizontal;
+
+  static Periodic printer(pdMS_TO_TICKS(300));
+  printer.interval([&]() {
+    LogQueue::Log("[DIAG] claw clawYReading: res=%.2f physical=%.2f\n", res, clawY.getPhysicalAngle());
+  });
+  return res;
+}
+
+// clawX in PWM-comparable form: angleFromGravityX()'s atan2(g.y, g.z) is exactly the roll about
+// clawX's axis (body -x, fitted live, 1:1 with the command), but only while the claw lies
+// horizontal - pointing up, the roll doesn't move gravity at all. Shifted so the jaws-level roll
+// (CLAW_X_ROLL_AT_LEVEL) reads CLAW_X_PWM_AT_LEVEL.
+float ArmClaw::clawXReading() {
+  float roll = angleFromGravityX();
+  if (isnan(roll)) {
+    return NAN;
+  }
+  return roll + (CLAW_X_PWM_AT_LEVEL - CLAW_X_ROLL_AT_LEVEL);
 }

@@ -123,7 +123,11 @@ void LocalWitmotion::SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum) {
           quat.k = quat.k / norm;
         }        
         instance->quaternion.store(quat);
-        if (instance->armPart->updateQuaternion(instance) != 0) {
+        // Not calibrated yet (no base) is the normal state until calibration finishes, not a send
+        // error - logging it put one line per IMU sample into the claw's log (40+MB in a session),
+        // burying everything else.
+        int quatResult = instance->armPart->updateQuaternion(instance);
+        if (quatResult != 0 && quatResult != ERROR_PART_IS_NOT_CALIBRATED) {
           LogQueue::Log("quat sending error\n");
         }        
         break;
