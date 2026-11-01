@@ -58,8 +58,9 @@ void Bus::initTask(void *instance) {
   }
 }
 
-// can2040 counters per interval, to tell whose frames get corrupted on the bus: a node whose own frames
-// fail retries them (tx attempts well above tx sent), the nodes that hear them count parse errors
+// can2040 counters per interval. Parse errors are the corruption signal: they rise on every node that
+// hears a damaged frame. tx attempts above tx sent is normal on a busy bus - can2040 re-arms (and counts)
+// a pending transmit after each frame it acks while waiting, as well as after a lost arbitration.
 void Bus::logStatistics() {
   can2040_stats stats;
   can2040_get_statistics(&cbus, &stats);
