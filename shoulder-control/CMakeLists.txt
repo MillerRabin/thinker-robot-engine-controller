@@ -63,6 +63,7 @@ pico_generate_pio_header(${APP_SHOULDER_NAME} ${APP_COMMON_DIRECTORY}/statusLed/
 # Pico settings
 # ==============================
 
+pico_set_linker_script(${APP_SHOULDER_NAME} ${CAN2040_RAM_LINKER_SCRIPT})
 pico_enable_stdio_usb(${APP_SHOULDER_NAME} 1)
 pico_enable_stdio_uart(${APP_SHOULDER_NAME} 0)
 

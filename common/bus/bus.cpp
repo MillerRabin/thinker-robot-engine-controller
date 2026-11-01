@@ -15,15 +15,21 @@ void Bus::busReceiveTask(void *pInstance) {
       continue;
     }
     instance->armPart->setBusReceivingTaskStatus(true);
-    while (instance->receiveBuffer.pop(&frame)) {            
+    bool received = false;
+    while (instance->receiveBuffer.pop(&frame)) {
+      received = true;
       instance->busCallback(instance->armPart, frame);
-    }    
+    }
+    // Stamped here rather than in can2040_cb: the clock read and 64-bit divide live in flash
+    if (received)
+      instance->lastRxTime.store(to_ms_since_boot(get_absolute_time()), std::memory_order_relaxed);
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(5));
   }  
 }
 
-void Bus::can2040_cb(struct can2040 *cd, uint32_t notify, CanFrame *msg) {  
-  auto *bus = static_cast<Bus *>(Bus::instance);  
+// Runs inside the can2040 irq, so it lives in RAM with can2040 itself (see CAN2040_RAM_LINKER_SCRIPT)
+void __not_in_flash("can2040") Bus::can2040_cb(struct can2040 *cd, uint32_t notify, CanFrame *msg) {
+  auto *bus = static_cast<Bus *>(Bus::instance);
   if (notify == CAN2040_NOTIFY_ERROR) {
     return;
   }
@@ -32,8 +38,7 @@ void Bus::can2040_cb(struct can2040 *cd, uint32_t notify, CanFrame *msg) {
     return;
   }
 
-  bus->lastRxTime.store(to_ms_since_boot(get_absolute_time()), std::memory_order_relaxed);
-  bus->receiveBuffer.push(*msg);  
+  bus->receiveBuffer.push(*msg);
 }
 
 void Bus::initTask(void *instance) {  
@@ -165,6 +170,6 @@ bool Bus::isBusAlive() {
   return true;
 }
 
-void Bus::PIOx_IRQHandler() {
+void __not_in_flash("can2040") Bus::PIOx_IRQHandler() {
   can2040_pio_irq_handler(&Bus::cbus);
 }

@@ -63,6 +63,7 @@ pico_generate_pio_header(${APP_CLAW_NAME} ${APP_COMMON_DIRECTORY}/statusLed/ws28
 # Pico settings
 # ==============================
 
+pico_set_linker_script(${APP_CLAW_NAME} ${CAN2040_RAM_LINKER_SCRIPT})
 pico_enable_stdio_usb(${APP_CLAW_NAME} 1)
 pico_enable_stdio_uart(${APP_CLAW_NAME} 0)
 pico_add_extra_outputs(${APP_CLAW_NAME})
