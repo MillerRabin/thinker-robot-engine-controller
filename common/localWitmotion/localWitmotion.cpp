@@ -4,7 +4,7 @@ uint32_t LocalWitmotion::c_uiBaud[10] = {0, 4800, 9600, 19200, 38400, 57600, 115
 LocalWitmotion *LocalWitmotion::instance = NULL;
 volatile bool LocalWitmotion::dataAvailable = false;
 
-volatile uint8_t LocalWitmotion::uartRxBuffer[512];
+volatile uint8_t LocalWitmotion::uartRxBuffer[UART_RX_BUFFER_SIZE];
 volatile uint16_t LocalWitmotion::uartHead = 0;
 volatile uint16_t LocalWitmotion::uartTail = 0;
 
@@ -23,11 +23,36 @@ void LocalWitmotion::SensorUartSend(uint8_t *p_data, uint32_t uiSize) {
   uart_write_blocking(MEMS_UART_ID, p_data, uiSize);	  
 }
 
+// Drains the RX FIFO into uartRxBuffer and wakes readDetectorTask. Runs on IMU_CORE (enabled from that
+// task), below can2040's irq priority.
+void LocalWitmotion::uartIrqHandler() {
+  while (uart_is_readable(MEMS_UART_ID)) {
+    uint8_t c = uart_getc(MEMS_UART_ID);
+    uint16_t next = (uartHead + 1) % UART_RX_BUFFER_SIZE;
+    if (next != uartTail) {
+      uartRxBuffer[uartHead] = c;
+      uartHead = next;
+    }
+  }
+  BaseType_t woken = pdFALSE;
+  vTaskNotifyGiveFromISR(readTaskHandle, &woken);
+  portYIELD_FROM_ISR(woken);
+}
+
+// Sleeps until the uart irq hands it bytes. It used to spin in uart_read_blocking(), keeping its core -
+// which also runs can2040 - busy with a context switch every tick, and can2040 then saw rx stalls (its
+// irq held off for 80+ bit times).
 void LocalWitmotion::readDetectorTask(void* instance) {
-  unsigned char ucTemp;    
+  irq_set_exclusive_handler(UART_IRQ_NUM(MEMS_UART_ID), uartIrqHandler);
+  irq_set_enabled(UART_IRQ_NUM(MEMS_UART_ID), true);
+  uart_set_irq_enables(MEMS_UART_ID, true, false);
   while (true) {    
-    uart_read_blocking(MEMS_UART_ID, &ucTemp, 1);    
-    WitSerialDataIn(ucTemp);
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    while (uartTail != uartHead) {
+      uint8_t c = uartRxBuffer[uartTail];
+      uartTail = (uartTail + 1) % UART_RX_BUFFER_SIZE;
+      WitSerialDataIn(c);
+    }
   }    
 }
 

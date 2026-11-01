@@ -30,10 +30,12 @@ private:
   static void gpio_callback(uint gpio, uint32_t events);
   static void init(void* instance);
   static void readDetectorTask(void* instance);
+  static void uartIrqHandler();
   static uint32_t AutoScanSensor(void);
   static volatile bool dataAvailable;
   static uint32_t c_uiBaud[10];
-  static volatile uint8_t uartRxBuffer[512];
+  static constexpr uint16_t UART_RX_BUFFER_SIZE = 512;
+  static volatile uint8_t uartRxBuffer[UART_RX_BUFFER_SIZE];
   static volatile uint16_t uartHead;
   static volatile uint16_t uartTail;
   static void Usart1Init(uint32_t baud_rate);
