@@ -69,14 +69,14 @@
 #define MEMS_SDA_PIN 0
 #define MEMS_SCL_PIN 1
 #define MEMS_INT_PIN 10
-#define MEMS_RST_PIN 2
+#define WRIST_MEMS_RST_PIN 2
 #define MEMS_RX_PIN 0
 #define MEMS_TX_PIN 1
-#define SHOULDER_MEMS_RST_PIN 9
-#define SHOULDER_MEMS_SCK_PIN 2
-#define SHOULDER_MEMS_MOSI_PIN 3
-#define SHOULDER_MEMS_MISO_PIN 0
-#define SHOULDER_MEMS_CS_PIN 1
+#define MEMS_RST_PIN 9
+#define MEMS_SCK_PIN 2
+#define MEMS_MOSI_PIN 3
+#define MEMS_MISO_PIN 0
+#define MEMS_CS_PIN 1
 
 #define WITMOTION_XSHUT_PIN 6
 #define WITMOTION_INT_PIN 7
@@ -91,13 +91,13 @@
 
 #define SHOULDER_Z_PIN 11
 #define SHOULDER_Y_PIN 7
-#define ELBOW_Y_PIN 3
+#define ELBOW_Y_PIN 7
 #define WRIST_Z_PIN 9
 #define WRIST_Y_PIN 3
 #define CLAW_X_PIN 9
 #define CLAW_Y_PIN 10
 #define CLAW_GRIPPER_PIN 11
-#define CAN_RX_PIN 4
+#define CAN_RX_PIN 4  
 #define CAN_TX_PIN 5
 
 // Onboard WS2812 on the Waveshare RP2040-Zero/Tiny boards.

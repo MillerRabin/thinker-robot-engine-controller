@@ -298,27 +298,17 @@ void ArmElbow::engineLoop() {
   }
 }
 
-ArmElbow::ArmElbow(const uint memsSdaPin, const uint memsSclPin,
+ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
+                   const uint memsMOSIPin, const uint memsCSPin,
                    const uint memsIntPin, const uint memsRstPin,
                    const uint engineYPin, const uint canRxPin,
-                   // Safe range's floor is 8deg, not 0 - physical low limit is ~5deg (motor ran hot
-                   // sitting at commanded 0, straining against the real mechanical stop), 8deg keeps
-                   // clear margin. Range(0,270) itself must stay the true calibrated span (it sets
-                   // the degree-to-PWM scale); the safe range clamps commands without touching that.
-                   const uint canTxPin) : ArmPart(canRxPin, canTxPin),
-                                          elbowY(engineYPin, Range(0, 270), ELBOW_Y_HOME_POSITION, 100, 0.0005f, 0.0025f, Range(8, 270)),
-                                          imu(this, memsSdaPin, memsSclPin, memsIntPin, memsRstPin) {
-  // Mounting correction: maps raw IMU axes onto ArmShoulder's Y/Z convention.
+                   const uint canTxPin) : 
+      ArmPart(canRxPin, canTxPin),
+      elbowY(engineYPin, Range(0, 270), ELBOW_Y_HOME_POSITION, 100, 0.0005f,
+             0.0025f, Range(8, 270)),
+      imu(this, memsSCKPin, memsMISOPin, memsMOSIPin, memsCSPin, memsRstPin,
+          memsIntPin) {
   Quaternion q_corr = {-0.314134f, -0.584772f, -0.348743f, 0.661619f};
-  // Tried (2026-08-24) composing a small residual correction directly into q_corr instead of as a
-  // formula-level offset, on the theory that the residual is a real mounting-alignment error and
-  // belongs here. Reverted: live-tested, and composing an extra rotation on top of q_corr's own
-  // already-large rotation did not behave as a simple, predictable local-axis adjustment (measured
-  // result went to roughly -94deg instead of the intended ~0deg) - q_corr's own rotation is large
-  // enough that "local Y after q_corr" isn't intuitive to reason about by hand. Not safe to keep
-  // guessing signs/axes on live hardware for a mounting-correction quaternion used everywhere -
-  // back to the plain formula-level offset (see ELBOW_GRAVITY_Y_PWM_OFFSET below), which is simple,
-  // already verified working, and only affects this one function.
   imu.setRotate(q_corr);
 }
 

@@ -50,8 +50,11 @@ private:
   float elbowYHomeAngle = ELBOW_Y_PWM_AT_VERTICAL;
   public:
     Servo elbowY;
-    ArmElbow(uint memsSdaPin, uint memsSclPin, uint memsIntPin, uint memsRstPin,
-             uint engineYPin, uint canRxPin, uint canTxPin);
+    ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
+             const uint memsMOSIPin, const uint memsCSPin,
+             const uint memsIntPin, const uint memsRstPin,
+             const uint engineYPin, const uint canRxPin, 
+             const uint canTxPin);
     uint32_t getQuaternionMessageId() { return CAN_ELBOW_QUATERNION; };
     uint32_t getAccelerometerMessageId() { return CAN_ELBOW_ACCELEROMETER; };
     uint32_t getGyroscopeMessageId() { return CAN_ELBOW_GYROSCOPE; };
