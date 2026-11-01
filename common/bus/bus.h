@@ -69,6 +69,11 @@ class Bus {
     TaskHandle_t initTaskHandle = NULL;
     SemaphoreHandle_t sendMutex = NULL;
     std::atomic<bool> reinitInProgress{false};
+    // PIO rx FIFO stalls reported to can2040_cb (irq late by ~80+ bit times); written only by the irq
+    volatile uint32_t rxStalls = 0;
+    can2040_stats lastStats = {};
+    uint32_t lastRxStalls = 0;
+    void logStatistics();
     void requestReinit();
   public:
     bool isBusAlive();

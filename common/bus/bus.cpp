@@ -27,10 +27,11 @@ void Bus::busReceiveTask(void *pInstance) {
   }  
 }
 
-// Runs inside the can2040 irq, so it lives in RAM with can2040 itself (see CAN2040_RAM_LINKER_SCRIPT)
+// Runs inside the can2040 irq, so it lives in RAM with can2040 itself (see RAM_CODE_LINKER_SCRIPT)
 void __not_in_flash("can2040") Bus::can2040_cb(struct can2040 *cd, uint32_t notify, CanFrame *msg) {
   auto *bus = static_cast<Bus *>(Bus::instance);
   if (notify == CAN2040_NOTIFY_ERROR) {
+    bus->rxStalls = bus->rxStalls + 1;
     return;
   }
 
@@ -43,13 +44,37 @@ void __not_in_flash("can2040") Bus::can2040_cb(struct can2040 *cd, uint32_t noti
 
 void Bus::initTask(void *instance) {  
   Bus *bus = static_cast<Bus *>(instance);
+  uint32_t seconds = 0;
+  // Start can2040 right away: isBusAlive() only reports a dead bus 3 s after boot (lastRxTime starts at 0)
+  bus->init();
   while (true) {    
     if (!bus->isBusAlive()) {
       LogQueue::Log("Bus is not alive\n");
       bus->init();  
     } else {}
+    if (++seconds % CAN_STATS_LOG_INTERVAL == 0)
+      bus->logStatistics();
     vTaskDelay(pdMS_TO_TICKS(1000));      
   }
+}
+
+// can2040 counters per interval, to tell whose frames get corrupted on the bus: a node whose own frames
+// fail retries them (tx attempts well above tx sent), the nodes that hear them count parse errors
+void Bus::logStatistics() {
+  can2040_stats stats;
+  can2040_get_statistics(&cbus, &stats);
+  uint32_t stalls = rxStalls;
+  if (stats.tx_attempt < lastStats.tx_attempt)
+    lastStats = {};
+  LogQueue::Log("CAN stats %us: rx %lu, tx %lu, tx attempts %lu, parse errors %lu, rx stalls %lu\n",
+                (unsigned)CAN_STATS_LOG_INTERVAL,
+                (unsigned long)(stats.rx_total - lastStats.rx_total),
+                (unsigned long)(stats.tx_total - lastStats.tx_total),
+                (unsigned long)(stats.tx_attempt - lastStats.tx_attempt),
+                (unsigned long)(stats.parse_error - lastStats.parse_error),
+                (unsigned long)(stalls - lastRxStalls));
+  lastStats = stats;
+  lastRxStalls = stalls;
 }
 
 Bus::Bus(const uint rxPin, const uint txPin, ArmPart *armPart, CanCallback callback) : 
@@ -59,6 +84,12 @@ Bus::Bus(const uint rxPin, const uint txPin, ArmPart *armPart, CanCallback callb
     busCallback(callback) {
 
   Bus::instance = this;
+  // Hold TX recessive (high) until can2040_start() hands the pin to the PIO. The pad's reset default is
+  // a pull-down, which drags the transceiver's D input toward dominant while nothing drives it.
+  gpio_init(txPin);
+  gpio_pull_up(txPin);
+  gpio_put(txPin, 1);
+  gpio_set_dir(txPin, GPIO_OUT);
   can2040_setup(&cbus, pio_num);
   can2040_callback_config(&cbus, Bus::can2040_cb);
   irq_set_exclusive_handler(PIO0_IRQ_0, Bus::PIOx_IRQHandler);
