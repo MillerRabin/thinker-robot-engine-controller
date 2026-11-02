@@ -189,6 +189,8 @@ bool ArmElbow::calibrateYLoop() {
   }
   if (ok) {
     elbowYHomeAngle = elbowY.getPhysicalAngle();
+    // Calibrated vertical is where gravity stops loading the joint - see Servo::zoneOf().
+    elbowY.setGravityNeutral(elbowYHomeAngle);
     base = imu.quaternion.load().invert();
     pitchIntegrationValid = false; // re-anchor pitchY to 0 at the new base
   } else {

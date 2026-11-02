@@ -152,6 +152,8 @@ bool ArmShoulder::calibrateYLoop() {
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
   shoulderYHomeAngle = shoulderY.getPhysicalAngle();
+  // Calibrated vertical is where gravity stops loading the joint - see Servo::zoneOf().
+  shoulderY.setGravityNeutral(shoulderYHomeAngle);
   setYCalibrating(false);
   LogQueue::Log("[DIAG] calibrateYLoop: exit after %lu iterations, shoulderYHomeAngle=%.2f\n", (unsigned long)iterations, shoulderYHomeAngle);
   return true;
@@ -392,6 +394,8 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     // ~7deg of backlash at vertical (2026-11-02): with the default 3deg budget the command stopped
     // 1.1deg short of crossing it, and calibrateYLoop never settled (looped >50 s until engines off).
     shoulderY.setFineCorrectionBudget(8.0f);
+    // Learn the resting offset only once the joint has stopped - see Servo::setPlanSettle().
+    shoulderY.setPlanSettle(3000);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
     shoulderY.enableTrace();
 }

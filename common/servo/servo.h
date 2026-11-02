@@ -169,6 +169,17 @@ private:
   static constexpr int64_t settleCheckUs = 100000;
   static constexpr float settleMotionDeg = 0.3f; // per settleCheckUs, i.e. 3deg/s
   bool settleTick(absolute_time_t now);
+  // Backlash/sag compensation for planned moves (see planMove()): where a loaded joint settles
+  // relative to its command depends on which way gravity loads it, so the link-minus-command
+  // offset it last settled at is remembered per zone and reused as the next plan's end offset.
+  // Zones: 0 below gravityNeutral, 1/2 within neutralBandDeg of it approached from below/above
+  // (unloaded, the side depends on momentum), 3 above. NAN = nothing learned yet.
+  float gravityNeutral = NAN;
+  static constexpr float neutralBandDeg = 3.0f;
+  static constexpr float learnToleranceDeg = 0.5f;
+  float zoneOffset[4] = {NAN, NAN, NAN, NAN};
+  int8_t planZone = -1; // zone the running planned target learns into, -1 = none or done
+  int8_t zoneOf(float target, float from) const;
 
   // Diagnostic trace, opt-in (see enableTrace()): every tick() for traceCapacity ticks after a
   // target change of at least traceMinMoveDeg, then dumped to the log a few samples per tick so the
@@ -224,6 +235,9 @@ public:
   // For a joint slower than its plans: after a plan, wait (up to maxMS) for the joint to stop
   // before the IMU trim starts, so the trim doesn't push the command on while the joint catches up.
   void setPlanSettle(uint32_t maxMS) { planSettleMaxUs = (int64_t)maxMS * 1000; }
+  // IMU-space angle where gravity doesn't load the joint (vertical) - enables the per-zone
+  // backlash compensation of planMove(). Set after each calibration.
+  void setGravityNeutral(float angle) { gravityNeutral = angle; }
   float getTargetAngle() const { return targetAngle; }
 
   void setIMUAngle(float value);
@@ -259,6 +273,7 @@ public:
   void reset() {
     planActive = false;
     planSettling = false;
+    planZone = -1;
     targetAngle = NAN;
     fineAnchorPhysical = NAN;
     coarseSince = 0;

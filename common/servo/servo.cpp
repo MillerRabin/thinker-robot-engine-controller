@@ -127,6 +127,7 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
   // A plain target (calibration, home, recovery) ends any planned move - planMove() re-arms it.
   planActive = false;
   planSettling = false;
+  planZone = -1;
   targetAngle = angle;
   setDeadZone(newDeadZone);
   setTimeMS(newTimeMS);
@@ -145,11 +146,18 @@ bool Servo::planMove(const float angle, uint16_t newTimeMS, float newDeadZone) {
   // the running plan's own end-vs-target offset, since the IMU lags the command while moving.
   // Read before setTargetAngle(), which clears planActive/planSettling.
   // Settling counts as mid-plan too: the joint is still on its way to planEnd.
-  const float offset = (planActive || planSettling) ? planEnd - targetAngle : physicalAngle - imuAngle;
+  float offset = (planActive || planSettling) ? planEnd - targetAngle : physicalAngle - imuAngle;
+  // A learned offset for the zone the target is in wins - the current one belongs to where the
+  // joint is now, and loaded the other way it settles on the other side of its backlash.
+  const int8_t zone = zoneOf(angle, imuAngle);
+  if (zone >= 0 && !isnan(zoneOffset[zone])) {
+    offset = -zoneOffset[zone];
+  }
   planActive = false;
   if (!setTargetAngle(angle, newTimeMS, newDeadZone)) {
     return false;
   }
+  planZone = zone;
   planStart = physicalAngle;
   planEnd = std::clamp(angle + offset, safeMinDegree, safeMaxDegree);
   // A minimum-jerk curve peaks at 1.875x its average speed - stretch it to stay under maxAngularSpeed.
@@ -223,6 +231,19 @@ bool Servo::settleTick(absolute_time_t now) {
   return true;
 }
 
+int8_t Servo::zoneOf(float target, float from) const {
+  if (isnan(gravityNeutral) || isnan(target) || isnan(from)) {
+    return -1;
+  }
+  if (target < gravityNeutral - neutralBandDeg) {
+    return 0;
+  }
+  if (target > gravityNeutral + neutralBandDeg) {
+    return 3;
+  }
+  return (target >= from) ? 1 : 2;
+}
+
 void Servo::resetDivergence() {
   divergenceCheckError = NAN;
   divergingIntervals = 0;
@@ -258,6 +279,14 @@ void Servo::tick() {
   const float error = targetAngle - imuAngle;
   const float absError = fabsf(error);
   // Hold still within the dead zone, otherwise sensor noise keeps producing a nonzero error forever.
+  // Only reached once a plan and its settle wait are over, so the joint has stopped - a swing
+  // passing through the target can't be learned as its resting offset.
+  if (planZone >= 0 && absError <= std::max(deadZone, learnToleranceDeg)) {
+    zoneOffset[planZone] = imuAngle - physicalAngle;
+    LogQueue::Log("Servo pin=%u learned zone %d offset %.2f (target %.2f)\n", pin, planZone,
+                  zoneOffset[planZone], targetAngle);
+    planZone = -1;
+  }
   if (absError <= deadZone) {
     resetDivergence();
     return;
