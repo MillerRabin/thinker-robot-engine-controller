@@ -413,11 +413,12 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   Quaternion q_corr = {0.033409f, -0.063652f, -0.418612f, -0.905316f};
   imu.setRotate(q_corr);
   // Hold the wrist's own angle by its own IMU while the elbow moves (2026-11-03): with the defaults a
-  // 15deg elbow move tilted it 17.7deg (anchor held for 1 s) and it took 4-6 s to come back. 3/s puts
-  // the loop near 0.5 Hz, well under the elbow's 1.3-2 Hz ringing; 40deg/s covers the elbow's
-  // planned-move peak of ~28deg/s.
+  // 15deg elbow move tilted it 17.7deg (anchor held for 1 s) and it took 4-6 s to come back. 3/s
+  // (loop near 0.5 Hz) answered the elbow's ~1.1 Hz ringing hard enough to feed it: the elbow rang
+  // +-3.5deg for 4-5 s after a move, the wrist +-6deg in antiphase, vs +-1deg with 0.5/s. 1.5/s
+  // halves that; 40deg/s still covers the elbow's planned-move peak of ~28deg/s.
   wristY.setFineReleaseError(4.0f);
-  wristY.setHoldResponse(3.0f, 40.0f);
+  wristY.setHoldResponse(1.5f, 40.0f);
   wristY.enableTrace();
   if (taskHandle == NULL) {
     if (xTaskCreateAffinitySet(ArmWrist::engineTask,
