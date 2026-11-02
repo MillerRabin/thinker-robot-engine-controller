@@ -73,6 +73,8 @@ class Bus {
     std::atomic<bool> reinitInProgress{false};
     // PIO rx FIFO stalls reported to can2040_cb (irq late by ~80+ bit times); written only by the irq
     volatile uint32_t rxStalls = 0;
+    // A frame handed to can2040 that hasn't been reported sent yet (cleared by can2040_cb)
+    volatile bool txInFlight = false;
     can2040_stats lastStats = {};
     uint32_t lastRxStalls = 0;
     void logStatistics();

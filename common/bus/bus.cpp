@@ -35,6 +35,11 @@ void __not_in_flash("can2040") Bus::can2040_cb(struct can2040 *cd, uint32_t noti
     return;
   }
 
+  if (notify == CAN2040_NOTIFY_TX) {
+    bus->txInFlight = false;
+    return;
+  }
+
   if (notify != CAN2040_NOTIFY_RX) {
     return;
   }
@@ -145,37 +150,53 @@ can_status_t Bus::init() {
   return CAN_SUCCESS;
 }
 
+// Hands can2040 one frame at a time, at most one per tick. Queueing several let can2040 send them back
+// to back, each SOF right after this node's own previous frame, and at a 5 ms period those follow-up
+// frames were misread by every can2040 node, this one included.
 void Bus::busSendTask(void *pInstance) {  
   auto *instance = static_cast<Bus *>(pInstance);
-  CanFrame localFrames[CAN_TX_BUFFER_SIZE];
-  TickType_t lastWakeTime = xTaskGetTickCount();
+  CanFrame pending[CAN_TX_BUFFER_SIZE] = {};
+  uint32_t next = 0;
+  TickType_t lastSnapshot = xTaskGetTickCount();
+  TickType_t txSince = 0;
   while (true) {
-    if (xSemaphoreTake(instance->sendMutex, pdMS_TO_TICKS(CAN_SEND_WAIT_TIMEOUT)) == pdTRUE) {      
-      memcpy(localFrames, instance->sendBuffer, sizeof(localFrames));
-      memset(instance->sendBuffer, 0, sizeof(instance->sendBuffer));
-      xSemaphoreGive(instance->sendMutex);
-      if (!instance->isBusAlive()) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(1);
+    TickType_t now = xTaskGetTickCount();
+    if (now - lastSnapshot >= pdMS_TO_TICKS(CAN_SEND_LOOP_TIMEOUT)) {
+      lastSnapshot = now;
+      if (xSemaphoreTake(instance->sendMutex, pdMS_TO_TICKS(CAN_SEND_WAIT_TIMEOUT)) == pdTRUE) {
+        for (uint i = 0; i < CAN_TX_BUFFER_SIZE; i++)
+          if (instance->sendBuffer[i].dlc != 0)
+            pending[i] = instance->sendBuffer[i];
+        memset(instance->sendBuffer, 0, sizeof(instance->sendBuffer));
+        xSemaphoreGive(instance->sendMutex);
+      }
+    }
+    if (!instance->isBusAlive() || instance->reinitInProgress.load(std::memory_order_relaxed)) {
+      instance->txInFlight = false;
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    if (instance->txInFlight) {
+      // can2040_stop() on a reinit drops the queue without a NOTIFY_TX - don't wait on it forever
+      if (now - txSince < pdMS_TO_TICKS(CAN_TX_IN_FLIGHT_TIMEOUT))
         continue;
-      }
-      if (instance->reinitInProgress.load(std::memory_order_relaxed)) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+      instance->txInFlight = false;
+    }
+    for (uint n = 0; n < CAN_TX_BUFFER_SIZE; n++) {
+      uint i = (next + n) % CAN_TX_BUFFER_SIZE;
+      if (pending[i].dlc == 0)
         continue;
+      instance->txInFlight = true;
+      txSince = now;
+      if (can2040_transmit(&(Bus::cbus), &pending[i]) != 0) {
+        instance->txInFlight = false;
+        break;
       }
-
-      bool transferSuccess = false;
-
-      for (uint i = 0; i < CAN_TX_BUFFER_SIZE; i++) {
-        CanFrame frame = localFrames[i];
-        if (frame.dlc != 0) {          
-          transferSuccess = (can2040_transmit(&(Bus::cbus), &frame) == 0);
-          if (!transferSuccess) {          
-            break;
-          }
-        }
-      }
-    }    
-    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(CAN_SEND_LOOP_TIMEOUT));
+      pending[i].dlc = 0;
+      next = i + 1;
+      break;
+    }
   }
 }
 
