@@ -117,12 +117,109 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
   if (angle < safeMinDegree || angle > safeMaxDegree)
     return false;
 
+  if (trace != nullptr && traceState == TraceState::Idle && !isnan(targetAngle) &&
+      fabsf(angle - targetAngle) >= traceMinMoveDeg) {
+    traceFrom = targetAngle;
+    traceTo = angle;
+    traceTimeMS = newTimeMS;
+    traceRequested = true;
+  }
+  // A plain target (calibration, home, recovery) ends any planned move - planMove() re-arms it.
+  planActive = false;
+  planSettling = false;
   targetAngle = angle;
   setDeadZone(newDeadZone);
   setTimeMS(newTimeMS);
   moveStarted = get_absolute_time();
   resetDivergence();
   fineAnchorPhysical = NAN;
+  return true;
+}
+
+bool Servo::planMove(const float angle, uint16_t newTimeMS, float newDeadZone) {
+  if (isnan(imuAngle) || isnan(physicalAngle) || isnan(targetAngle)) {
+    planActive = false;
+    return setTargetAngle(angle, newTimeMS, newDeadZone);
+  }
+  // Keep the command-vs-IMU offset the joint has now (backlash side, gravity sag) - mid-plan that's
+  // the running plan's own end-vs-target offset, since the IMU lags the command while moving.
+  // Read before setTargetAngle(), which clears planActive/planSettling.
+  // Settling counts as mid-plan too: the joint is still on its way to planEnd.
+  const float offset = (planActive || planSettling) ? planEnd - targetAngle : physicalAngle - imuAngle;
+  planActive = false;
+  if (!setTargetAngle(angle, newTimeMS, newDeadZone)) {
+    return false;
+  }
+  planStart = physicalAngle;
+  planEnd = std::clamp(angle + offset, safeMinDegree, safeMaxDegree);
+  // A minimum-jerk curve peaks at 1.875x its average speed - stretch it to stay under maxAngularSpeed.
+  const int64_t minDurationUs = (int64_t)(1.875f * fabsf(planEnd - planStart) / maxAngularSpeed * 1000000.0f);
+  planDurationUs = std::max(timeUs, minDurationUs);
+  planStarted = get_absolute_time();
+  planActive = true;
+  return true;
+}
+
+// Measured live (2026-11-02, servo trace): the IMU-error speed law ramped the command to ~20deg/s
+// at once, the link sat 160-350 ms in the gear backlash, then got yanked, overshot the command by
+// 2-4.5deg - and that overshoot cut the command from ~20 to ~1deg/s almost instantly, leaving the
+// link ringing in the backlash for seconds (elbow ~1.3-2 Hz). A minimum-jerk curve starts and stops
+// with zero speed and acceleration, so the backlash is taken up slowly and nothing stops abruptly.
+// Returns false once the plan is over (or there is none) - tick() then trims by IMU as before.
+bool Servo::planTick(absolute_time_t now, int64_t dtUs) {
+  if (!planActive) {
+    return false;
+  }
+  const float dtSec = std::min(dtUs / 1000000.0f, 0.01f);
+  const float tau = absolute_time_diff_us(planStarted, now) / (float)planDurationUs;
+  if (tau >= 1.0f) {
+    planActive = false;
+    appliedSpeedDegPerSec = 0.0f;
+    physicalAngle = planEnd;
+    setDegreeDirect(physicalAngle);
+    if (planSettleMaxUs > 0) {
+      planSettling = true;
+      planEndedAt = now;
+      settleRefIMU = imuAngle;
+      settleRefTime = now;
+    }
+    return true;
+  }
+  const float s = tau * tau * tau * (10.0f + tau * (-15.0f + 6.0f * tau));
+  float nextPhysical = planStart + (planEnd - planStart) * s;
+  // Same opt-in hold-back as tick()'s - and the curve's clock waits while it holds, so the command
+  // resumes smoothly instead of jumping to where the curve has got to meanwhile.
+  const float dir = (planEnd >= planStart) ? 1.0f : -1.0f;
+  if (!isnan(maxLeadDeg) && dir * (nextPhysical - (imuAngle + dir * maxLeadDeg)) > 0.0f) {
+    nextPhysical = physicalAngle;
+    planStarted = delayed_by_us(planStarted, dtUs);
+  }
+  appliedSpeedDegPerSec = (nextPhysical - physicalAngle) / dtSec;
+  physicalAngle = std::clamp(nextPhysical, safeMinDegree, safeMaxDegree);
+  setDegreeDirect(physicalAngle);
+  return true;
+}
+
+// Measured live (2026-11-02): the elbow servo dropped to 8-15deg/s, so a 1 s plan ended 10-15deg
+// ahead of the joint; the trim saw that as a real error, drove the command another 5-6deg past the
+// plan, and the joint overshot the target by 11-12deg and swung for seconds. Holding the command
+// until the joint stops leaves the trim only the true residual. Returns true while holding.
+bool Servo::settleTick(absolute_time_t now) {
+  if (!planSettling) {
+    return false;
+  }
+  if (absolute_time_diff_us(planEndedAt, now) >= planSettleMaxUs) {
+    planSettling = false;
+    return false;
+  }
+  if (absolute_time_diff_us(settleRefTime, now) >= settleCheckUs) {
+    if (fabsf(imuAngle - settleRefIMU) < settleMotionDeg) {
+      planSettling = false;
+      return false;
+    }
+    settleRefIMU = imuAngle;
+    settleRefTime = now;
+  }
   return true;
 }
 
@@ -147,11 +244,15 @@ void Servo::tick() {
   absolute_time_t now = get_absolute_time();
   int64_t dtUs = absolute_time_diff_us(lastTickTime, now);
   lastTickTime = now;
+  traceTick(now);
 
   if ((dtUs <= 0) || isnan(imuAngle) || isnan(physicalAngle) || isnan(targetAngle))
     return;
 
   if (diverging)
+    return;
+
+  if (planTick(now, dtUs) || settleTick(now))
     return;
 
   const float error = targetAngle - imuAngle;
@@ -321,7 +422,54 @@ void Servo::tick() {
   setDegreeDirect(physicalAngle);
 }
 
+bool Servo::enableTrace() {
+  if (trace == nullptr) {
+    trace = static_cast<TraceSample *>(pvPortMalloc(sizeof(TraceSample) * traceCapacity));
+  }
+  return trace != nullptr;
+}
+
+// Records at the top of tick(), before its early returns, so dead-zone and frozen ticks show too.
+// physicalAngle there is the command currently on the PWM output.
+void Servo::traceTick(absolute_time_t now) {
+  if (trace == nullptr) {
+    return;
+  }
+  if (traceState == TraceState::Idle && traceRequested) {
+    traceRequested = false;
+    traceCount = 0;
+    traceStart = now;
+    traceState = TraceState::Recording;
+  }
+  if (traceState == TraceState::Recording) {
+    trace[traceCount++] = {(uint32_t)absolute_time_diff_us(traceStart, now), targetAngle, rawIMUAngle,
+                           imuAngle, physicalAngle};
+    if (traceCount == traceCapacity) {
+      traceDumped = 0;
+      traceState = TraceState::Dumping;
+      LogQueue::Log("TR%u start: target %.2f -> %.2f in %u ms; t ms, target, raw imu, imu, command\n",
+                    pin, traceFrom, traceTo, traceTimeMS);
+    }
+    return;
+  }
+  if (traceState == TraceState::Dumping) {
+    char line[LOG_QUEUE_MSG_SIZE - 2];
+    int len = snprintf(line, sizeof(line), "TR%u", pin);
+    for (int i = 0; i < 3 && traceDumped < traceCount; i++, traceDumped++) {
+      const TraceSample &s = trace[traceDumped];
+      len += snprintf(line + len, sizeof(line) - len, " %.1f %.2f %.2f %.2f %.2f;", s.tUs / 1000.0f,
+                      s.target, s.rawIMU, s.imu, s.physical);
+    }
+    LogQueue::Log("%s\n", line);
+    if (traceDumped >= traceCount) {
+      LogQueue::Log("TR%u end\n", pin);
+      traceState = TraceState::Idle;
+    }
+  }
+}
+
 void Servo::setIMUAngle(float value) {
+  rawIMUAngle = value;
   // Propagate NaN rather than keeping a stale value - tick()'s NaN guard must see it and freeze.
   if (isnan(value)) {
     imuAngle = value;

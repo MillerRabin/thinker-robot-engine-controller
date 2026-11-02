@@ -389,9 +389,39 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     // within ~1deg of gravity's 90 (worst seen 5.6), and clean live lifts at ~9deg/s tracked within
     // 1.5deg. 8deg leaves margin for that while bounding how far the command can run ahead.
     shoulderY.setMaxLead(8.0f);
+    // ~7deg of backlash at vertical (2026-11-02): with the default 3deg budget the command stopped
+    // 1.1deg short of crossing it, and calibrateYLoop never settled (looped >50 s until engines off).
+    shoulderY.setFineCorrectionBudget(8.0f);
+    // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
+    shoulderY.enableTrace();
+}
+
+// Logged every 250 ms whatever the state, calibration included - the shake happened there. Fast
+// rotation is what the gyro-fused quaternion does see, unlike a slow yaw drift.
+void ArmShoulder::monitorShake(const Quaternion &q) {
+  const absolute_time_t now = get_absolute_time();
+  if (shakeLastQ.isValid()) {
+    const float dt = absolute_time_diff_us(shakeLastTime, now) / 1000000.0f;
+    if (dt > 0.0005f && dt < 0.05f) {
+      // Body-frame rotation between samples; for a small one, rate = 2 * vector part / dt.
+      const Quaternion dq = shakeLastQ.invert() * q;
+      const float scale = 2.0f * RAD_TO_DEG / dt * (dq.real < 0.0f ? -1.0f : 1.0f);
+      shakePeak.x = fmaxf(shakePeak.x, fabsf(dq.i * scale));
+      shakePeak.y = fmaxf(shakePeak.y, fabsf(dq.j * scale));
+      shakePeak.z = fmaxf(shakePeak.z, fabsf(dq.k * scale));
+    }
+  }
+  shakeLastQ = q;
+  shakeLastTime = now;
+  if (absolute_time_diff_us(shakeWindowStart, now) >= 250000) {
+    LogQueue::Log("[SHAKE] peak deg/s x %.1f y %.1f z %.1f\n", shakePeak.x, shakePeak.y, shakePeak.z);
+    shakePeak = {0.0f, 0.0f, 0.0f};
+    shakeWindowStart = now;
+  }
 }
 
 int ArmShoulder::updateQuaternion(IMUBase *position) {
+  monitorShake(position->quaternion.load());
   Quaternion baseQ = base.load();
   if (!baseQ.isValid()) {
     return ERROR_PART_IS_NOT_CALIBRATED;
@@ -426,7 +456,7 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame) {
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
 
     if (!isnan(angleY)) {
-      shoulderY.setTargetAngle(angleY, timeMS, SHOULDER_DEAD_ZONE);
+      shoulderY.planMove(angleY, timeMS, SHOULDER_DEAD_ZONE);
     }
     if (!isnan(angleZ)) {
       shoulderZ.setTargetAngle(angleZ, timeMS, SHOULDER_DEAD_ZONE);

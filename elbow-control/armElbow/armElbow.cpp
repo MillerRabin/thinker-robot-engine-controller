@@ -310,6 +310,10 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
           memsIntPin) {
   Quaternion q_corr = {-0.314134f, -0.584772f, -0.348743f, 0.661619f};
   imu.setRotate(q_corr);
+  // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
+  elbowY.enableTrace();
+  // The elbow servo ran at 8-15deg/s on 2026-11-02 (27deg/s that morning) - see Servo::settleTick().
+  elbowY.setPlanSettle(3000);
 }
 
 int ArmElbow::begin() {
@@ -357,7 +361,7 @@ void ArmElbow::busReceiveCallback(can2040_msg frame) {
     LogQueue::Log("CAN_ELBOW_SET_Y_DEGREE received: angleY=%.2f timeMS=%u physicalAngle=%.2f\n", angleY, timeMS, elbowY.getPhysicalAngle());
 
     if (!isnan(angleY)) {
-      elbowY.setTargetAngle(angleY, timeMS, ELBOW_DEAD_ZONE);
+      elbowY.planMove(angleY, timeMS, ELBOW_DEAD_ZONE);
     }
   }
 

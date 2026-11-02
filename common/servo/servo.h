@@ -138,7 +138,7 @@ private:
   // Fine-correction budget - see tick(). Reset only by a new target (setTargetAngle()/reset()), not
   // by resetDivergence(), which also runs on every dead-zone dip.
   float fineAnchorPhysical = NAN;
-  static constexpr float fineCorrectionBudgetDeg = 3.0f;
+  float fineCorrectionBudgetDeg = 3.0f; // see setFineCorrectionBudget()
   // When absError first went >= minProgressDeg, 0 while below - the anchor is only released once
   // that lasts fineReleaseUs (see tick()).
   absolute_time_t coarseSince = 0;
@@ -149,6 +149,53 @@ private:
   bool outputActive = false;
 
   void resetDivergence();
+
+  // Planned move (see planMove()): the command follows a minimum-jerk curve from planStart to
+  // planEnd over planDurationUs, by time rather than by IMU error; tick() then falls back to its
+  // slow IMU trim. planActive is written last by planMove() (CAN task) and read first by tick().
+  volatile bool planActive = false;
+  float planStart = NAN;
+  float planEnd = NAN;
+  absolute_time_t planStarted = 0;
+  int64_t planDurationUs = 0;
+  bool planTick(absolute_time_t now, int64_t dtUs);
+  // Opt-in settle wait after a plan (see setPlanSettle()): the IMU trim holds off while the joint
+  // is still moving toward the plan's end, up to planSettleMaxUs. 0 = trim right away.
+  int64_t planSettleMaxUs = 0;
+  bool planSettling = false;
+  absolute_time_t planEndedAt = 0;
+  float settleRefIMU = NAN;
+  absolute_time_t settleRefTime = 0;
+  static constexpr int64_t settleCheckUs = 100000;
+  static constexpr float settleMotionDeg = 0.3f; // per settleCheckUs, i.e. 3deg/s
+  bool settleTick(absolute_time_t now);
+
+  // Diagnostic trace, opt-in (see enableTrace()): every tick() for traceCapacity ticks after a
+  // target change of at least traceMinMoveDeg, then dumped to the log a few samples per tick so the
+  // printing doesn't disturb the 5 ms loop while recording. Shows whether the command itself swings
+  // with the IMU, and with what lag.
+  struct TraceSample {
+    uint32_t tUs;
+    float target;
+    float rawIMU;
+    float imu;
+    float physical;
+  };
+  enum class TraceState : uint8_t { Idle, Recording, Dumping };
+  static constexpr uint16_t traceCapacity = 800;
+  static constexpr float traceMinMoveDeg = 1.0f;
+  TraceSample *trace = nullptr;
+  TraceState traceState = TraceState::Idle;
+  // Set by setTargetAngle(), which runs on the CAN task - tick() starts the recording itself.
+  volatile bool traceRequested = false;
+  uint16_t traceCount = 0;
+  uint16_t traceDumped = 0;
+  absolute_time_t traceStart = 0;
+  float traceFrom = NAN;
+  float traceTo = NAN;
+  uint16_t traceTimeMS = 0;
+  float rawIMUAngle = NAN; // setIMUAngle()'s input before the low-pass filter, for the trace
+  void traceTick(absolute_time_t now);
 
   int getWrapAndDivider(const uint freq, PWMParameters& params) const;
   uint16_t getSlices(const float targetPeriod, const float period, const uint32_t wrap) const;
@@ -171,6 +218,12 @@ public:
         const float freq = 50, const float lowPeriod = 0.0005f,
         const float highPeriod = 0.0025f, Range safeRange = Range(NAN, NAN));
   bool setTargetAngle(const float angle, uint16_t timeMS, float deadZone);
+  // setTargetAngle() for a commanded move: the command travels the IMU distance to the target on a
+  // smooth, time-based curve instead of chasing the IMU error - see tick() and planTick().
+  bool planMove(const float angle, uint16_t timeMS, float deadZone);
+  // For a joint slower than its plans: after a plan, wait (up to maxMS) for the joint to stop
+  // before the IMU trim starts, so the trim doesn't push the command on while the joint catches up.
+  void setPlanSettle(uint32_t maxMS) { planSettleMaxUs = (int64_t)maxMS * 1000; }
   float getTargetAngle() const { return targetAngle; }
 
   void setIMUAngle(float value);
@@ -187,6 +240,11 @@ public:
   // slope ~1) - elbow's didn't when a relationship-assuming check was last tried (see the removed
   // lead-clamp comment above). Unlike that check, this one only ever holds physicalAngle back.
   void setMaxLead(float deg) { maxLeadDeg = deg; }
+  // A joint whose backlash is wider than the default 3deg needs a wider budget, or the command can't
+  // cross the backlash once the error is small and the joint never settles (see tick()).
+  void setFineCorrectionBudget(float deg) { fineCorrectionBudgetDeg = deg; }
+  // Allocates the trace buffer (~16 KB) - see TraceSample. False if the heap can't spare it.
+  bool enableTrace();
   void tick();
 
   void stop() {
@@ -199,6 +257,8 @@ public:
   // also cut the output (release()), so every shoulder recalibration dropped a limp elbow and wrist
   // under gravity (confirmed live 2026-10-31: the wrist "lost vertical" in one such cascade).
   void reset() {
+    planActive = false;
+    planSettling = false;
     targetAngle = NAN;
     fineAnchorPhysical = NAN;
     coarseSince = 0;

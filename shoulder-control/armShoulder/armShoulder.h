@@ -47,6 +47,13 @@ private:
   float lastGoodGravityY = NAN;
   absolute_time_t lastGoodGravityYTime = 0;
   float angleFromGravityY();
+  // Shake diagnosis (2026-11-02): shoulder-z visibly shook at vertical while its command sat at
+  // 135. Peak body-axis angular rate per window, from consecutive IMU samples - see monitorShake().
+  Quaternion shakeLastQ;
+  absolute_time_t shakeLastTime = 0;
+  absolute_time_t shakeWindowStart = 0;
+  Vector3 shakePeak{0.0f, 0.0f, 0.0f};
+  void monitorShake(const Quaternion &q);
 public:
   Servo shoulderZ;
   Servo shoulderY;
