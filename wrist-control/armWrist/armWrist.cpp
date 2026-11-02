@@ -219,6 +219,10 @@ Vector3 ArmWrist::trackTick() {
   wristZ.setIMUAngle(wristZ.getPhysicalAngle());
   wristY.tick();
   wristZ.tick();
+  // Trace a disturbance from the elbow - the wrist's own target doesn't change for one.
+  if (fabsf(wristY.getTargetAngle() - wristY.getIMUAngle()) > 1.5f) {
+    wristY.requestTrace();
+  }
   updateStatuses();
   return physicalAngles;
 }
@@ -408,6 +412,13 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   // Mounting correction: maps raw IMU axes onto ArmShoulder's Y/Z convention.
   Quaternion q_corr = {0.033409f, -0.063652f, -0.418612f, -0.905316f};
   imu.setRotate(q_corr);
+  // Hold the wrist's own angle by its own IMU while the elbow moves (2026-11-03): with the defaults a
+  // 15deg elbow move tilted it 17.7deg (anchor held for 1 s) and it took 4-6 s to come back. 3/s puts
+  // the loop near 0.5 Hz, well under the elbow's 1.3-2 Hz ringing; 40deg/s covers the elbow's
+  // planned-move peak of ~28deg/s.
+  wristY.setFineReleaseError(4.0f);
+  wristY.setHoldResponse(3.0f, 40.0f);
+  wristY.enableTrace();
   if (taskHandle == NULL) {
     if (xTaskCreateAffinitySet(ArmWrist::engineTask,
                                "ArmWrist::engineTask", 4096, this, 4,

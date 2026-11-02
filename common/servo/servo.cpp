@@ -409,6 +409,9 @@ void Servo::tick() {
     if (isnan(fineAnchorPhysical)) {
       fineAnchorPhysical = physicalAngle;
     }
+  } else if (!isnan(fineReleaseErrorDeg) && absError >= fineReleaseErrorDeg) {
+    // A real disturbance, not noise or a bias - see setFineReleaseError().
+    fineAnchorPhysical = NAN;
   } else if (coarseSince == 0) {
     coarseSince = now;
   } else if (absolute_time_diff_us(coarseSince, now) >= fineReleaseUs) {

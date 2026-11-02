@@ -65,7 +65,7 @@ private:
   // going back to the plain error/timeLeft formula reproduced the original sustained oscillation
   // (see tick()'s comment). stabilizationSpeed is the ceiling that gradient is clamped to - same
   // ceiling already proven safe for initial-seed-recovery scaling elsewhere.
-  const float stabilizationGainPerSec = 0.5f; // deg/s per deg of error
+  float stabilizationGainPerSec = 0.5f; // deg/s per deg of error, see setHoldResponse()
   float stabilizationSpeed = 18.0f; // deg/s ceiling
 
   const float maxAngularSpeed = 60.0f;   // deg/s
@@ -143,6 +143,8 @@ private:
   // that lasts fineReleaseUs (see tick()).
   absolute_time_t coarseSince = 0;
   static constexpr int64_t fineReleaseUs = 1000000;
+  // Opt-in, NAN = off: an error this large releases the anchor at once - see setFineReleaseError().
+  float fineReleaseErrorDeg = NAN;
 
   // True while the PWM output carries a real commanded pulse (set by setDegreeDirect(), cleared by
   // release()) - the constructor's homePosition is bookkeeping only, nothing is output until then.
@@ -257,6 +259,28 @@ public:
   // A joint whose backlash is wider than the default 3deg needs a wider budget, or the command can't
   // cross the backlash once the error is small and the joint never settles (see tick()).
   void setFineCorrectionBudget(float deg) { fineCorrectionBudgetDeg = deg; }
+  // For a joint holding its own angle against a parent's motion: the budget's 1 s release made it
+  // ride along with the parent for that whole second (the wrist tilted 17.7deg on a 15deg elbow move,
+  // 2026-11-03). An error this large is a real disturbance - beyond the noise and the sub-degree
+  // bias the budget exists for - so it releases the anchor at once.
+  void setFineReleaseError(float deg) { fineReleaseErrorDeg = deg; }
+  // Holding gain and speed ceiling once past a move's deadline (see tick()). The defaults (0.5/s,
+  // 18deg/s) date from 2026-08-26, when data lagged and faster recovery oscillated; a joint that
+  // must follow a parent's motion needs more.
+  void setHoldResponse(float gainPerSec, float maxSpeed) {
+    stabilizationGainPerSec = gainPerSec;
+    stabilizationSpeed = std::min(maxSpeed, maxAngularSpeed);
+  }
+  // Starts a trace now if none is running - for a disturbance from outside, when the joint's own
+  // target doesn't change (see enableTrace()).
+  void requestTrace() {
+    if (trace != nullptr && traceState == TraceState::Idle) {
+      traceFrom = targetAngle;
+      traceTo = targetAngle;
+      traceTimeMS = 0;
+      traceRequested = true;
+    }
+  }
   // Allocates the trace buffer (~16 KB) - see TraceSample. False if the heap can't spare it.
   bool enableTrace();
   void tick();
