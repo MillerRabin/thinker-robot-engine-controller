@@ -34,6 +34,8 @@ class RangeDetector {
     bool initShortDistanceSensor();
     bool initLongDistanceSensor();
     void activateSensors(bool shortSensor, bool longSensor);
+    void retryMissingSensors();
+    void logBusScan(const char *stage, bool shortSensor, bool longSensor);
     static TaskHandle_t detectorTaskHandle;
   public:
     ArmPart *armPart;        

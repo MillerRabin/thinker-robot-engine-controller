@@ -1,4 +1,5 @@
 #include "rangeDetector.h"
+#include "pico/stdio_usb.h"
 
 TaskHandle_t RangeDetector::detectorTaskHandle = NULL;
 
@@ -32,18 +33,56 @@ void RangeDetector::activateSensors(bool shortSensor, bool longSensor) {
   longSensorAvailable = false;
   gpio_put(longDetectorShutPin, 0);
   gpio_put(shortDetectorShutPin, 0);
-  
+  // Hold both in shutdown long enough to actually reset them - a VL53L0X that skips the reset
+  // keeps its moved address (0x2A) and the re-init below can't find it at 0x29.
+  vTaskDelay(pdMS_TO_TICKS(RANGE_SHUTDOWN_DELAY));
+
   if (longSensor) {
     gpio_put(longDetectorShutPin, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
-    initLongDistanceSensor();
+    // A failed VL53L0X still answers at the default 0x29, which is the VL6180X's address too -
+    // shut it down again so it can't collide with the short sensor's init.
+    if (!initLongDistanceSensor())
+      gpio_put(longDetectorShutPin, 0);
   }
-  
-  if (shortSensor){  
+
+  if (shortSensor){
     gpio_put(shortDetectorShutPin, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
-    initShortDistanceSensor();        
+    initShortDistanceSensor();
   }
+  LogQueue::Log("Range sensors: long %s, short %s\n", longSensorAvailable ? "OK" : "FAILED",
+                shortSensorAvailable ? "OK" : "FAILED");
+}
+
+// Retries only the missing sensor where that's safe: the VL6180X alone can be reset while the
+// VL53L0X sits at 0x2A, but a VL53L0X re-init needs 0x29 free, so it resets both.
+void RangeDetector::retryMissingSensors() {
+  if (!longSensorAvailable) {
+    activateSensors(true, true);
+    return;
+  }
+  gpio_put(shortDetectorShutPin, 0);
+  vTaskDelay(pdMS_TO_TICKS(RANGE_SHUTDOWN_DELAY));
+  gpio_put(shortDetectorShutPin, 1);
+  vTaskDelay(pdMS_TO_TICKS(50));
+  initShortDistanceSensor();
+  LogQueue::Log("Range sensors: long OK, short %s\n", shortSensorAvailable ? "OK" : "FAILED");
+}
+
+// One-line list of the addresses that ACK on the detectors bus, with the given sensors enabled.
+void RangeDetector::logBusScan(const char *stage, bool shortSensor, bool longSensor) {
+  gpio_put(longDetectorShutPin, longSensor);
+  gpio_put(shortDetectorShutPin, shortSensor);
+  vTaskDelay(pdMS_TO_TICKS(50));
+  char found[128] = "";
+  size_t len = 0;
+  for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+    uint8_t rxdata;
+    if (i2c_read_timeout_us(i2c, addr, &rxdata, 1, false, 2000) >= 0 && len < sizeof(found) - 6)
+      len += snprintf(found + len, sizeof(found) - len, " 0x%02x", addr);
+  }
+  LogQueue::Log("Range I2C scan (%s):%s\n", stage, len ? found : " nothing");
 }
 
 void RangeDetector::printIdentification(struct VL6180xIdentification *temp) {
@@ -63,7 +102,9 @@ bool RangeDetector::initShortDistanceSensor() {
   //shortDistanceDetector.getIdentification(&identification);
   //printIdentification(&identification);
 
-  if (shortDistanceDetector.VL6180xInit() != 0) {
+  const int res = shortDistanceDetector.VL6180xInit();
+  if (res != 0) {
+    LogQueue::Log("VL6180X init failed: %d (not fresh out of reset)\n", res);
     return false;
   }
   shortDistanceDetector.VL6180xDefautSettings();  
@@ -72,23 +113,43 @@ bool RangeDetector::initShortDistanceSensor() {
 }
 
 bool RangeDetector::initLongDistanceSensor() {
-  if (longDistanceDetector.begin(i2c)) {
-    longDistanceDetector.setAddress(VL53_NEW_ADDR);    
-    longDistanceDetector.startRangeContinuous();
-    longSensorAvailable = true;
-    return true;
+  if (!longDistanceDetector.begin(i2c)) {
+    LogQueue::Log("VL53L0X init failed: status %d\n", longDistanceDetector.Status);
+    return false;
   }
-  else {
-    printf("FAILED TO INITIALIZE VL53L0X\n");
+  if (!longDistanceDetector.setAddress(VL53_NEW_ADDR)) {
+    LogQueue::Log("VL53L0X address change failed: status %d\n", longDistanceDetector.Status);
+    return false;
   }
-  return false;
+  longDistanceDetector.startRangeContinuous();
+  longSensorAvailable = true;
+  return true;
 }
 
 void RangeDetector::detectorTask(void *instance) {
   
-  RangeDetector *detector = (RangeDetector *)instance;     
+  RangeDetector *detector = (RangeDetector *)instance;
   detector->activateSensors(true, true);
+  // The first attempt runs before USB is up, so its log is lost - and a single failure used to
+  // leave the sensor NaN until reboot (e.g. the host enabling detector power after we booted).
+  TickType_t lastInitTick = xTaskGetTickCount();
+  bool scanned = false;
   while (true) {
+    if ((!detector->longSensorAvailable || !detector->shortSensorAvailable) &&
+        xTaskGetTickCount() - lastInitTick >= pdMS_TO_TICKS(RANGE_REINIT_INTERVAL)) {
+      // Scanned once someone is reading the USB log - a scan right after boot is never seen.
+      if (!scanned && stdio_usb_connected()) {
+        detector->logBusScan("both off", false, false);
+        detector->logBusScan("long only", false, true);
+        detector->logBusScan("short only", true, false);
+        scanned = true;
+        detector->activateSensors(true, true);
+      } else {
+        detector->retryMissingSensors();
+      }
+      lastInitTick = xTaskGetTickCount();
+    }
+
     //detector->scanI2cTask();
     if (detector->shortSensorAvailable) {
       detector->shortRange = detector->shortDistanceDetector.getDistance();
