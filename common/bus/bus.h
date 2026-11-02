@@ -63,7 +63,9 @@ class Bus {
     static can2040 cbus;
     static void can2040_cb(can2040 *cd, uint32_t notify, CanFrame *msg);
     CanRingBuffer receiveBuffer;
-    CanFrame sendBuffer[CAN_TX_BUFFER_SIZE];    
+    // Zeroed: the object comes from new, and RAM keeps the previous firmware's bytes across a soft reboot,
+    // so busSendTask's first pass used to put stale frames on the bus (e.g. another module's upgrade command)
+    CanFrame sendBuffer[CAN_TX_BUFFER_SIZE] = {};
     TaskHandle_t sendTaskHandle = NULL;
     TaskHandle_t receiveTaskHandle = NULL;
     TaskHandle_t initTaskHandle = NULL;
