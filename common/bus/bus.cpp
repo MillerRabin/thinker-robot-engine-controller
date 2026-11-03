@@ -81,6 +81,18 @@ void Bus::logStatistics() {
                 (unsigned long)(stalls - lastRxStalls));
   lastStats = stats;
   lastRxStalls = stalls;
+  // Longest pause between transmits of each frame id this interval (ms) - a receiver drops a sender
+  // whose frames pause past its freshness window (500 ms for RemoteWrist).
+  char gaps[LOG_QUEUE_MSG_SIZE - 2];
+  int len = snprintf(gaps, sizeof(gaps), "CAN tx max gap ms:");
+  for (uint i = 0; i < CAN_TX_BUFFER_SIZE && len < (int)sizeof(gaps) - 10; i++) {
+    if (slotLastTx[i] == 0)
+      continue;
+    len += snprintf(gaps + len, sizeof(gaps) - len, " %02lx:%lu", (unsigned long)slotId[i],
+                    (unsigned long)(slotMaxGap[i] * portTICK_PERIOD_MS));
+    slotMaxGap[i] = 0;
+  }
+  LogQueue::Log("%s\n", gaps);
 }
 
 Bus::Bus(const uint rxPin, const uint txPin, ArmPart *armPart, CanCallback callback) : 
@@ -193,6 +205,10 @@ void Bus::busSendTask(void *pInstance) {
         instance->txInFlight = false;
         break;
       }
+      if (instance->slotLastTx[i] != 0 && now - instance->slotLastTx[i] > instance->slotMaxGap[i])
+        instance->slotMaxGap[i] = now - instance->slotLastTx[i];
+      instance->slotLastTx[i] = now;
+      instance->slotId[i] = pending[i].id;
       pending[i].dlc = 0;
       next = i + 1;
       break;
@@ -215,12 +231,13 @@ bool Bus::send(uint32_t id, uint64_t data) {
   }
 }
 
+// Signed difference: busReceiveTask() may stamp lastRxTime between our clock read and its load, and
+// unsigned that wraps to ~4e9 - "dead" - so busSendTask() slept 1000 ms with frames still arriving.
+// The wrist hit it often enough (all its frames paused 1007 ms, its status up to 4 s) that the claw,
+// which drops the wrist after 500 ms of silence, kept recalibrating (2026-11-03).
 bool Bus::isBusAlive() {
   uint32_t now = to_ms_since_boot(get_absolute_time());
-  if (now - lastRxTime.load(std::memory_order_relaxed) > 3000) {
-    return false;
-  }
-  return true;
+  return (int32_t)(now - lastRxTime.load(std::memory_order_relaxed)) <= 3000;
 }
 
 void __not_in_flash("can2040") Bus::PIOx_IRQHandler() {

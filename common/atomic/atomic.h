@@ -30,8 +30,13 @@ public:
 
   bool isFresh() const {
     TickType_t now = xTaskGetTickCount();
-    return (now - lastUpdated.load(std::memory_order_relaxed)) < maxInterval;
+    // Signed: store() may run on another task between our tick read and this load, and unsigned
+    // that wraps to ~4e9 - "stale" - see Bus::isBusAlive().
+    return (int32_t)(now - lastUpdated.load(std::memory_order_relaxed)) < (int32_t)maxInterval;
   }
+
+  // Ticks since the last store() - for diagnostics, isFresh() is the check.
+  TickType_t age() const { return xTaskGetTickCount() - lastUpdated.load(std::memory_order_relaxed); }
 
   void makeFresh() {
     lastUpdated.store(xTaskGetTickCount(), std::memory_order_relaxed);

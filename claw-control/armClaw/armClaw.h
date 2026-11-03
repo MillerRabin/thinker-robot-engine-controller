@@ -45,6 +45,7 @@ private:
   float clawXReading();
   bool moveYOpenLoop(float pwm);
   bool calibrationInterrupted(const char *phase);
+  void logWristLoss(const char *where);
   bool calibrateAxis(const char *phase, Servo &servo, float (ArmClaw::*reading)(), float readingAtHome,
                      float &homeAngle);
   // Delta-integrated per tick rather than re-derived absolutely - see getIMUAngles().

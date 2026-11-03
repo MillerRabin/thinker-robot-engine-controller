@@ -76,6 +76,11 @@ class Bus {
     // A frame handed to can2040 that hasn't been reported sent yet (cleared by can2040_cb)
     volatile bool txInFlight = false;
     can2040_stats lastStats = {};
+    // Per send slot: the frame id it last carried, when it last went to can2040, and the longest
+    // pause between two of its transmits this stats interval - logged with "CAN stats".
+    uint32_t slotId[CAN_TX_BUFFER_SIZE] = {};
+    TickType_t slotLastTx[CAN_TX_BUFFER_SIZE] = {};
+    TickType_t slotMaxGap[CAN_TX_BUFFER_SIZE] = {};
     uint32_t lastRxStalls = 0;
     void logStatistics();
     void requestReinit();

@@ -23,7 +23,8 @@ void RemoteClaw::dispatchMessage(can2040_msg frame) {
 
 bool RemoteClaw::isOnline() {
   auto now = xTaskGetTickCount();
-  return (now - lastUpdated < maxInterval);
+  // Signed: the CAN task may stamp lastUpdated after our tick read - see Bus::isBusAlive().
+  return (int32_t)(now - lastUpdated) < (int32_t)maxInterval;
 }
 
 bool RemoteClaw::isPositionOK() {

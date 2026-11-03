@@ -50,6 +50,15 @@ void ArmClaw::updateStatusLed(bool calibrating, bool ready) {
 // Common abort checks for every calibration phase below - engines power in each one (a cut mid-seed
 // left a stale seed on the other modules), and losing the wrist (its recalibration moves the claw's
 // base); the old loops only checked the wrist in their final settle wait.
+// Which of RemoteWrist::isPositionOK()'s checks failed, and how stale each input was - the claw lost
+// the wrist 10x in 46 s on 2026-11-03 while the wrist itself kept running (see Bus "CAN stats" gaps).
+void ArmClaw::logWristLoss(const char *where) {
+  LogQueue::Log("[DIAG] claw wrist lost (%s): online %d calibrated %d, status %lu ms ago, quaternion %lu ms ago\n",
+                where, wrist.isOnline(), wrist.isCalibrated(),
+                (unsigned long)(wrist.statusAge() * portTICK_PERIOD_MS),
+                (unsigned long)(wrist.quaternionAge() * portTICK_PERIOD_MS));
+}
+
 bool ArmClaw::calibrationInterrupted(const char *phase) {
   if (!platform.getEnginesPowerStatus()) {
     LogQueue::Log("[DIAG] claw %s: aborted, engines powered off\n", phase);
@@ -57,6 +66,7 @@ bool ArmClaw::calibrationInterrupted(const char *phase) {
   }
   if (!wrist.isPositionOK()) {
     LogQueue::Log("[DIAG] claw %s: aborted, wrist lost position\n", phase);
+    logWristLoss(phase);
     return true;
   }
   return false;
@@ -355,6 +365,9 @@ void ArmClaw::engineTask(void *instance) {
     if (!sp || !pp) {
       if (wasOK) {
         LogQueue::Log("claw engineTask: position NOT OK (sp=%d pp=%d), stopped\n", sp, pp);
+        if (!pp) {
+          claw->logWristLoss("engineTask");
+        }
         wasOK = false;
       }
       LogQueue::Log("[DIAG] claw engineTask: waiting sp=%d pp=%d\n", sp, pp);
