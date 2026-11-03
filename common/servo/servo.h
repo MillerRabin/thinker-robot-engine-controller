@@ -193,6 +193,7 @@ private:
     float rawIMU;
     float imu;
     float physical;
+    float aux; // see setTraceAux()
   };
   enum class TraceState : uint8_t { Idle, Recording, Dumping };
   static constexpr uint16_t traceCapacity = 800;
@@ -208,6 +209,7 @@ private:
   float traceTo = NAN;
   uint16_t traceTimeMS = 0;
   float rawIMUAngle = NAN; // setIMUAngle()'s input before the low-pass filter, for the trace
+  float traceAux = NAN;
   void traceTick(absolute_time_t now);
 
   int getWrapAndDivider(const uint freq, PWMParameters& params) const;
@@ -271,6 +273,9 @@ public:
     stabilizationGainPerSec = gainPerSec;
     stabilizationSpeed = std::min(maxSpeed, maxAngularSpeed);
   }
+  // An extra value recorded with every trace sample, e.g. an independent angle estimate to check
+  // the IMU angle against. Set it before tick().
+  void setTraceAux(float value) { traceAux = value; }
   // Starts a trace now if none is running - for a disturbance from outside, when the joint's own
   // target doesn't change (see enableTrace()).
   void requestTrace() {
@@ -281,7 +286,7 @@ public:
       traceRequested = true;
     }
   }
-  // Allocates the trace buffer (~16 KB) - see TraceSample. False if the heap can't spare it.
+  // Allocates the trace buffer (~19 KB) - see TraceSample. False if the heap can't spare it.
   bool enableTrace();
   void tick();
 

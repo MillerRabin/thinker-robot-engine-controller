@@ -39,6 +39,8 @@ class LocalBNO : public IMUBase {
     void setRotate(Quaternion rotate) {
       this->rotate = rotate;
     }
+    // quaternion is stored already rotated; a raw-frame reading (the accelerometer) needs this too.
+    Quaternion getRotate() const { return rotate; }
     LocalBNO(ArmPart* armPart, const uint sdaPin, const uint sclPin, const uint intPin, const uint rstPin);
     LocalBNO(ArmPart *armPart, const uint sckPin, const uint misoPin, const uint mosiPin, const uint csPin, const uint rstPin, const uint intPin);
     bool begin();

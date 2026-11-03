@@ -475,11 +475,11 @@ void Servo::traceTick(absolute_time_t now) {
   }
   if (traceState == TraceState::Recording) {
     trace[traceCount++] = {(uint32_t)absolute_time_diff_us(traceStart, now), targetAngle, rawIMUAngle,
-                           imuAngle, physicalAngle};
+                           imuAngle, physicalAngle, traceAux};
     if (traceCount == traceCapacity) {
       traceDumped = 0;
       traceState = TraceState::Dumping;
-      LogQueue::Log("TR%u start: target %.2f -> %.2f in %u ms; t ms, target, raw imu, imu, command\n",
+      LogQueue::Log("TR%u start: target %.2f -> %.2f in %u ms; t ms, target, raw imu, imu, command, aux\n",
                     pin, traceFrom, traceTo, traceTimeMS);
     }
     return;
@@ -487,10 +487,10 @@ void Servo::traceTick(absolute_time_t now) {
   if (traceState == TraceState::Dumping) {
     char line[LOG_QUEUE_MSG_SIZE - 2];
     int len = snprintf(line, sizeof(line), "TR%u", pin);
-    for (int i = 0; i < 3 && traceDumped < traceCount; i++, traceDumped++) {
+    for (int i = 0; i < 2 && traceDumped < traceCount; i++, traceDumped++) {
       const TraceSample &s = trace[traceDumped];
-      len += snprintf(line + len, sizeof(line) - len, " %.1f %.2f %.2f %.2f %.2f;", s.tUs / 1000.0f,
-                      s.target, s.rawIMU, s.imu, s.physical);
+      len += snprintf(line + len, sizeof(line) - len, " %.1f %.2f %.2f %.2f %.2f %.2f;", s.tUs / 1000.0f,
+                      s.target, s.rawIMU, s.imu, s.physical, s.aux);
     }
     LogQueue::Log("%s\n", line);
     if (traceDumped >= traceCount) {

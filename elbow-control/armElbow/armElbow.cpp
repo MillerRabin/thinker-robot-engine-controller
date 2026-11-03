@@ -262,6 +262,24 @@ void ArmElbow::engineTask(void *instance) {
   }
 }
 
+// The elbow's pitch from the raw accelerometer, in getIMUAngles()'s frame and PWM-space mapping - a
+// trace channel only (2026-11-03). In some sessions the game-rotation-vector pitch crawled at
+// 4.5-8deg/s while the command moved at 28deg/s, and an elbow reboot made it fast again; this follows
+// the real tilt at once (plus the arm's own acceleration), so a trace shows which one is slow.
+float ArmElbow::accelPitchDeg() {
+  if (!pitchIntegrationValid) {
+    return NAN;
+  }
+  const Accelerometer a = imu.accelerometer.load();
+  // The stored quaternion is quat * rotate, so its gravity is rotate^-1 applied to the raw-frame one.
+  const Vector3 g = imu.getRotate().invert().rotate({a.x, a.y, a.z});
+  if (fabsf(g.x) + fabsf(g.z) < 1e-3f) {
+    return NAN;
+  }
+  const float d = atan2f(-g.x, g.z) - gravityPitchAtBase;
+  return atan2f(sinf(d), cosf(d)) * RAD_TO_DEG + elbowYHomeAngle;
+}
+
 Vector3 ArmElbow::trackTick() {
   Vector3 imuAngles = getIMUAngles();
   Vector3 physicalAngles = getPhysicalAngles(imuAngles);
@@ -270,6 +288,7 @@ Vector3 ArmElbow::trackTick() {
   } else {
     elbowY.setIMUAngle(physicalAngles.y);
   }
+  elbowY.setTraceAux(accelPitchDeg());
   elbowY.tick();
   updateStatuses();
   return physicalAngles;

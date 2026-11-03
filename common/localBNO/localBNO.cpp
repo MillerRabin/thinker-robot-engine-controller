@@ -12,10 +12,14 @@ void LocalBNO::compassTask(void *instance) {
   bool needCalibration = false;
   bool needSaveCalibration = false;
   TickType_t lastCalibrationCheck = 0;
-  TickType_t lastWakeTime = xTaskGetTickCount();
   TickType_t lTime = xTaskGetTickCount();
   BNO080 *imu = &(bno->imu);
   const TickType_t calibrationCheckInterval = pdMS_TO_TICKS(3000);
+  // Read-rate diagnosis (2026-11-03): each pass reads one report, while game rotation vector and
+  // accelerometer each arrive every getRefreshInterval() ms - if the reads fall behind, the hub's
+  // queue grows and every angle comes late. Logged every 5 s: reports actually read, empty polls.
+  uint32_t grvReports = 0, accReports = 0, otherReports = 0, emptyPolls = 0;
+  TickType_t lastRateLog = xTaskGetTickCount();
   bno->begin();  
   while (true) {            
     if (imu->hasReset()) {
@@ -35,12 +39,26 @@ void LocalBNO::compassTask(void *instance) {
       continue;
     }
         
+    if (xTaskGetTickCount() - lastRateLog >= pdMS_TO_TICKS(5000)) {
+      LogQueue::Log("BNO reads 5s: grv %lu acc %lu other %lu empty %lu\n", (unsigned long)grvReports,
+                    (unsigned long)accReports, (unsigned long)otherReports, (unsigned long)emptyPolls);
+      grvReports = accReports = otherReports = emptyPolls = 0;
+      lastRateLog = xTaskGetTickCount();
+    }
     uint16_t datatype = imu->getReadings();
     if (datatype == 0) {
+      emptyPolls++;
       vTaskDelay(1);
       continue;
     }
     TickType_t now = xTaskGetTickCount();    
+    if (datatype == SENSOR_REPORTID_GAME_ROTATION_VECTOR || datatype == SENSOR_REPORTID_ROTATION_VECTOR) {
+      grvReports++;
+    } else if (datatype == SENSOR_REPORTID_ACCELEROMETER) {
+      accReports++;
+    } else {
+      otherReports++;
+    }
 
     switch (datatype) {
       case SENSOR_REPORTID_ROTATION_VECTOR:
@@ -100,7 +118,10 @@ void LocalBNO::compassTask(void *instance) {
         needSaveCalibration = true;
       }
     }
-    vTaskDelayUntil(&lastWakeTime, IMU_UPDATE_INTERVAL);
+    // No pacing delay after a report: the next one may be queued already. Pacing at one report per
+    // IMU_UPDATE_INTERVAL read 1000 of the 2000 reports the two 5 ms streams produce in 5 s (shoulder
+    // and elbow alike, 0-2 empty polls), so the hub's queue sat full and every angle came late
+    // (2026-11-03). An empty poll still yields with vTaskDelay(1) above.
   }
 }
 

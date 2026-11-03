@@ -48,6 +48,7 @@ private:
   // PWM angle calibrateYLoop() last landed on (gravity-verified vertical) - also maps the gravity
   // reading into PWM-space for the next seed, see calibrateYLoop().
   float elbowYHomeAngle = ELBOW_Y_PWM_AT_VERTICAL;
+  float accelPitchDeg();
   public:
     Servo elbowY;
     ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
