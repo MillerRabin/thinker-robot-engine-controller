@@ -26,7 +26,6 @@ private:
   TaskHandle_t taskHandle = NULL;
   RemoteWrist wrist;
   StatusLed statusLed{STATUS_LED_PIN};
-  TickType_t lastGuardTripTick = 0;
   void updateStatusLed(bool calibrating, bool ready = false);
   // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively
   // invalidates base/pitchIntegrationValid rather than waiting for the next calibration.

@@ -7,7 +7,6 @@
 enum class LedState : uint8_t {
   Off,
   Calibrating,
-  GuardTripped,
   EnginesDisabled,
   Ready,
 };
@@ -17,9 +16,6 @@ private:
   PIO pio;
   uint sm;
   LedState state = LedState::Off;
-  bool blinkOn = false;
-  absolute_time_t lastBlinkToggle;
-  static constexpr int64_t blinkIntervalUs = 250 * 1000;
   void putPixel(uint8_t r, uint8_t g, uint8_t b);
 
 public:

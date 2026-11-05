@@ -28,15 +28,7 @@ void ArmClaw::updateStatusLed(bool calibrating, bool ready) {
     clawGripper.release();
   }
 
-  constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
-  if (clawX.isDiverging() || clawY.isDiverging() || clawGripper.isDiverging()) {
-    lastGuardTripTick = xTaskGetTickCount();
-  }
-  bool guardTripRecent = lastGuardTripTick != 0 &&
-      (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
-  if (guardTripRecent) {
-    statusLed.setState(LedState::GuardTripped);
-  } else if (!enginesEnabled) {
+  if (!enginesEnabled) {
     statusLed.setState(LedState::EnginesDisabled);
   } else if (calibrating) {
     statusLed.setState(LedState::Calibrating);
@@ -128,11 +120,6 @@ bool ArmClaw::calibrateAxis(const char *phase, Servo &servo, float (ArmClaw::*re
     if (calibrationInterrupted(phase)) {
       return false;
     }
-    // A frozen servo can never satisfy settled(), so this loop needs its own way out.
-    if (servo.isDiverging()) {
-      LogQueue::Log("[DIAG] claw %s: aborted, servo diverging\n", phase);
-      return false;
-    }
     float r = (this->*reading)();
     iterations++;
     printer.interval([&]() {
@@ -177,10 +164,6 @@ bool ArmClaw::moveYOpenLoop(float pwm) {
   while (!clawY.isPositioned()) {
     updateStatusLed(true);
     if (calibrationInterrupted("moveYOpenLoop")) {
-      return false;
-    }
-    if (clawY.isDiverging()) {
-      LogQueue::Log("[DIAG] claw moveYOpenLoop: aborted, clawY diverging\n");
       return false;
     }
     clawY.setIMUAngle(clawY.getPhysicalAngle());
@@ -260,9 +243,8 @@ void ArmClaw::engineLoop() {
     auto pp = wrist.isPositionOK();
     auto bp = base.load().isValid();
     auto ep = platform.getEnginesPowerStatus();
-    auto diverging = clawX.isDiverging() || clawY.isDiverging();
-    if (!sp || !pp || !bp || !ep || diverging) {
-      LogQueue::Log("[DIAG] claw engineLoop: exit (sp=%d pp=%d bp=%d ep=%d diverging=%d) physicalX=%.2f physicalY=%.2f\n", sp, pp, bp, ep, diverging, clawX.getPhysicalAngle(), clawY.getPhysicalAngle());
+    if (!sp || !pp || !bp || !ep) {
+      LogQueue::Log("[DIAG] claw engineLoop: exit (sp=%d pp=%d bp=%d ep=%d) physicalX=%.2f physicalY=%.2f\n", sp, pp, bp, ep, clawX.getPhysicalAngle(), clawY.getPhysicalAngle());
       clawX.reset();
       clawY.reset();
       break;
@@ -308,7 +290,7 @@ void ArmClaw::engineTask(void *instance) {
       // how the gripper's travel was found, and how X/Y's PWM-vs-gravity mapping gets measured
       // before their real calibration is trusted. An axis gets no pulse until it's commanded.
       // Runs at the normal tick rate while a move is in flight - tick() assumes ~5ms ticks (dt is
-      // capped at 10ms), so the 250ms idle cadence would crawl and trip the stall check.
+      // capped at 10ms), so the 250ms idle cadence would crawl.
       struct ManualAxis {
         Servo &servo;
         float start;
@@ -325,7 +307,7 @@ void ArmClaw::engineTask(void *instance) {
                            {claw->clawY, yStart},
                            {claw->clawGripper, CLAW_GRIPPER_HOME_POSITION}};
       auto moving = [](Servo &s) {
-        return s.isHolding() && !isnan(s.getTargetAngle()) && !s.isPositioned() && !s.isDiverging();
+        return s.isHolding() && !isnan(s.getTargetAngle()) && !s.isPositioned();
       };
       TickType_t manualWakeTime = xTaskGetTickCount();
       while (claw->platform.getEnginesPowerStatus()) {
@@ -351,9 +333,8 @@ void ArmClaw::engineTask(void *instance) {
       claw->angleFromGravityY();
       static Periodic gripperPrinter(pdMS_TO_TICKS(1000));
       gripperPrinter.interval([&]() {
-        LogQueue::Log("[DIAG] claw gripper: target=%.2f physical=%.2f diverging=%d\n",
-                      claw->clawGripper.getTargetAngle(), claw->clawGripper.getPhysicalAngle(),
-                      claw->clawGripper.isDiverging());
+        LogQueue::Log("[DIAG] claw gripper: target=%.2f physical=%.2f\n",
+                      claw->clawGripper.getTargetAngle(), claw->clawGripper.getPhysicalAngle());
       });
       vTaskDelay(pdMS_TO_TICKS(250));
       continue;

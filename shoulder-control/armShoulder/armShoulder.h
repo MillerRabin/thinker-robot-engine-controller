@@ -27,8 +27,6 @@ private:
   Vector3 trackTick();
   bool settled(bool withinTolerance, TickType_t &stableSince);
   StatusLed statusLed{STATUS_LED_PIN};
-  // Latched, not live isDiverging() - a trip can self-clear within one tick, too fast to see.
-  TickType_t lastGuardTripTick = 0;
   void updateStatusLed(bool calibrating, bool ready = false);
   // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively
   // invalidates base/pitchIntegrationValid rather than waiting for the next calibration.
@@ -39,8 +37,6 @@ private:
   float shoulderYHomeAngle = SHOULDER_Y_HOME_POSITION;
   bool pitchIntegrationValid = false;
   float accumulatedPitchX = 0.0f;
-  // Absolute gravity pitch (rad) captured when pitchIntegrationValid re-anchors - see getIMUAngles().
-  float gravityPitchAtBase = 0.0f;
   // Last trusted angleFromGravityY() reading and when it was taken, for its own glitch filter -
   // time-aware because this function is called from both a tight ~5ms tracking loop and a slower
   // ~250ms idle-diagnostic loop, so a flat per-call jump threshold would be wrong for one of them.

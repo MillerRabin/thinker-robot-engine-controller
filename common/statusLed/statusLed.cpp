@@ -4,7 +4,6 @@
 StatusLed::StatusLed(uint pin, PIO pio, uint sm) : pio(pio), sm(sm) {
   uint offset = pio_add_program(pio, &ws2812_program);
   ws2812_program_init(pio, sm, offset, pin, 800000.0f);
-  lastBlinkToggle = get_absolute_time();
   putPixel(0, 0, 0);
 }
 
@@ -17,11 +16,7 @@ void StatusLed::putPixel(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void StatusLed::setState(LedState newState) {
-  if (newState != state) {
-    state = newState;
-    blinkOn = true;
-    lastBlinkToggle = get_absolute_time();
-  }
+  state = newState;
 
   switch (state) {
     case LedState::Off:
@@ -29,13 +24,6 @@ void StatusLed::setState(LedState newState) {
       break;
     case LedState::Calibrating:
       putPixel(60, 60, 0);
-      break;
-    case LedState::GuardTripped:
-      if (absolute_time_diff_us(lastBlinkToggle, get_absolute_time()) >= blinkIntervalUs) {
-        blinkOn = !blinkOn;
-        lastBlinkToggle = get_absolute_time();
-      }
-      putPixel(blinkOn ? 80 : 0, 0, 0);
       break;
     case LedState::EnginesDisabled:
       putPixel(0, 0, 80);

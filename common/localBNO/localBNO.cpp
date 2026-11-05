@@ -3,6 +3,82 @@
 uint32_t LocalBNO::notificationIndex = 1;
 TaskHandle_t LocalBNO::compassTaskHandle;
 
+// The game rotation vector can integrate the gyro about the wrong axis for a whole boot while the
+// same chip's accelerometer stays right (shoulder, 2026-11-05, after a reflash): a 10deg turn about
+// the joint (body y) read as 10deg about body x, and it snapped to y only ~0.5 s after the joint
+// stopped. Twist about y barely moved, the correction kept driving, and the shoulder swept 0<->180
+// on a still platform - the 2026-11-03 sweep too, most likely. The quaternion's gravity vs the
+// accelerometer's: median 0.2-1.4deg in normal runs (platform tilts up to 140deg included); in
+// that bad boot 14deg for 1.2 s on a 10deg move, 30-35deg for 2.7 s as the sweep began. 10deg for
+// 0.5 s (first version) came close to tripping on a good wrist during platform tilts with the faster
+// hold response: 20deg peak, 0.6 s above 10 - the end of the arm feels the shoulder's and elbow's
+// accelerations most. 15deg for 1 s still stops the sweep in its first second or two.
+constexpr float FUSION_MAX_ERROR_DEG = 15.0f;
+constexpr TickType_t FUSION_MAX_ERROR_TIME = pdMS_TO_TICKS(1000);
+constexpr float FUSION_FILTER_TAU_SEC = 0.1f;
+// Readings off 1 g by more than this are a shock, not gravity. A sustained sideways acceleration
+// can't fake 10deg for 0.5 s on this arm (that would take ~0.9 m/s of speed gained).
+constexpr float FUSION_ACCEL_BAND = 1.5f; // m/s^2 around 9.81
+constexpr TickType_t FUSION_SETTLE_TIME = pdMS_TO_TICKS(3000);
+// Give up after this many resets each within the window of the previous one - a BNO a reset doesn't
+// cure would otherwise recalibrate the arm forever.
+constexpr int FUSION_MAX_RESETS = 3;
+constexpr TickType_t FUSION_RESET_WINDOW = pdMS_TO_TICKS(60000);
+
+// True when the quaternion has disagreed with the accelerometer for too long and the BNO should be
+// reset - its new world frame invalidates the arm part's base, so the part recalibrates.
+bool LocalBNO::fusionDiverged(const Accelerometer &acc, TickType_t now) {
+  float dtSec = (float)(now - fusionLastCheck) / configTICK_RATE_HZ;
+  fusionLastCheck = now;
+  if ((int32_t)(now - fusionCheckFrom) < 0) {
+    return false;
+  }
+  Quaternion q = quaternion.load();
+  if (!q.isValid()) {
+    return false;
+  }
+  Vector3 a = rotate.isValid() ? rotate.invert().rotate({acc.x, acc.y, acc.z}) : Vector3{acc.x, acc.y, acc.z};
+  float aLen = sqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
+  if (fabsf(aLen - 9.81f) > FUSION_ACCEL_BAND) {
+    return false;
+  }
+  Vector3 g = q.getGravityVector();
+  float gLen = sqrtf(g.x * g.x + g.y * g.y + g.z * g.z);
+  float cosErr = std::clamp((g.x * a.x + g.y * a.y + g.z * a.z) / (gLen * aLen), -1.0f, 1.0f);
+  float errorDeg = acosf(cosErr) * RAD_TO_DEG;
+  fusionErrorDeg += (errorDeg - fusionErrorDeg) * std::min(dtSec / FUSION_FILTER_TAU_SEC, 1.0f);
+  fusionErrorMaxDeg = std::max(fusionErrorMaxDeg, fusionErrorDeg);
+
+  if (fusionErrorDeg <= FUSION_MAX_ERROR_DEG) {
+    fusionBadSince = 0;
+    return false;
+  }
+  if (fusionBadSince == 0) {
+    fusionBadSince = now;
+    return false;
+  }
+  if (now - fusionBadSince < FUSION_MAX_ERROR_TIME) {
+    return false;
+  }
+  if (fusionResets > 0 && now - fusionLastReset > FUSION_RESET_WINDOW) {
+    fusionResets = 0;
+  }
+  if (fusionResets >= FUSION_MAX_RESETS) {
+    static Periodic giveUpPrinter(pdMS_TO_TICKS(10000));
+    giveUpPrinter.interval([&]() {
+      LogQueue::Log("BNO fusion still %.1fdeg off its accelerometer after %d resets - not resetting again\n",
+                    fusionErrorDeg, fusionResets);
+    });
+    return false;
+  }
+  fusionResets++;
+  fusionLastReset = now;
+  LogQueue::Log("BNO fusion %.1fdeg off its accelerometer for %lu ms - resetting the BNO (%d of %d)\n",
+                fusionErrorDeg, (unsigned long)((now - fusionBadSince) * portTICK_PERIOD_MS), fusionResets,
+                FUSION_MAX_RESETS);
+  return true;
+}
+
 void LocalBNO::tare(uint8_t axisMask) {
   imu.tare(axisMask, 0);
 }
@@ -40,9 +116,11 @@ void LocalBNO::compassTask(void *instance) {
     }
         
     if (xTaskGetTickCount() - lastRateLog >= pdMS_TO_TICKS(5000)) {
-      LogQueue::Log("BNO reads 5s: grv %lu acc %lu other %lu empty %lu\n", (unsigned long)grvReports,
-                    (unsigned long)accReports, (unsigned long)otherReports, (unsigned long)emptyPolls);
+      LogQueue::Log("BNO reads 5s: grv %lu acc %lu other %lu empty %lu, fusion error max %.1fdeg\n",
+                    (unsigned long)grvReports, (unsigned long)accReports, (unsigned long)otherReports,
+                    (unsigned long)emptyPolls, bno->fusionErrorMaxDeg);
       grvReports = accReports = otherReports = emptyPolls = 0;
+      bno->fusionErrorMaxDeg = 0.0f;
       lastRateLog = xTaskGetTickCount();
     }
     uint16_t datatype = imu->getReadings();
@@ -51,7 +129,8 @@ void LocalBNO::compassTask(void *instance) {
       vTaskDelay(1);
       continue;
     }
-    TickType_t now = xTaskGetTickCount();    
+    TickType_t now = xTaskGetTickCount();
+    bool resetFusion = false;
     if (datatype == SENSOR_REPORTID_GAME_ROTATION_VECTOR || datatype == SENSOR_REPORTID_ROTATION_VECTOR) {
       grvReports++;
     } else if (datatype == SENSOR_REPORTID_ACCELEROMETER) {
@@ -82,15 +161,24 @@ void LocalBNO::compassTask(void *instance) {
         bno->armPart->updateAccelerometer(bno);            
         break;
       }
-      case SENSOR_REPORTID_ACCELEROMETER: {        
+      case SENSOR_REPORTID_ACCELEROMETER: {
         Accelerometer acc;
-        acc.fromBNO(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);        
+        acc.fromBNO(imu->rawAccelX, imu->rawAccelY, imu->rawAccelZ);
         bno->accelerometer.store(acc);
         bno->armPart->updateAccelerometer(bno);
+        resetFusion = bno->fusionDiverged(acc, now);
         break;
       }
       default:
         break;
+    }
+
+    if (resetFusion) {
+      // begin() pulses the RST pin (SPI) or soft-resets (I2C) and re-enables the reports.
+      bno->begin();
+      needCalibration = false;
+      bno->armPart->onIMUReset();
+      continue;
     }
 
     bno->updateAccuracy(imu->rawQuatRadianAccuracy, imu->getQuatAccuracy(), imu->gyroAccuracy, imu->accelLinAccuracy);
@@ -222,8 +310,11 @@ bool LocalBNO::begin() {
   }      
   initIMU();
   quaternion.makeFresh();
+  fusionCheckFrom = xTaskGetTickCount() + FUSION_SETTLE_TIME;
+  fusionErrorDeg = 0.0f;
+  fusionBadSince = 0;
   return true;
-} 
+}
 
 bool LocalBNO::beginI2C() {  
   i2c_init(i2c_default, 400 * 1000);

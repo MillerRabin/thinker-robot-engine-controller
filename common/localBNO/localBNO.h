@@ -26,8 +26,17 @@ class LocalBNO : public IMUBase {
     static uint32_t notificationIndex;
     static TaskHandle_t compassTaskHandle;
     bool beginI2C();
-    bool beginSPI();    
+    bool beginSPI();
     Quaternion rotate;
+    // Fusion check state - see fusionDiverged().
+    float fusionErrorDeg = 0.0f;       // low-passed angle between the quaternion's and the accelerometer's gravity
+    float fusionErrorMaxDeg = 0.0f;    // peak of fusionErrorDeg since the last "BNO reads" log line
+    TickType_t fusionCheckFrom = 0;    // no check before this tick (the fusion settling after a reset)
+    TickType_t fusionLastCheck = 0;
+    TickType_t fusionBadSince = 0;     // 0 = fusionErrorDeg is under the limit
+    TickType_t fusionLastReset = 0;
+    int fusionResets = 0;              // resets within FUSION_RESET_WINDOW of each other
+    bool fusionDiverged(const Accelerometer &acc, TickType_t now);
   protected:
     void initIMU();
     ArmPart *armPart;

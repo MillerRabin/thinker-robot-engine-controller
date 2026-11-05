@@ -83,18 +83,11 @@ private:
   float physicalAngle = NAN; // commanded servo angle
   float targetAngle = NAN;   // target angle
 
-  // Divergence guard: freeze if tracking error grows instead of shrinking for a sustained period.
-  float divergenceCheckError = NAN;
-  absolute_time_t divergenceCheckTime = 0;
-  uint8_t divergingIntervals = 0;
-  bool diverging = false;
-  static constexpr int64_t divergenceCheckIntervalUs = 300000;
-  static constexpr uint8_t divergenceMaxIntervals = 6;
-  static constexpr float divergenceMarginDeg = 2.0f;
+  // REMOVED (2026-11-03, the user's call): the last freeze guard - error grown by more than 2deg in
+  // each of 6 consecutive 0.3 s checks. Like the stall check below, it read a tilting base as a
+  // fault: on a fast platform tilt the error outgrows the hold speed. With it went the whole
+  // diverging/isDiverging() freeze; a joint now always keeps correcting.
 
-  // Catches the case a growing-error check misses: pinned at a limit with a large but non-growing error.
-  absolute_time_t limitPinnedSince = 0;
-  static constexpr int64_t limitPinnedMaxUs = divergenceCheckIntervalUs * divergenceMaxIntervals;
 
   // REMOVED (2026-08-24): a "lead clamp" + hard physicalAngle-vs-imuAngle gap guard used to live
   // here, meant to stop physicalAngle from racing ahead of imuAngle. Both versions tried (an
@@ -107,36 +100,24 @@ private:
   // incident). Do not reintroduce a check that assumes a specific physicalAngle-vs-imuAngle
   // relationship without solid, full-range live-measured evidence it holds for every joint that
   // will use it - it doesn't for elbow, and there's no guarantee it holds for future joints either.
-  // The progress check below (relationship-agnostic - it only ever looks at imuAngle by itself)
-  // covers the actual danger this was trying to catch: see its comment.
 
-  // Catches a persistent windup: imuAngle isn't making real progress toward targetAngle while
-  // physicalAngle keeps getting commanded further - confirmed live as the actual shoulder incident
-  // this was built for ("physicalAngle ran from ~91 to its 180 range limit over several seconds
-  // while imuAngle sat at a near-constant ~90"). Deliberately doesn't look at physicalAngle at all -
-  // only checks that imuAngle itself is moving, which needs no assumption about how physicalAngle's
-  // scale relates to imuAngle's scale (see the removed lead-clamp comment above for why that
-  // assumption is unsafe). The existing growing-error check above and pinned-at-limit check below
-  // are equally relationship-agnostic and remain as-is; together the three cover: wrong direction
-  // (growing error), stuck at a hard limit (pinned), and stuck anywhere else (this one).
-  // 5s window (not 1.8s, matching the other checks): confirmed live that closing the last few
-  // degrees of a real, unhurried convergence can legitimately take longer than 1.8s (false-tripped
-  // once on shoulderY with no mechanical resistance) - 5s gives real convergence room while still
-  // catching an actual stall in bounded time.
-  absolute_time_t progressCheckTime = 0;
-  float progressCheckImuAngle = NAN;
-  // Widened from 1.0 (2026-08-31): a real 1.17deg residual on elbow tripped this, since it sat just
-  // above the old threshold - same false-positive class as tick()'s absError-skip guard (stable
-  // holding just outside the dead zone, correctly not "making progress" because there's nothing
-  // meaningful left to correct). 2.0 gives that a comfortable margin.
+  // REMOVED (2026-11-03): a stall check that froze the joint when imuAngle had moved less than 2deg
+  // over 5 s with the error still >= 2deg - built for windup while the data lagged ("physicalAngle
+  // ran from ~91 to its 180 range limit over several seconds while imuAngle sat at ~90"). It assumed a
+  // still base: a joint holding its angle while the platform or its parent tilts rocks around its
+  // target, so the IMU ends where it started 5 s earlier while the command has moved 17deg - it froze
+  // the elbow, then the shoulder, into recalibrations on a live platform tilt. Windup now ends at the
+  // safe limit, where tick() holds.
+
+  // Error size that counts as a real correction rather than noise or a bias - see the
+  // fine-correction budget in tick().
   static constexpr float minProgressDeg = 2.0f;
-  static constexpr int64_t progressCheckIntervalUs = 5000000;
 
   // Opt-in anti-windup limit (deg), NAN = disabled - see setMaxLead() and tick().
   float maxLeadDeg = NAN;
 
   // Fine-correction budget - see tick(). Reset only by a new target (setTargetAngle()/reset()), not
-  // by resetDivergence(), which also runs on every dead-zone dip.
+  // by resetCorrection(), which also runs on every dead-zone dip.
   float fineAnchorPhysical = NAN;
   float fineCorrectionBudgetDeg = 3.0f; // see setFineCorrectionBudget()
   // When absError first went >= minProgressDeg, 0 while below - the anchor is only released once
@@ -150,7 +131,8 @@ private:
   // release()) - the constructor's homePosition is bookkeeping only, nothing is output until then.
   bool outputActive = false;
 
-  void resetDivergence();
+  // Restarts the speed ramp and the fine-budget release timer - see tick().
+  void resetCorrection();
 
   // Planned move (see planMove()): the command follows a minimum-jerk curve from planStart to
   // planEnd over planDurationUs, by time rather than by IMU error; tick() then falls back to its
@@ -296,7 +278,7 @@ public:
 
   // Stops control but keeps holding: the PWM output stays at the last commanded position, and
   // physicalAngle keeps describing it, so the next calibration can seed from it with no jump (see
-  // isHolding()). For a guard trip or a lost parent while engines stay on - the previous version
+  // isHolding()). For a lost parent while engines stay on - the previous version
   // also cut the output (release()), so every shoulder recalibration dropped a limp elbow and wrist
   // under gravity (confirmed live 2026-10-31: the wrist "lost vertical" in one such cascade).
   void reset() {
@@ -331,7 +313,6 @@ public:
   }
 
   bool isPositioned() const;
-  bool isDiverging() const { return diverging; }
   // Actively outputting physicalAngle - the servo is physically there (within backlash/sag).
   bool isHolding() const { return outputActive && !isnan(physicalAngle); }
 };

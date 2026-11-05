@@ -33,15 +33,7 @@ void ArmElbow::updateStatusLed(bool calibrating, bool ready) {
     elbowY.release();
   }
 
-  constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
-  if (elbowY.isDiverging()) {
-    lastGuardTripTick = xTaskGetTickCount();
-  }
-  bool guardTripRecent = lastGuardTripTick != 0 &&
-      (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
-  if (guardTripRecent) {
-    statusLed.setState(LedState::GuardTripped);
-  } else if (!enginesEnabled) {
+  if (!enginesEnabled) {
     statusLed.setState(LedState::EnginesDisabled);
   } else if (calibrating) {
     statusLed.setState(LedState::Calibrating);
@@ -157,12 +149,6 @@ bool ArmElbow::calibrateYLoop() {
     updateStatusLed(true);
     if (!shoulder.isPositionOK()) {
       LogQueue::Log("Calibrating Y aborted: shoulder lost position\n");
-      ok = false;
-      break;
-    }
-    // A frozen servo can never satisfy settled(), so this loop needs its own way out.
-    if (elbowY.isDiverging()) {
-      LogQueue::Log("Calibrating Y aborted: elbowY diverging\n");
       ok = false;
       break;
     }
@@ -304,8 +290,10 @@ void ArmElbow::engineLoop() {
     auto sp = imu.isPositionOK();
     auto pp = shoulder.isPositionOK();
     auto ep = platform.getEnginesPowerStatus();
-    if (!sp || !pp || !ep || elbowY.isDiverging()) {
-      LogQueue::Log("Engine is turned off (sp=%d pp=%d ep=%d diverging=%d)\n", sp, pp, ep, elbowY.isDiverging());
+    // A BNO reset (see LocalBNO::fusionDiverged()) invalidates base - recalibrate, like the shoulder and wrist.
+    auto bp = base.isValid();
+    if (!sp || !pp || !bp || !ep) {
+      LogQueue::Log("Engine is turned off (sp=%d pp=%d bp=%d ep=%d)\n", sp, pp, bp, ep);
       elbowY.reset();
       break;
     }
@@ -335,6 +323,10 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   elbowY.enableTrace();
   // The elbow servo ran at 8-15deg/s on 2026-11-02 (27deg/s that morning) - see Servo::settleTick().
   elbowY.setPlanSettle(3000);
+  // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
+  // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
+  // elbow's planned-move peak of ~28deg/s.
+  elbowY.setHoldResponse(1.5f, 40.0f);
 }
 
 int ArmElbow::begin() {
@@ -475,30 +467,16 @@ float ArmElbow::angleFromGravityY() {
 Vector3 ArmElbow::getIMUAngles() {
   Quaternion qm = base * imu.quaternion.load();
 
-  // pitchY used to be delta-integrated via a per-tick yaw-strip-then-swing decomposition of the
-  // quaternion delta (qDeltaSwing.twistAngle({0,1,0})) - order-sensitive, breaks under a large
-  // rotation between ticks. A comment here used to claim this already matched
-  // ArmShoulder::getIMUAngles()'s fix for the identical bug, but the fix was never actually applied
-  // to this function - only the comment was added. Confirmed live (2026-08-25) as a real incident:
-  // elbow reached vertical correctly, then suddenly snapped down and hit the table, repeatedly.
-  // Fixed the same way as shoulder: use the absolute, yaw-invariant gravity-vector formula directly
-  // (this was already computed as the drift-correction term), no delta/integration state needed.
-  // Measured from the ABSOLUTE quaternion's gravity, as a delta from its value at calibration - not
-  // from qm's, whose "gravity" is really the calibration pose's body z-axis and only stands for
-  // gravity if that was vertical. Here it's ~7deg off (raw reads ~7.35 at vertical), enough to turn
-  // a rotation about the vertical into fake pitch - confirmed live on the wrist (2026-10-31, body z
-  // horizontal there): a 15-20deg shoulder-z turn read as 4-6deg and tracking tilted it for real.
+  // The rotation about the joint's own axis (body y) since calibration, straight from the
+  // quaternion - see ArmShoulder::getIMUAngles() for why not the gravity projection any more
+  // (undefined with the joint axis near vertical, 2026-11-03) and why not per-tick deltas (this
+  // elbow snapped down and hit the table, 2026-08-25).
   float pitchY;
-  Quaternion qAbs = imu.quaternion.load();
-  Vector3 gAbs = qAbs.getGravityVector();
-  float gravityPitch = atan2(-gAbs.x, gAbs.z);
-  float pitchYAbs = NAN;
-  if (qAbs.isValid() && !isnan(gravityPitch)) {
-    if (!pitchIntegrationValid) {
-      gravityPitchAtBase = gravityPitch;
-    }
-    float d = gravityPitch - gravityPitchAtBase;
-    pitchYAbs = atan2f(sinf(d), cosf(d));
+  float pitchYAbs = qm.twistAngle({0.0f, 1.0f, 0.0f});
+  if (!pitchIntegrationValid) {
+    // Only for accelPitchDeg()'s trace channel now.
+    Vector3 g = imu.quaternion.load().getGravityVector();
+    gravityPitchAtBase = atan2(-g.x, g.z);
   }
   if (!qm.isValid() || isnan(pitchYAbs)) {
     // Glitched reading - hold the last value instead of feeding NaN/garbage forward.

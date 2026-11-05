@@ -25,8 +25,6 @@ private:
   void engineLoop();
   Vector3 trackTick();
   StatusLed statusLed{STATUS_LED_PIN};
-  // Latched, not live isDiverging() - a trip can self-clear within one tick, too fast to see.
-  TickType_t lastGuardTripTick = 0;
   void updateStatusLed(bool calibrating, bool ready = false);
   // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively
   // invalidates base/pitchIntegrationValid rather than waiting for the next calibration.
@@ -39,7 +37,7 @@ private:
   Quaternion base;
   bool pitchIntegrationValid = false;
   float accumulatedPitchY = 0.0f;
-  // Absolute gravity pitch (rad) captured when pitchIntegrationValid re-anchors - see getIMUAngles().
+  // Absolute gravity pitch (rad) captured when pitchIntegrationValid re-anchors - accelPitchDeg()'s reference.
   float gravityPitchAtBase = 0.0f;
   // use is the intended default; not-use is the emergency fallback.
   AtomicValue<uint8_t> useIMUMode{static_cast<uint8_t>(USE_IMU_USE), pdMS_TO_TICKS(500)};

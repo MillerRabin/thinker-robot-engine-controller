@@ -27,15 +27,7 @@ void ArmWrist::updateStatusLed(bool calibrating, bool ready) {
     wristZ.release();
   }
 
-  constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
-  if (wristY.isDiverging() || wristZ.isDiverging()) {
-    lastGuardTripTick = xTaskGetTickCount();
-  }
-  bool guardTripRecent = lastGuardTripTick != 0 &&
-      (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
-  if (guardTripRecent) {
-    statusLed.setState(LedState::GuardTripped);
-  } else if (!enginesEnabled) {
+  if (!enginesEnabled) {
     statusLed.setState(LedState::EnginesDisabled);
   } else if (calibrating) {
     statusLed.setState(LedState::Calibrating);
@@ -132,12 +124,6 @@ bool ArmWrist::calibrateYLoop() {
       setYCalibrating(false);
       return false;
     }
-    // A frozen servo can never satisfy settled(), so this loop needs its own way out.
-    if (wristY.isDiverging()) {
-      LogQueue::Log("[DIAG] wrist calibrateYLoop: aborted, wristY diverging\n");
-      setYCalibrating(false);
-      return false;
-    }
     // elbow.isPositionOK() doesn't reliably/promptly reflect engines-off (it only tracks elbow's
     // own calibrated bit, which lags a CAN round-trip behind platform's engines status) - without
     // this, tick() keeps advancing physicalAngle with no servo power, then snaps to that stale
@@ -181,11 +167,6 @@ bool ArmWrist::calibrateZLoop() {
   uint32_t iterations = 0;
   while (!wristZ.isPositioned()) {
     updateStatusLed(true);
-    if (wristZ.isDiverging()) {
-      LogQueue::Log("[DIAG] wrist calibrateZLoop: aborted, wristZ diverging\n");
-      setZCalibrating(false);
-      return false;
-    }
     if (!platform.getEnginesPowerStatus()) {
       LogQueue::Log("[DIAG] wrist calibrateZLoop: aborted, engines powered off\n");
       setZCalibrating(false);
@@ -248,11 +229,6 @@ bool ArmWrist::calibrateLoop() {
     uint32_t iterations = 0;
     while (true) {
       updateStatusLed(true);
-      if (wristY.isDiverging() || wristZ.isDiverging()) {
-        LogQueue::Log("[DIAG] wrist calibrateLoop: aborted, servo diverging during settle wait\n");
-        ok = false;
-        break;
-      }
       if (!elbow.isPositionOK()) {
         LogQueue::Log("[DIAG] wrist calibrateLoop: aborted, elbow lost position during settle wait\n");
         ok = false;
@@ -307,9 +283,8 @@ void ArmWrist::engineLoop() {
     auto pp = elbow.isPositionOK();
     auto bp = base.load().isValid();
     auto ep = platform.getEnginesPowerStatus();
-    auto diverging = wristY.isDiverging() || wristZ.isDiverging();
-    if (!sp || !pp || !bp || !ep || diverging) {
-      LogQueue::Log("[DIAG] wrist engineLoop: exit (sp=%d pp=%d bp=%d ep=%d diverging=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, ep, diverging, wristY.getPhysicalAngle(), wristZ.getPhysicalAngle());
+    if (!sp || !pp || !bp || !ep) {
+      LogQueue::Log("[DIAG] wrist engineLoop: exit (sp=%d pp=%d bp=%d ep=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, ep, wristY.getPhysicalAngle(), wristZ.getPhysicalAngle());
       wristY.reset();
       wristZ.stop();
       break;
@@ -489,32 +464,19 @@ Vector3 ArmWrist::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
 
-  // pitchY used to be delta-integrated via a per-tick yaw-strip-then-swing decomposition of the
-  // quaternion delta (qDeltaSwing.twistAngle({0,1,0})) - order-sensitive, breaks under a large
-  // rotation between ticks. A comment here claimed this already matched ArmShoulder's fix for the
-  // identical bug, but the fix was never actually applied to this function - only the comment was
-  // copied (confirmed live 2026-08-25 as a real incident on ArmElbow's identical copy-paste; wrist
-  // has never been live-tested with this code path active). Fixed the same way as shoulder/elbow:
-  // use the absolute, yaw-invariant gravity-vector formula directly (already computed as the drift-
-  // correction term below), no delta/integration state needed.
-  // Measured from the ABSOLUTE quaternion's gravity, as a delta from its value at calibration - not
-  // from qm's: qm's "gravity" is really the calibration pose's body z-axis, which only stands for
-  // gravity if it was vertical then. Wrist's isn't (this axis reads ~90 at vertical, so body z is
-  // horizontal), so a rotation about the vertical turned into a fake pitch - confirmed live
-  // (2026-10-31): a 15-20deg shoulder-z turn read as 4-6deg of wrist pitch, and tracking really
-  // tilted the wrist chasing it. Gravity in the body frame can't change under that rotation at all.
+  // The rotation about the joint's own axis since calibration, straight from the quaternion - see
+  // ArmShoulder::getIMUAngles() for why not the gravity projection any more (undefined with the
+  // joint axis near vertical, 2026-11-03) and why not per-tick deltas. Not qm's gravity either: that
+  // is the calibration pose's body z-axis, horizontal here (this axis reads ~90 at vertical), and a
+  // 15-20deg shoulder-z turn read through it as 4-6deg of fake pitch (2026-10-31). A turn about the
+  // vertical gives no twist about a horizontal joint axis.
+  // The joint axis isn't body y in this IMU's corrected frame (q_corr only got gravity right):
+  // measured 2026-11-05 by moving the wrist alone 20deg and back with the platform still - a 25deg
+  // turn about (-0.555, 0.778, -0.292), steady within 0.01 over the whole move. Twist about y read
+  // 0.78 of it, so a 20deg command turned the wrist 25deg.
+  constexpr Vector3 WRIST_Y_JOINT_AXIS = {-0.555f, 0.778f, -0.292f};
   float pitchY;
-  Quaternion qAbs = imu.quaternion.load();
-  Vector3 gAbs = qAbs.getGravityVector();
-  float gravityPitch = atan2(-gAbs.x, gAbs.z);
-  float pitchYAbs = NAN;
-  if (qAbs.isValid() && !isnan(gravityPitch)) {
-    if (!pitchIntegrationValid) {
-      gravityPitchAtBase = gravityPitch;
-    }
-    float d = gravityPitch - gravityPitchAtBase;
-    pitchYAbs = atan2f(sinf(d), cosf(d));
-  }
+  float pitchYAbs = qm.twistAngle(WRIST_Y_JOINT_AXIS);
   if (!qm.isValid() || isnan(pitchYAbs)) {
     // Glitched reading - hold the last value instead of feeding NaN/garbage forward.
     pitchY = accumulatedPitchY;
@@ -535,6 +497,9 @@ Vector3 ArmWrist::getIMUAngles() {
   static Periodic axisPrinter(pdMS_TO_TICKS(300));
   axisPrinter.interval([&]() {
     LogQueue::Log("[DIAG] wrist pitchY=%.2f yawZ=%.2f\n", pitchY * RAD_TO_DEG, yawZ * RAD_TO_DEG);
+    // The absolute quaternion, to check the twist against the gravity projection offline (2026-11-03).
+    Quaternion raw = imu.quaternion.load();
+    LogQueue::Log("[DIAG] wrist rawQuat i=%.4f j=%.4f k=%.4f real=%.4f\n", raw.i, raw.j, raw.k, raw.real);
   });
 
   return {0, pitchY, yawZ};

@@ -28,15 +28,7 @@ void ArmShoulder::updateStatusLed(bool calibrating, bool ready) {
     shoulderZ.release();
   }
 
-  constexpr TickType_t guardTripHoldTicks = pdMS_TO_TICKS(1500);
-  if (shoulderY.isDiverging() || shoulderZ.isDiverging()) {
-    lastGuardTripTick = xTaskGetTickCount();
-  }
-  bool guardTripRecent = lastGuardTripTick != 0 &&
-      (xTaskGetTickCount() - lastGuardTripTick) < guardTripHoldTicks;
-  if (guardTripRecent) {
-    statusLed.setState(LedState::GuardTripped);
-  } else if (!enginesEnabled) {
+  if (!enginesEnabled) {
     statusLed.setState(LedState::EnginesDisabled);
   } else if (calibrating) {
     statusLed.setState(LedState::Calibrating);
@@ -86,7 +78,7 @@ bool ArmShoulder::calibrateYLoop() {
   // legitimately jumped far from the last accepted reading) and return NaN - std::clamp() on NaN is
   // unspecified/implementation-defined, so it silently passed the NaN through to setDegreeDirect()
   // instead of being caught, leaving physicalAngle desynced from the real position.
-  // A servo still holding (recalibration after a guard trip, engines never went off) is seeded where
+  // A servo still holding (recalibration after a lost IMU or platform, engines never went off) is seeded where
   // it already is - re-seeding from gravity jumped by the ~6deg backlash near vertical.
   bool holding = shoulderY.isHolding();
   float imuY = holding ? shoulderY.getPhysicalAngle() : std::clamp(lastSeedSample, 0.0f, 180.0f);
@@ -125,12 +117,6 @@ bool ArmShoulder::calibrateYLoop() {
   uint32_t iterations = 0;
   while (true) {
     updateStatusLed(true);
-    // A frozen servo can never satisfy settled(), so this loop needs its own way out.
-    if (shoulderY.isDiverging()) {
-      LogQueue::Log("[DIAG] calibrateYLoop: aborted, shoulderY diverging\n");
-      setYCalibrating(false);
-      return false;
-    }
     // Without this, tick() keeps advancing physicalAngle (PWM bookkeeping) toward closing the
     // error even with no servo power - it then snaps to that stale value once power returns.
     if (!platform.getEnginesPowerStatus()) {
@@ -175,11 +161,6 @@ bool ArmShoulder::calibrateZLoop() {
   uint32_t iterations = 0;
   while (!shoulderZ.isPositioned()) {
     updateStatusLed(true);
-    if (shoulderZ.isDiverging()) {
-      LogQueue::Log("[DIAG] calibrateZLoop: aborted, shoulderZ diverging\n");
-      setZCalibrating(false);
-      return false;
-    }
     if (!platform.getEnginesPowerStatus()) {
       LogQueue::Log("[DIAG] calibrateZLoop: aborted, engines powered off\n");
       setZCalibrating(false);
@@ -241,11 +222,6 @@ bool ArmShoulder::calibrateLoop() {
     uint32_t iterations = 0;
     while (true) {
       updateStatusLed(true);
-      if (shoulderY.isDiverging() || shoulderZ.isDiverging()) {
-        LogQueue::Log("[DIAG] calibrateLoop: aborted, servo diverging during settle wait\n");
-        ok = false;
-        break;
-      }
       if (!platform.getEnginesPowerStatus()) {
         LogQueue::Log("[DIAG] calibrateLoop: aborted, engines powered off during settle wait\n");
         ok = false;
@@ -295,9 +271,8 @@ void ArmShoulder::engineLoop() {
     auto sp = imu.isPositionOK();
     auto pp = platform.isPositionOK();
     auto bp = base.load().isValid();
-    auto diverging = shoulderY.isDiverging() || shoulderZ.isDiverging();
-    if (!sp || !pp || !bp || diverging) {
-      LogQueue::Log("[DIAG] engineLoop: exit (sp=%d pp=%d bp=%d diverging=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, diverging, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
+    if (!sp || !pp || !bp) {
+      LogQueue::Log("[DIAG] engineLoop: exit (sp=%d pp=%d bp=%d) physicalY=%.2f physicalZ=%.2f\n", sp, pp, bp, shoulderY.getPhysicalAngle(), shoulderZ.getPhysicalAngle());
       shoulderY.reset();
       shoulderZ.stop();
       break;
@@ -387,13 +362,18 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
           memsIntPin) {
     Quaternion q_corr = {0.7071068f, 0.0f, 0.0f, 0.7071068f};
     imu.setRotate(q_corr);
-    // PWM-space and gravity-space verified to coincide on this axis: calibration settles with PWM
-    // within ~1deg of gravity's 90 (worst seen 5.6), and clean live lifts at ~9deg/s tracked within
-    // 1.5deg. 8deg leaves margin for that while bounding how far the command can run ahead.
-    shoulderY.setMaxLead(8.0f);
+    // No setMaxLead() here any more (was 8deg): PWM-space and gravity-space only coincide while the
+    // platform is level. Tilting it shifts the IMU angle by the tilt with the command unchanged, and the
+    // correction then moves the command away from the IMU - the clamp held it still from the first 8deg
+    // of tilt on, the elbow alone kept the arm upright, and 5 s later the stall check froze the shoulder
+    // into a recalibration (2026-11-03, 30deg tilt). It was anti-windup for the lagging-data era.
     // ~7deg of backlash at vertical (2026-11-02): with the default 3deg budget the command stopped
     // 1.1deg short of crossing it, and calibrateYLoop never settled (looped >50 s until engines off).
     shoulderY.setFineCorrectionBudget(8.0f);
+    // Follow a tilting platform (2026-11-05): with the defaults (0.5/s, 18deg/s) the shoulder trailed
+    // vertical by a median 14deg, p90 31deg, while the user tilted the platform at 10-30deg/s - the lag
+    // of a ramp is speed/gain. The wrist's proven 1.5/s, 40deg/s (see ArmWrist's constructor).
+    shoulderY.setHoldResponse(1.5f, 40.0f);
     // Learn the resting offset only once the joint has stopped - see Servo::setPlanSettle().
     shoulderY.setPlanSettle(3000);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
@@ -498,33 +478,18 @@ Vector3 ArmShoulder::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
   float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
 
-  // pitchX used to be delta-integrated via a per-tick yaw-strip-then-swing decomposition of the
-  // quaternion delta (qDeltaSwing.twistAngle({0,1,0})). That decomposition is order-sensitive and
-  // breaks under a large rotation between ticks - confirmed live (2026-08-24) as the actual root
-  // cause of a real runaway: with Y and Z both moving in engineLoop, a bad per-tick delta got
-  // integrated, producing a target that ran away from the true angle, growing the servo error
-  // exponentially (5.56 -> 71.79deg) until shoulderY hit its 180deg PWM limit and the diverging
-  // guard froze it. Same failure pattern already documented as the cause of ArmElbow::shoulderYAngleDeg()
-  // getting stuck after a 30deg shoulder-z move. Fixed by using the same gravity-vector-based
-  // absolute formula already trusted for calibration (angleFromGravityY(), calibrateYLoop()) and
-  // for this function's own former drift-correction term - getGravityVector() is yaw-invariant, so
-  // it can't suffer this order-sensitivity, and it needs no delta/integration state at all.
-  // Taken from the ABSOLUTE quaternion's gravity as a delta from calibration, not from qm's - qm's
-  // "gravity" is the calibration pose's body z-axis, which only stands for gravity if that was
-  // vertical. Close to true here (raw ~-2deg at vertical), but not on the wrist, where a shoulder-z
-  // turn read as fake pitch live (2026-10-31) - kept identical across modules.
+  // The rotation about the joint's own axis (body y) since calibration, straight from the
+  // quaternion - gravity only seeds calibration (angleFromGravityY()). Absolute against base, so no
+  // per-tick integration: integrating per-tick deltas is what ran away on 2026-08-24 (5.56 ->
+  // 71.79deg until the 180 limit). The gravity projection that replaced it, atan2(-g.x, g.z), is
+  // undefined once gravity lies along the joint axis: with the platform rolled sideways it flipped by
+  // ~150deg and, no guards left, the shoulder chased it 0 -> 180 and back (2026-11-03, axis 83deg off
+  // horizontal, twist about y -2.5deg at the moment gravity read -80). A roll the joint can't correct
+  // gives no twist about its axis, so the joint just holds. On a level platform the two agree within
+  // 0.05deg (replayed on the 2026-11-02 moves); a turn about the vertical leaks in only in proportion
+  // to how far the joint axis is off horizontal.
   float pitchX;
-  Quaternion qAbs = imu.quaternion.load();
-  Vector3 gAbs = qAbs.getGravityVector();
-  float gravityPitch = atan2(-gAbs.x, gAbs.z);
-  float pitchXAbs = NAN;
-  if (qAbs.isValid() && !isnan(gravityPitch)) {
-    if (!pitchIntegrationValid) {
-      gravityPitchAtBase = gravityPitch;
-    }
-    float d = gravityPitch - gravityPitchAtBase;
-    pitchXAbs = atan2f(sinf(d), cosf(d));
-  }
+  float pitchXAbs = qm.twistAngle({0.0f, 1.0f, 0.0f});
   if (!qm.isValid() || isnan(pitchXAbs)) {
     // Glitched reading - hold the last value instead of feeding NaN/garbage forward.
     pitchX = accumulatedPitchX;
@@ -535,8 +500,7 @@ Vector3 ArmShoulder::getIMUAngles() {
   } else {
     // Sanity clamp, not a control filter: real per-tick motion is bounded by servo speed, so a
     // implausibly large single-sample jump is treated as a glitch and capped rather than trusted
-    // outright - a second line of defense against the same class of bad reading, independent of
-    // whatever the growing-error guard catches downstream.
+    // outright - a second line of defense against the same class of bad reading.
     constexpr float maxPlausibleDeltaRad = 10.0f * DEG_TO_RAD;
     float delta = std::clamp(pitchXAbs - accumulatedPitchX, -maxPlausibleDeltaRad, maxPlausibleDeltaRad);
     accumulatedPitchX += delta;
@@ -585,8 +549,12 @@ constexpr float SHOULDER_GRAVITY_Y_PWM_OFFSET = 92.0f;
 // commandable 0 down to the joint's real mechanical stop at ~-23 (confirmed live by the user) - with
 // -15 every sample there was rejected and calibration silently never started. The seed still clamps
 // to 0, so starting from there is one deliberate jump up to PWM 0 (logged in calibrateYLoop()).
+// MAX widened from 195 the same way (2026-11-03): leaning over the far side, the arm rested at its
+// mechanical stop there, ~212.9 (confirmed by the user), past the commandable 180, and calibration
+// again never started. The seed clamps to 180 - one jump back to PWM 180 (33deg, confirmed live).
+// 7deg over the stop: it read 212.91-212.96 across two boots.
 constexpr float SHOULDER_GRAVITY_Y_MIN = -35.0f;
-constexpr float SHOULDER_GRAVITY_Y_MAX = 195.0f;
+constexpr float SHOULDER_GRAVITY_Y_MAX = 220.0f;
 // Tick-to-tick glitch filter, mirroring getIMUAngles()'s sanity clamp - time-aware rather than a
 // flat per-call threshold, since this function is called from both a tight ~5ms tracking loop and
 // a slower ~250ms idle-diagnostic loop. Rate is more generous than maxAngularSpeed (60deg/s)
