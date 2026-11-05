@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UF2_FILE="$SCRIPT_DIR/build/elbow-control/ENGINE_CONTROL_ELBOW.uf2"
 PICO_MOUNT_SCRIPT="$SCRIPT_DIR/pico-mount.sh"
 MOUNT_POINT=""
+PICO_SERIAL="E66250758B484121"
 
 # Colors for better output
 GREEN='\033[0;32m'
@@ -51,6 +52,20 @@ fi
 
 echo -e "${GREEN}✅ Found UF2 file: $UF2_FILE${NC}"
 echo -e "   File size: $(ls -lh "$UF2_FILE" | awk '{print $5}')"
+echo
+
+# The Pico must be on USB: sent to boot mode without it, it can't be flashed and stays in the
+# bootloader, off the CAN bus. The elbow did that on 2026-11-06 and the whole bus went dead - host
+# and every module - until the arm was power-cycled (most likely the bootloader's pull-downs holding
+# the transceiver's TX dominant). A Pico already in boot mode shows up as an RPI-RP2 drive instead.
+if [ -e "/dev/serial/by-id/usb-Raspberry_Pi_Pico_${PICO_SERIAL}-if00" ]; then
+    echo -e "${GREEN}✅ Pico ${PICO_SERIAL} is on USB${NC}"
+elif lsblk -no LABEL | grep -q "RPI-RP2"; then
+    echo -e "${YELLOW}⚠️  Pico ${PICO_SERIAL} not on USB, but an RPI-RP2 drive is - assuming it's this one${NC}"
+else
+    echo -e "${RED}❌ Pico ${PICO_SERIAL} is not on USB - connect it before deploying${NC}"
+    exit 1
+fi
 echo
 
 # Turn off engines power
