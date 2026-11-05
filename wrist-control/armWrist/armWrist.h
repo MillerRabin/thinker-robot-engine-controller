@@ -41,15 +41,22 @@ private:
   // PWM angle calibrateYLoop() last landed on (gravity-verified vertical); base is relative to this.
   // Also maps the gravity reading into PWM-space for the next seed, see calibrateYLoop().
   float wristYHomeAngle = WRIST_Y_PWM_AT_VERTICAL;
+  // PWM angle calibrateZLoop() last landed on (gravity-verified upright), the same role for Z.
+  float wristZHomeAngle = WRIST_Z_HOME_POSITION;
   bool pitchIntegrationValid = false;
   float accumulatedPitchY = 0.0f;
+  bool twistZIntegrationValid = false;
+  float accumulatedTwistZ = 0.0f;
   float angleFromGravityY();
+  float angleFromGravityZ();
   float elbowYAngleDeg();
   // Last trusted angleFromGravityY() reading and when it was taken, for its own glitch filter -
   // time-aware, matching ArmShoulder's identical fix (this function is called from both a tight
   // tracking loop and a slower idle-diagnostic loop, so a flat per-call jump threshold is wrong for one).
   float lastGoodGravityY = NAN;
   absolute_time_t lastGoodGravityYTime = 0;
+  float lastGoodGravityZ = NAN;
+  absolute_time_t lastGoodGravityZTime = 0;
 
 public:
   Servo wristY;

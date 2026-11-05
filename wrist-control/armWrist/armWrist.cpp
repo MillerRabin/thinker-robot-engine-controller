@@ -2,6 +2,17 @@
 #include "../common/periodic/periodic.h"
 #include "../common/quaternion/quaternion.h"
 
+// Joint axes in this IMU's corrected frame (q_corr only got gravity right), each measured by moving
+// that joint alone 20deg with the platform still. Y (2026-11-05): a 25deg turn about it, steady
+// within 0.01 over the whole move; twist about body y read 0.78 of it, so a 20deg command turned
+// the wrist 25deg. Z (2026-11-06): 19.6deg about it for +20 PWM, 89.7deg from Y - the IMU turns
+// with Z too. With the arm upright both are horizontal, so gravity calibrates both.
+constexpr Vector3 WRIST_Y_JOINT_AXIS = {-0.555f, 0.778f, -0.292f};
+constexpr Vector3 WRIST_Z_JOINT_AXIS = {-0.221f, 0.208f, 0.953f};
+// Z x Y: the body direction that points up when the wrist stands upright - normal to both axes,
+// so it is the "vertical" for both joints.
+constexpr Vector3 WRIST_UP_AXIS = {-0.8026f, -0.5938f, -0.0565f};
+
 bool ArmWrist::settled(bool withinTolerance, TickType_t &stableSince) {
   if (!withinTolerance) {
     stableSince = 0;
@@ -152,52 +163,112 @@ bool ArmWrist::calibrateYLoop() {
   return true;
 }
 
+// Wrist Z closed on gravity, the same steps as calibrateYLoop(). It used to just go to PWM
+// WRIST_Z_HOME_POSITION, assumed - like the shoulder's Z - to turn about the vertical, which gravity
+// can't see. It doesn't: with the arm upright its axis is horizontal (2026-11-06), and PWM 135 sat
+// ~4deg off upright.
 bool ArmWrist::calibrateZLoop() {
   LogQueue::Log("[DIAG] wrist calibrateZLoop: enter\n");
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
 
   setZCalibrating(true);
-  float startZ = wristZ.getPhysicalAngle();
-  if (isnan(startZ)) {
-    startZ = WRIST_Z_HOME_POSITION;
-  }
-  wristZ.setDegreeDirect(startZ);
-  wristZ.setTargetAngle(WRIST_Z_HOME_POSITION, 1000, WRIST_DEAD_ZONE);
-  uint32_t iterations = 0;
-  while (!wristZ.isPositioned()) {
+  constexpr int seedStableSamples = 5;
+  constexpr float seedStableTolerance = 5.0f; // deg
+  float lastSeedSample = NAN;
+  int seedStableCount = 0;
+  while (seedStableCount < seedStableSamples) {
     updateStatusLed(true);
+    if (!elbow.isPositionOK()) {
+      LogQueue::Log("Wrist calibrating Z aborted: elbow lost position (seeding)\n");
+      setZCalibrating(false);
+      return false;
+    }
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("Wrist calibrating Z aborted: engines powered off (seeding)\n");
+      setZCalibrating(false);
+      return false;
+    }
+    float sample = angleFromGravityZ();
+    if (!isnan(sample) && !isnan(lastSeedSample) &&
+        fabsf(sample - lastSeedSample) <= seedStableTolerance) {
+      seedStableCount++;
+    } else {
+      seedStableCount = isnan(sample) ? 0 : 1;
+    }
+    lastSeedSample = sample;
+    vTaskDelayUntil(&lastWakeTime, taskInterval);
+  }
+
+  // Through wristZHomeAngle into PWM-space, or where the servo already holds - see calibrateYLoop().
+  bool holding = wristZ.isHolding();
+  float seedZ = holding ? wristZ.getPhysicalAngle()
+                        : std::clamp(wristZHomeAngle + (lastSeedSample - WRIST_Z_HOME_POSITION), wristZ.safeMinDegree, wristZ.safeMaxDegree);
+  LogQueue::Log("[DIAG] wrist calibrateZLoop: seed physicalZ=%.2f (raw gravityZ=%.2f, home=%.2f, holding=%d)\n", seedZ, lastSeedSample, wristZHomeAngle, holding);
+  wristZ.setDegreeDirect(seedZ);
+
+  for (int i = 0; i < 20; i++) {
+    if (!platform.getEnginesPowerStatus()) {
+      LogQueue::Log("Wrist calibrating Z aborted: engines powered off (post-seed delay)\n");
+      setZCalibrating(false);
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  constexpr float WRIST_Z_MAX_RECOVERY_SPEED = 18.0f; // deg/s
+  float seedError = fabsf(WRIST_Z_HOME_POSITION - lastSeedSample);
+  uint16_t recoveryTimeMs = (uint16_t)std::clamp(
+      (seedError / WRIST_Z_MAX_RECOVERY_SPEED) * 1000.0f,
+      (float)WRIST_Y_RECOVERY_TIME_MS, 10000.0f);
+  LogQueue::Log("[DIAG] wrist calibrateZLoop: seedError=%.2f recoveryTimeMs=%u\n", seedError, recoveryTimeMs);
+  wristZ.setTargetAngle(WRIST_Z_HOME_POSITION, recoveryTimeMs, WRIST_DEAD_ZONE);
+  TickType_t stableSince = 0;
+  uint32_t iterations = 0;
+  while (true) {
+    updateStatusLed(true);
+    if (!elbow.isPositionOK()) {
+      LogQueue::Log("Wrist calibrating Z aborted: elbow lost position\n");
+      setZCalibrating(false);
+      return false;
+    }
     if (!platform.getEnginesPowerStatus()) {
       LogQueue::Log("[DIAG] wrist calibrateZLoop: aborted, engines powered off\n");
       setZCalibrating(false);
       return false;
     }
+    float gravityZ = angleFromGravityZ();
     iterations++;
     printer.interval([&]() {
-      LogQueue::Log("[DIAG] wrist calibrateZLoop: iter=%lu physicalZ=%.3f imuZ=%.3f\n", (unsigned long)iterations, wristZ.getPhysicalAngle(), wristZ.getIMUAngle());
+      LogQueue::Log("[DIAG] wrist calibrateZLoop: iter=%lu gravityZ=%.3f physicalZ=%.3f\n", (unsigned long)iterations, gravityZ, wristZ.getPhysicalAngle());
     });
-    wristZ.setIMUAngle(wristZ.getPhysicalAngle());
+    wristZ.setIMUAngle(gravityZ);
     wristZ.tick();
     updateStatuses();
+    if (settled(fabsf(WRIST_Z_HOME_POSITION - gravityZ) <= CALIBRATION_SETTLE_TOLERANCE, stableSince)) {
+      break;
+    }
     vTaskDelayUntil(&lastWakeTime, taskInterval);
   }
-  vTaskDelay(pdMS_TO_TICKS(2000));
+  wristZHomeAngle = wristZ.getPhysicalAngle();
   setZCalibrating(false);
-  LogQueue::Log("[DIAG] wrist calibrateZLoop: exit after %lu iterations\n", (unsigned long)iterations);
+  LogQueue::Log("[DIAG] wrist calibrateZLoop: exit after %lu iterations, wristZHomeAngle=%.2f\n", (unsigned long)iterations, wristZHomeAngle);
   return true;
 }
 
 Vector3 ArmWrist::trackTick() {
   Vector3 imuAngles = getIMUAngles();
   Vector3 physicalAngles = getPhysicalAngles(imuAngles);
+  // Z holds its own angle by the IMU too since 2026-11-06 - it keeps the claw upright when the
+  // platform rolls sideways, which the Y joints can't. It ran on the servo's own position before,
+  // taken for an unobservable yaw like the shoulder's Z (2026-10-31: command 153 vs IMU 136).
   if (useIMUMode.load() == USE_IMU_NOT_USE) {
     wristY.setIMUAngle(wristY.getPhysicalAngle());
+    wristZ.setIMUAngle(wristZ.getPhysicalAngle());
   } else {
     wristY.setIMUAngle(physicalAngles.y);
+    wristZ.setIMUAngle(physicalAngles.z);
   }
-  // Z always on the servo's own position, never yawZ - same unobservable-yaw windup as
-  // ArmShoulder::trackTick()'s Z (seen here too, 2026-10-31: command 153 vs yaw-based 136).
-  wristZ.setIMUAngle(wristZ.getPhysicalAngle());
   wristY.tick();
   wristZ.tick();
   // Trace a disturbance from the elbow - the wrist's own target doesn't change for one.
@@ -218,9 +289,11 @@ bool ArmWrist::calibrateLoop() {
 
   if (ok) {
     base.store(imu.quaternion.load().invert());
-    pitchIntegrationValid = false; // re-anchor pitchY to 0 at the new base
+    pitchIntegrationValid = false; // re-anchor pitchY and twistZ to 0 at the new base
+    twistZIntegrationValid = false;
     // Retarget to wristYHomeAngle (PWM-space) - feedback is PWM-space from here on, target must match.
     wristY.setTargetAngle(wristYHomeAngle, WRIST_Y_RECOVERY_TIME_MS, WRIST_DEAD_ZONE);
+    wristZ.setTargetAngle(wristZHomeAngle, WRIST_Y_RECOVERY_TIME_MS, WRIST_DEAD_ZONE);
     LogQueue::Log("[DIAG] wrist calibrateLoop: base refreshed, starting final settle wait\n");
 
     TickType_t lastWakeTime = xTaskGetTickCount();
@@ -243,7 +316,7 @@ bool ArmWrist::calibrateLoop() {
       iterations++;
       bool withinTolerance =
           fabsf(wristYHomeAngle - physicalAngles.y) <= CALIBRATION_SETTLE_TOLERANCE &&
-          fabsf(WRIST_Z_HOME_POSITION - wristZ.getPhysicalAngle()) <= CALIBRATION_SETTLE_TOLERANCE; // matches trackTick()'s Z
+          fabsf(wristZHomeAngle - physicalAngles.z) <= CALIBRATION_SETTLE_TOLERANCE;
       printer.interval([&]() {
         LogQueue::Log("[DIAG] wrist calibrateLoop: settle iter=%lu physicalY=%.2f physicalZ=%.2f withinTolerance=%d\n",
                (unsigned long)iterations, physicalAngles.y, physicalAngles.z, withinTolerance);
@@ -265,6 +338,7 @@ void ArmWrist::onIMUReset() {
   LogQueue::Log("wrist onIMUReset: invalidating base\n");
   base.store(Quaternion());
   pitchIntegrationValid = false;
+  twistZIntegrationValid = false;
 }
 
 int ArmWrist::updateStatuses() {
@@ -275,6 +349,7 @@ int ArmWrist::updateStatuses() {
 void ArmWrist::engineLoop() {
   LogQueue::Log("[DIAG] wrist engineLoop: enter\n");
   wristY.setTargetAngle(wristYHomeAngle, WRIST_Y_RECOVERY_TIME_MS, WRIST_DEAD_ZONE);
+  wristZ.setTargetAngle(wristZHomeAngle, WRIST_Y_RECOVERY_TIME_MS, WRIST_DEAD_ZONE);
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
   while (true) {
@@ -398,6 +473,11 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   wristY.setFineReleaseError(4.0f);
   wristY.setHoldResponse(1.5f, 40.0f);
   wristY.enableTrace();
+  // The same hold for Z. Its backlash: a 20deg move there and back left 3-4deg (2026-11-06), more
+  // than the default 3deg fine budget lets the command cross.
+  wristZ.setFineReleaseError(4.0f);
+  wristZ.setHoldResponse(1.5f, 40.0f);
+  wristZ.setFineCorrectionBudget(5.0f);
   if (taskHandle == NULL) {
     if (xTaskCreateAffinitySet(ArmWrist::engineTask,
                                "ArmWrist::engineTask", 4096, this, 4,
@@ -465,7 +545,6 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
 
 Vector3 ArmWrist::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
-  float yawZ = qm.twistAngle({0.0f, 0.0f, 1.0f});
 
   // The rotation about the joint's own axis since calibration, straight from the quaternion - see
   // ArmShoulder::getIMUAngles() for why not the gravity projection any more (undefined with the
@@ -473,11 +552,9 @@ Vector3 ArmWrist::getIMUAngles() {
   // is the calibration pose's body z-axis, horizontal here (this axis reads ~90 at vertical), and a
   // 15-20deg shoulder-z turn read through it as 4-6deg of fake pitch (2026-10-31). A turn about the
   // vertical gives no twist about a horizontal joint axis.
-  // The joint axis isn't body y in this IMU's corrected frame (q_corr only got gravity right):
-  // measured 2026-11-05 by moving the wrist alone 20deg and back with the platform still - a 25deg
-  // turn about (-0.555, 0.778, -0.292), steady within 0.01 over the whole move. Twist about y read
-  // 0.78 of it, so a 20deg command turned the wrist 25deg.
-  constexpr Vector3 WRIST_Y_JOINT_AXIS = {-0.555f, 0.778f, -0.292f};
+  // Y and Z are each the twist about their own axis (see WRIST_Y_JOINT_AXIS): with the IMU past
+  // both joints qm is a turn about Y followed by one about Z, and for perpendicular axes the twist
+  // about each gives that joint's angle exactly.
   float pitchY;
   float pitchYAbs = qm.twistAngle(WRIST_Y_JOINT_AXIS);
   if (!qm.isValid() || isnan(pitchYAbs)) {
@@ -497,19 +574,35 @@ Vector3 ArmWrist::getIMUAngles() {
     pitchY = accumulatedPitchY;
   }
 
+  // Z the same way, with the same glitch clamp.
+  float twistZ;
+  float twistZAbs = qm.twistAngle(WRIST_Z_JOINT_AXIS);
+  if (!qm.isValid() || isnan(twistZAbs)) {
+    twistZ = accumulatedTwistZ;
+  } else if (!twistZIntegrationValid) {
+    twistZ = twistZAbs;
+    accumulatedTwistZ = twistZAbs;
+    twistZIntegrationValid = true;
+  } else {
+    constexpr float maxPlausibleDeltaRad = 10.0f * DEG_TO_RAD;
+    float delta = std::clamp(twistZAbs - accumulatedTwistZ, -maxPlausibleDeltaRad, maxPlausibleDeltaRad);
+    accumulatedTwistZ += delta;
+    twistZ = accumulatedTwistZ;
+  }
+
   static Periodic axisPrinter(pdMS_TO_TICKS(300));
   axisPrinter.interval([&]() {
-    LogQueue::Log("[DIAG] wrist pitchY=%.2f yawZ=%.2f\n", pitchY * RAD_TO_DEG, yawZ * RAD_TO_DEG);
+    LogQueue::Log("[DIAG] wrist pitchY=%.2f twistZ=%.2f\n", pitchY * RAD_TO_DEG, twistZ * RAD_TO_DEG);
     // The absolute quaternion, to check the twist against the gravity projection offline (2026-11-03).
     Quaternion raw = imu.quaternion.load();
     LogQueue::Log("[DIAG] wrist rawQuat i=%.4f j=%.4f k=%.4f real=%.4f\n", raw.i, raw.j, raw.k, raw.real);
   });
 
-  return {0, pitchY, yawZ};
+  return {0, pitchY, twistZ};
 }
 
 Vector3 ArmWrist::getPhysicalAngles(Vector3 &imuAngles) {
-  return { 0, (imuAngles.y * RAD_TO_DEG + wristYHomeAngle), (imuAngles.z * RAD_TO_DEG + WRIST_Z_HOME_POSITION) };
+  return { 0, (imuAngles.y * RAD_TO_DEG + wristYHomeAngle), (imuAngles.z * RAD_TO_DEG + wristZHomeAngle) };
 }
 
 // elbow.imu.quaternion is elbow's base-anchored broadcast (zero at elbow's own calibration),
@@ -530,7 +623,10 @@ float ArmWrist::elbowYAngleDeg() {
 // Uses the quaternion's gravity vector rather than raw accelerometer atan2 (shoulder/elbow's
 // approach) - unlike accelerometer readings, the quaternion already has q_corr applied, so this
 // reuses the mounting correction already verified live instead of needing a fresh raw-axis fit.
-// Sign/wrap constants are a starting point - verify live like ELBOW_GRAVITY_* was tuned.
+// Gravity's angle about the real joint axis, 0 along WRIST_UP_AXIS, plus WRIST_Y_HOME_POSITION - the
+// same way as angleFromGravityZ(). It was atan2(-g.x, g.z) about body y until 2026-11-06: 94 at
+// upright, 1.2-1.4x the real turn, and a Z turn leaked in, so calibration stopped ~4deg short of
+// upright.
 // Glitch filter added 2026-08-31, matching ArmShoulder::angleFromGravityY()'s identical fix - a
 // tick-to-tick jump filter that's time-aware (called from both a tight tracking loop and a slower
 // idle-diagnostic loop) rather than a flat per-call threshold. No absolute MIN/MAX range check yet
@@ -551,7 +647,12 @@ float ArmWrist::angleFromGravityY() {
     return NAN;
   }
   Vector3 g = q.getGravityVector();
-  float raw = atan2(-g.x, g.z) * RAD_TO_DEG;
+  const Vector3 &u = WRIST_UP_AXIS;
+  const Vector3 &y = WRIST_Y_JOINT_AXIS;
+  Vector3 side = {y.y * u.z - y.z * u.y, y.z * u.x - y.x * u.z, y.x * u.y - y.y * u.x}; // Y x up
+  float alongUp = g.x * u.x + g.y * u.y + g.z * u.z;
+  float alongSide = g.x * side.x + g.y * side.y + g.z * side.z;
+  float raw = atan2f(-alongSide, alongUp) * RAD_TO_DEG + WRIST_Y_HOME_POSITION;
   float elbowCorr = elbowYAngleDeg();
   float res = raw - elbowCorr;
   if (res < WRIST_GRAVITY_Y_WRAP_LOW) {
@@ -577,5 +678,51 @@ float ArmWrist::angleFromGravityY() {
 
   lastGoodGravityY = res;
   lastGoodGravityYTime = now;
+  return res;
+}
+
+// Gravity's angle about the Z axis, 0 when it lies along WRIST_UP_AXIS, in the same space as
+// angleFromGravityY(): WRIST_Z_HOME_POSITION at upright. A body turn of +a about Z turns gravity -a
+// in the body frame, hence the sign. No elbow correction: the parents only pitch, about axes
+// parallel to Y, and that leaves this angle at 0 near upright.
+constexpr float WRIST_GRAVITY_Z_MAX_DEG_PER_SEC = 120.0f;
+constexpr float WRIST_GRAVITY_Z_MIN_JUMP_FLOOR = 5.0f; // deg, for back-to-back calls
+// Split the circle inside the servo's unreachable arc, as for Y: PWM 0..270 leaves 270..360.
+constexpr float WRIST_GRAVITY_Z_WRAP_LOW = -45.0f;
+
+float ArmWrist::angleFromGravityZ() {
+  Quaternion q = imu.quaternion.load();
+  if (!q.isValid()) {
+    return NAN;
+  }
+  Vector3 g = q.getGravityVector();
+  const Vector3 &u = WRIST_UP_AXIS;
+  const Vector3 &z = WRIST_Z_JOINT_AXIS;
+  Vector3 side = {z.y * u.z - z.z * u.y, z.z * u.x - z.x * u.z, z.x * u.y - z.y * u.x}; // Z x up
+  float alongUp = g.x * u.x + g.y * u.y + g.z * u.z;
+  float alongSide = g.x * side.x + g.y * side.y + g.z * side.z;
+  float res = atan2f(-alongSide, alongUp) * RAD_TO_DEG + WRIST_Z_HOME_POSITION;
+  if (res < WRIST_GRAVITY_Z_WRAP_LOW) {
+    res += 360.0f;
+  } else if (res >= WRIST_GRAVITY_Z_WRAP_LOW + 360.0f) {
+    res -= 360.0f;
+  }
+
+  static Periodic gravityPrinter(pdMS_TO_TICKS(300));
+  gravityPrinter.interval([&]() {
+    LogQueue::Log("[DIAG] wrist angleFromGravityZ: res=%.2f physical=%.2f\n", res, wristZ.getPhysicalAngle());
+  });
+
+  absolute_time_t now = get_absolute_time();
+  if (!isnan(lastGoodGravityZ)) {
+    float elapsedSec = absolute_time_diff_us(lastGoodGravityZTime, now) / 1000000.0f;
+    float maxPlausibleJump = std::max(WRIST_GRAVITY_Z_MAX_DEG_PER_SEC * elapsedSec, WRIST_GRAVITY_Z_MIN_JUMP_FLOOR);
+    if (fabsf(res - lastGoodGravityZ) > maxPlausibleJump) {
+      return NAN;
+    }
+  }
+
+  lastGoodGravityZ = res;
+  lastGoodGravityZTime = now;
   return res;
 }
