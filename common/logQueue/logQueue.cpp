@@ -8,7 +8,9 @@ void LogQueue::Init() {
     queue = xQueueCreate(LOG_QUEUE_MESSAGES, LOG_QUEUE_MSG_SIZE);    
   }  
   if (taskHandle == NULL) {
-    if (xTaskCreateAffinitySet(LogQueue::printTask, "LogQueue::printTask", 4096, NULL, 6, IMU_CORE, &taskHandle) == pdFAIL) {
+    // Below the BNO and CAN tasks on this core (5-6): printing waits for USB, and at 6 a flooded or
+    // stalled output kept the BNO unread for 795 ms (2026-11-06). A full queue drops messages instead.
+    if (xTaskCreateAffinitySet(LogQueue::printTask, "LogQueue::printTask", 4096, NULL, 2, IMU_CORE, &taskHandle) == pdFAIL) {
       printf("Failed to create logQueue task\n");      
     } 
   }

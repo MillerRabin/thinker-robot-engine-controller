@@ -241,6 +241,12 @@ void ArmElbow::engineTask(void *instance) {
     // Only proceed on a successful calibration - engineLoop() would otherwise retarget to stale values.
     if (elbow->calibrateLoop()) {
       elbow->engineLoop();
+    } else {
+      // A calibration that fails at its first check came straight back here: with the engines off
+      // while the shoulder still reported calibrated, hundreds of retries a second, each logging its
+      // abort. The flood stalled the log output, the log task starved the BNO reads on the same core,
+      // and the IMU went silent 795 ms and was restarted (2026-11-06). Wait before the next try.
+      vTaskDelay(pdMS_TO_TICKS(250));
     }
 
     elbow->setEngineTaskStatus(false);

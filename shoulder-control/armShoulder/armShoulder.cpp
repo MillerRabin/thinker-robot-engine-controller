@@ -344,6 +344,9 @@ void ArmShoulder::engineTask(void *instance) {
     if (shoulder->calibrateLoop()) {
       shoulder->engineLoop();
       LogQueue::Log("[DIAG] engineTask: engineLoop returned, back to top\n");
+    } else {
+      // Not straight back into a calibration that fails at its first check - see ArmElbow::engineTask().
+      vTaskDelay(pdMS_TO_TICKS(250));
     }
     shoulder->setEngineTaskStatus(false);
     shoulder->updateStatuses();

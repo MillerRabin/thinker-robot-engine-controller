@@ -96,10 +96,17 @@ void LocalBNO::compassTask(void *instance) {
   // queue grows and every angle comes late. Logged every 5 s: reports actually read, empty polls.
   uint32_t grvReports = 0, accReports = 0, otherReports = 0, emptyPolls = 0;
   TickType_t lastRateLog = xTaskGetTickCount();
+  // The elbow's BNO went silent for 0.4-0.75 s on fast platform tilts and the module recalibrated,
+  // but its log lost ~8.7 s around each event (2026-11-05), so which way it recovered was never seen.
+  // Counted since boot and printed with every "BNO reads" line, they survive such a gap; the longest
+  // pause between rotation vectors shows how long the BNO was silent.
+  uint32_t selfResets = 0, restarts = 0, fusionResetsTotal = 0;
+  TickType_t lastGrvReport = 0, maxGrvGap = 0;
   bno->begin();  
   while (true) {            
     if (imu->hasReset()) {
       printf("IMU was reset. Re-enabling sensor...\n");
+      selfResets++;
       needCalibration = false;
       bno->initIMU();
       bno->armPart->onIMUReset();
@@ -109,6 +116,7 @@ void LocalBNO::compassTask(void *instance) {
     bno->armPart->setPositionStatus(isAlive);
     if (!isAlive) {
       printf("Restarting imu\n");
+      restarts++;
       auto res = bno->begin();
       needCalibration = false;
       vTaskDelay(pdMS_TO_TICKS(IMU_UPDATE_INTERVAL));
@@ -119,7 +127,12 @@ void LocalBNO::compassTask(void *instance) {
       LogQueue::Log("BNO reads 5s: grv %lu acc %lu other %lu empty %lu, fusion error max %.1fdeg\n",
                     (unsigned long)grvReports, (unsigned long)accReports, (unsigned long)otherReports,
                     (unsigned long)emptyPolls, bno->fusionErrorMaxDeg);
+      // Its own line: LogQueue cuts messages at LOG_QUEUE_MSG_SIZE (128).
+      LogQueue::Log("BNO max grv gap %lu ms; since boot: self resets %lu, restarts %lu, fusion resets %lu\n",
+                    (unsigned long)(maxGrvGap * portTICK_PERIOD_MS), (unsigned long)selfResets,
+                    (unsigned long)restarts, (unsigned long)fusionResetsTotal);
       grvReports = accReports = otherReports = emptyPolls = 0;
+      maxGrvGap = 0;
       bno->fusionErrorMaxDeg = 0.0f;
       lastRateLog = xTaskGetTickCount();
     }
@@ -133,6 +146,10 @@ void LocalBNO::compassTask(void *instance) {
     bool resetFusion = false;
     if (datatype == SENSOR_REPORTID_GAME_ROTATION_VECTOR || datatype == SENSOR_REPORTID_ROTATION_VECTOR) {
       grvReports++;
+      if (lastGrvReport != 0) {
+        maxGrvGap = std::max(maxGrvGap, now - lastGrvReport);
+      }
+      lastGrvReport = now;
     } else if (datatype == SENSOR_REPORTID_ACCELEROMETER) {
       accReports++;
     } else {
@@ -174,6 +191,7 @@ void LocalBNO::compassTask(void *instance) {
     }
 
     if (resetFusion) {
+      fusionResetsTotal++;
       // begin() pulses the RST pin (SPI) or soft-resets (I2C) and re-enables the reports.
       bno->begin();
       needCalibration = false;

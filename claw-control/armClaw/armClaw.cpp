@@ -381,6 +381,9 @@ void ArmClaw::engineTask(void *instance) {
     if (claw->calibrateLoop()) {
       claw->engineLoop();
       LogQueue::Log("[DIAG] claw engineTask: engineLoop returned, back to top\n");
+    } else {
+      // Not straight back into a calibration that fails at its first check - see ArmElbow::engineTask().
+      vTaskDelay(pdMS_TO_TICKS(250));
     }
     claw->setEngineTaskStatus(false);
     claw->updateStatuses();

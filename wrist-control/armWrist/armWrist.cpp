@@ -370,6 +370,9 @@ void ArmWrist::engineTask(void *instance) {
     if (wrist->calibrateLoop()) {
       wrist->engineLoop();
       LogQueue::Log("[DIAG] wrist engineTask: engineLoop returned, back to top\n");
+    } else {
+      // Not straight back into a calibration that fails at its first check - see ArmElbow::engineTask().
+      vTaskDelay(pdMS_TO_TICKS(250));
     }
     wrist->setEngineTaskStatus(false);
     wrist->updateStatuses();
