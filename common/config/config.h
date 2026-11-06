@@ -172,13 +172,15 @@
 // is pure stopping precision there (the old shared 2deg claw dead zone stopped every move 2deg short).
 #define CLAW_OPEN_LOOP_DEAD_ZONE 0.3f
 // Claw mapping, measured live 2026-10-31 (manual mode). clawY: PWM 178 = horizontal, ~90 = vertical,
-// 1:1; a stop ~14deg past vertical (~PWM 81), so commands stay >= 85. Unpowered, the claw is light
+// 1:1. That session found a stop ~14deg past vertical (~PWM 81) and kept commands >= 85; the user
+// says the working range is the servo's whole 0-180 - the mechanical limit is well past it
+// (2026-11-06) - so the claw bends +-90deg either way from in line with the wrist. Unpowered, the claw is light
 // enough to stay at whatever angle it was left - nothing can be assumed about where it is.
 // clawX (roll of the jaws, 1:1): jaws level at PWM 130, where its gravity roll reads ~64.5deg with
 // clawY horizontal (the IMU is fixed to the jaws; the user remounted them as level as mechanically
 // possible). Only boot defaults for clawYHomeAngle/clawXHomeAngle - calibration overwrites them.
 #define CLAW_Y_PWM_AT_VERTICAL 90.0f
-#define CLAW_Y_SAFE_MIN 85.0f
+#define CLAW_Y_SAFE_MIN 0.0f
 #define CLAW_Y_PWM_HORIZONTAL 178.0f
 #define CLAW_X_PWM_AT_LEVEL 130.0f
 #define CLAW_X_ROLL_AT_LEVEL 64.5f
