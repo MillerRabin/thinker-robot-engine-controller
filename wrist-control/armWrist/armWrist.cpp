@@ -13,6 +13,18 @@ constexpr Vector3 WRIST_Z_JOINT_AXIS = {-0.221f, 0.208f, 0.953f};
 // so it is the "vertical" for both joints.
 constexpr Vector3 WRIST_UP_AXIS = {-0.8026f, -0.5938f, -0.0565f};
 
+constexpr Vector3 cross(const Vector3 &a, const Vector3 &b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+static inline float dot(const Vector3 &a, const Vector3 &b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+static inline float wrapRad(float a) { return atan2f(sinf(a), cosf(a)); }
+
+// up x Z: the Y axis made exactly normal to the other two (they're 0.3deg off normal as measured),
+// so (Z, side, up) is an orthonormal frame - the arm's forward, side and up at calibration.
+constexpr Vector3 WRIST_SIDE_AXIS = cross(WRIST_UP_AXIS, WRIST_Z_JOINT_AXIS);
+
 bool ArmWrist::settled(bool withinTolerance, TickType_t &stableSince) {
   if (!withinTolerance) {
     stableSince = 0;
@@ -512,6 +524,7 @@ int ArmWrist::updateAccuracy(IMUBase *position) {
 void ArmWrist::busReceiveCallback(can2040_msg frame) {
   claw.dispatchMessage(frame);
   elbow.dispatchMessage(frame);
+  shoulder.dispatchMessage(frame);
 
   if (frame.id == CAN_WRIST_SET_YZ_DEGREE) {
     uint32_t raw = frame.data32[0];
@@ -543,20 +556,43 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
   }
 }
 
+// The arm's turn about the vertical since calibration, off the shoulder's broadcast: the shoulder's
+// link turns only about the vertical and its own y, so its twist about z is that turn exactly. Held
+// at the last value while the shoulder isn't heard.
+float ArmWrist::armYaw() {
+  Quaternion sq = shoulder.imu.quaternion.load();
+  if (shoulder.imu.quaternion.isFresh() && sq.isValid()) {
+    lastArmYaw = sq.twistAngle({0.0f, 0.0f, 1.0f});
+  }
+  return lastArmYaw;
+}
+
 Vector3 ArmWrist::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
+  float yaw = armYaw();
 
-  // The rotation about the joint's own axis since calibration, straight from the quaternion - see
-  // ArmShoulder::getIMUAngles() for why not the gravity projection any more (undefined with the
-  // joint axis near vertical, 2026-11-03) and why not per-tick deltas. Not qm's gravity either: that
-  // is the calibration pose's body z-axis, horizontal here (this axis reads ~90 at vertical), and a
-  // 15-20deg shoulder-z turn read through it as 4-6deg of fake pitch (2026-10-31). A turn about the
-  // vertical gives no twist about a horizontal joint axis.
-  // Y and Z are each the twist about their own axis (see WRIST_Y_JOINT_AXIS): with the IMU past
-  // both joints qm is a turn about Y followed by one about Z, and for perpendicular axes the twist
-  // about each gives that joint's angle exactly.
+  // The wrist's rotation since calibration is the arm's turn about the vertical, then a pitch about
+  // Y, then a side bend about Z: R = Rz(yaw) Ry(pitch) Rx(bend), with x = the Z axis, y = Y, z = up.
+  // Undoing the turn (read off the shoulder) leaves Ry(pitch) Rx(bend), and its matrix gives both
+  // angles exactly: R00 = cos pitch, R20 = -sin pitch, R11 = cos bend, R12 = -sin bend.
+  // Was the twist of qm about each axis (2026-11-05), exact only with the arm unturned. Turned, each
+  // leaked into the other: shoulder-z 37deg with the wrist pitched 54deg read a -19deg side bend
+  // that wasn't there, and Z bent the claw sideways to "fix" it. Pointing straight down (pitch 180),
+  // the twist about Z was undefined.
+  // Still absolute, still since calibration: a platform tilt shows up in both, and that's what the
+  // two joints hold the claw against. Not qm's gravity: see ArmShoulder::getIMUAngles().
+  float pitchYAbs = NAN;
+  float twistZAbs = NAN;
+  if (qm.isValid()) {
+    Quaternion q = Quaternion::AngleAxis(-yaw, WRIST_UP_AXIS.x, WRIST_UP_AXIS.y, WRIST_UP_AXIS.z) * qm;
+    const Vector3 rx = q.rotate(WRIST_Z_JOINT_AXIS);
+    const Vector3 ry = q.rotate(WRIST_SIDE_AXIS);
+    const Vector3 rz = q.rotate(WRIST_UP_AXIS);
+    pitchYAbs = atan2f(-dot(WRIST_UP_AXIS, rx), dot(WRIST_Z_JOINT_AXIS, rx));
+    twistZAbs = atan2f(-dot(WRIST_SIDE_AXIS, rz), dot(WRIST_SIDE_AXIS, ry));
+  }
+
   float pitchY;
-  float pitchYAbs = qm.twistAngle(WRIST_Y_JOINT_AXIS);
   if (!qm.isValid() || isnan(pitchYAbs)) {
     // Glitched reading - hold the last value instead of feeding NaN/garbage forward.
     pitchY = accumulatedPitchY;
@@ -567,16 +603,16 @@ Vector3 ArmWrist::getIMUAngles() {
   } else {
     // Sanity clamp, not a control filter: real per-tick motion is bounded by servo speed, so an
     // implausibly large single-sample jump is treated as a glitch and capped rather than trusted
-    // outright - matching ArmShoulder::getIMUAngles()'s guard.
+    // outright - matching ArmShoulder::getIMUAngles()'s guard. The step is taken across the +-180
+    // seam (atan2 jumps there while the wrist turns on through it).
     constexpr float maxPlausibleDeltaRad = 10.0f * DEG_TO_RAD;
-    float delta = std::clamp(pitchYAbs - accumulatedPitchY, -maxPlausibleDeltaRad, maxPlausibleDeltaRad);
+    float delta = std::clamp(wrapRad(pitchYAbs - accumulatedPitchY), -maxPlausibleDeltaRad, maxPlausibleDeltaRad);
     accumulatedPitchY += delta;
     pitchY = accumulatedPitchY;
   }
 
   // Z the same way, with the same glitch clamp.
   float twistZ;
-  float twistZAbs = qm.twistAngle(WRIST_Z_JOINT_AXIS);
   if (!qm.isValid() || isnan(twistZAbs)) {
     twistZ = accumulatedTwistZ;
   } else if (!twistZIntegrationValid) {
@@ -585,14 +621,14 @@ Vector3 ArmWrist::getIMUAngles() {
     twistZIntegrationValid = true;
   } else {
     constexpr float maxPlausibleDeltaRad = 10.0f * DEG_TO_RAD;
-    float delta = std::clamp(twistZAbs - accumulatedTwistZ, -maxPlausibleDeltaRad, maxPlausibleDeltaRad);
+    float delta = std::clamp(wrapRad(twistZAbs - accumulatedTwistZ), -maxPlausibleDeltaRad, maxPlausibleDeltaRad);
     accumulatedTwistZ += delta;
     twistZ = accumulatedTwistZ;
   }
 
   static Periodic axisPrinter(pdMS_TO_TICKS(300));
   axisPrinter.interval([&]() {
-    LogQueue::Log("[DIAG] wrist pitchY=%.2f twistZ=%.2f\n", pitchY * RAD_TO_DEG, twistZ * RAD_TO_DEG);
+    LogQueue::Log("[DIAG] wrist pitchY=%.2f twistZ=%.2f yaw=%.2f\n", pitchY * RAD_TO_DEG, twistZ * RAD_TO_DEG, yaw * RAD_TO_DEG);
     // The absolute quaternion, to check the twist against the gravity projection offline (2026-11-03).
     Quaternion raw = imu.quaternion.load();
     LogQueue::Log("[DIAG] wrist rawQuat i=%.4f j=%.4f k=%.4f real=%.4f\n", raw.i, raw.j, raw.k, raw.real);

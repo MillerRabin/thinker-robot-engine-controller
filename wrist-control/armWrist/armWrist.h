@@ -7,6 +7,7 @@
 #include "../../common/localBNO/localBNO.h"
 #include "../../common/remoteClaw/remoteClaw.h"
 #include "../../common/remoteElbow/remoteElbow.h"
+#include "../../common/remoteShoulder/remoteShoulder.h"
 #include "../../common/servo/servo.h"
 #include "../../common/statusLed/statusLed.h"
 #include "pico/stdlib.h"
@@ -31,6 +32,10 @@ private:
   TaskHandle_t taskHandle = NULL;
   RemoteClaw claw;
   RemoteElbow elbow;
+  // Only for the arm's turn about the vertical, see armYaw().
+  RemoteShoulder shoulder;
+  float lastArmYaw = 0.0f;
+  float armYaw();
   StatusLed statusLed{STATUS_LED_PIN};
   void updateStatusLed(bool calibrating, bool ready = false);
   // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively
