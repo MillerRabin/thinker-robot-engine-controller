@@ -490,6 +490,8 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   wristZ.setFineReleaseError(4.0f);
   wristZ.setHoldResponse(1.5f, 40.0f);
   wristZ.setFineCorrectionBudget(5.0f);
+  wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS);
+  wristZ.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS);
   if (taskHandle == NULL) {
     if (xTaskCreateAffinitySet(ArmWrist::engineTask,
                                "ArmWrist::engineTask", 4096, this, 4,

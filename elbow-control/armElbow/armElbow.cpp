@@ -329,6 +329,7 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   elbowY.enableTrace();
   // The elbow servo ran at 8-15deg/s on 2026-11-02 (27deg/s that morning) - see Servo::settleTick().
   elbowY.setPlanSettle(3000);
+  elbowY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
   // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
   // elbow's planned-move peak of ~28deg/s.

@@ -140,6 +140,14 @@ private:
   float dampingGainSec = 0.0f;
   float dampingMaxDeg = 0.0f;
   float dampingDeadbandDegPerSec = 0.0f;
+
+  // Hold hysteresis, opt-in (see setHoldHysteresis()): once the joint has settled in the dead zone,
+  // tick() holds still until the error stays past holdWakeDeg for holdWakeUs. NAN = off.
+  float holdWakeDeg = NAN;
+  int64_t holdWakeUs = 0;
+  bool holdSettled = false;
+  bool holdWaking = false;
+  absolute_time_t holdWakeSince = 0;
   float linkRate = NAN;       // deg/s, from setLinkRate(); consumed by tick()
   float dampingOffset = 0.0f; // what the last tick() added to the pulse
   void tickCommand();
@@ -296,6 +304,13 @@ public:
   // command turns it), for this tick only: tick() consumes it, so a joint that stops feeding it - or
   // feeds NaN - gets no damping.
   void setLinkRate(float degPerSec) { linkRate = degPerSec; }
+  // Hold hysteresis: once the IMU error has come inside the dead zone, the joint isn't corrected
+  // again until the error stays above wakeDeg for sustainMS. A knock's tremor flips sign faster
+  // and leaves it alone; a platform tilt or a real slip wakes it. A new target ends the wait.
+  void setHoldHysteresis(float wakeDeg, uint32_t sustainMS) {
+    holdWakeDeg = wakeDeg;
+    holdWakeUs = (int64_t)sustainMS * 1000;
+  }
   float getDampingOffset() const { return dampingOffset; }
   void tick();
 

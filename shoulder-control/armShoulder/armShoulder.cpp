@@ -444,6 +444,7 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     // Learn the resting offset only once the joint has stopped - see Servo::setPlanSettle().
     shoulderY.setPlanSettle(3000);
     shoulderY.setDamping(SHOULDER_DAMPING_GAIN_SEC, SHOULDER_DAMPING_MAX_DEG, SHOULDER_DAMPING_DEADBAND_DEG_PER_SEC);
+    shoulderY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
     shoulderY.enableTrace();
 }

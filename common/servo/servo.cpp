@@ -124,6 +124,8 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
   }
   // A plain target (calibration, home, recovery) ends any planned move - planMove() re-arms it.
   planActive = false;
+  holdSettled = false;
+  holdWaking = false;
   planSettling = false;
   planZone = -1;
   targetAngle = angle;
@@ -307,7 +309,30 @@ void Servo::tickCommand() {
                   zoneOffset[planZone], targetAngle);
     planZone = -1;
   }
+  // Measured live (2026-11-06): after a knock on the table all three IMU-held joints hunted for ~20 s -
+  // the error flipped sign at 0.3-1.5deg and the commands chased it by +-1-1.5deg, because the dead
+  // zones (0.1-0.3deg) sit at the IMU's own post-knock jitter and the backlash makes every correction
+  // jump past the target. See setHoldHysteresis().
+  if (holdSettled && !isnan(holdWakeDeg)) {
+    if (absError <= holdWakeDeg) {
+      holdWaking = false;
+      resetCorrection();
+      return;
+    }
+    if (!holdWaking) {
+      holdWaking = true;
+      holdWakeSince = now;
+    }
+    if (absolute_time_diff_us(holdWakeSince, now) < holdWakeUs) {
+      resetCorrection();
+      return;
+    }
+    holdSettled = false;
+    holdWaking = false;
+    LogQueue::Log("Servo pin=%u hold woke: error %.2f\n", pin, error);
+  }
   if (absError <= deadZone) {
+    holdSettled = true;
     resetCorrection();
     return;
   }

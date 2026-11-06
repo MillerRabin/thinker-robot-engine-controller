@@ -187,6 +187,10 @@
 #define CLAW_CALIBRATION_DEAD_ZONE 0.5f
 
 #define SERVO_DEAD_ZONE 0.3f
+// Hold hysteresis of the IMU-held joints (Servo::setHoldHysteresis()): once settled, an error has to
+// stay above this long before the joint is corrected again (2026-11-06, knock-on-the-table hunting).
+#define HOLD_WAKE_DEG 1.0f
+#define HOLD_WAKE_MS 400
 
 #define FLASH_EEPROM_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_EEPROM_SIZE FLASH_SECTOR_SIZE
