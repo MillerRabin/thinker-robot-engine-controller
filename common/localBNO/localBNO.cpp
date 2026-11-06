@@ -40,13 +40,33 @@ bool LocalBNO::fusionDiverged(const Accelerometer &acc, TickType_t now) {
   Vector3 a = rotate.isValid() ? rotate.invert().rotate({acc.x, acc.y, acc.z}) : Vector3{acc.x, acc.y, acc.z};
   float aLen = sqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
   if (fabsf(aLen - 9.81f) > FUSION_ACCEL_BAND) {
+    // Shaken: the accelerometer says nothing about gravity now, so the second starts over once it's
+    // quiet. Knocks on the table (2026-11-06) rang the elbow's accelerometer +-20-40deg for ~2.5 s
+    // with the fusion steady within 1.5deg; the out-of-band samples used to leave the timer running
+    // and the in-band ones between them, |a| ~ g but pointing anywhere, tripped a reset.
+    fusionBadSince = 0;
+    fusionAccelValid = false;
     return false;
   }
+  // The vector is low-passed, not the angle: vibration averages out of a vector, while every
+  // sample's angle is positive and adds up.
+  const float k = std::min(dtSec / FUSION_FILTER_TAU_SEC, 1.0f);
+  if (!fusionAccelValid) {
+    fusionAccel = a;
+    fusionAccelValid = true;
+  } else {
+    fusionAccel = {fusionAccel.x + (a.x - fusionAccel.x) * k, fusionAccel.y + (a.y - fusionAccel.y) * k,
+                   fusionAccel.z + (a.z - fusionAccel.z) * k};
+  }
+  const Vector3 &f = fusionAccel;
+  float fLen = sqrtf(f.x * f.x + f.y * f.y + f.z * f.z);
   Vector3 g = q.getGravityVector();
   float gLen = sqrtf(g.x * g.x + g.y * g.y + g.z * g.z);
-  float cosErr = std::clamp((g.x * a.x + g.y * a.y + g.z * a.z) / (gLen * aLen), -1.0f, 1.0f);
-  float errorDeg = acosf(cosErr) * RAD_TO_DEG;
-  fusionErrorDeg += (errorDeg - fusionErrorDeg) * std::min(dtSec / FUSION_FILTER_TAU_SEC, 1.0f);
+  if (fLen < 1e-3f || gLen < 1e-3f) {
+    return false;
+  }
+  float cosErr = std::clamp((g.x * f.x + g.y * f.y + g.z * f.z) / (gLen * fLen), -1.0f, 1.0f);
+  fusionErrorDeg = acosf(cosErr) * RAD_TO_DEG;
   fusionErrorMaxDeg = std::max(fusionErrorMaxDeg, fusionErrorDeg);
 
   if (fusionErrorDeg <= FUSION_MAX_ERROR_DEG) {
@@ -331,6 +351,7 @@ bool LocalBNO::begin() {
   fusionCheckFrom = xTaskGetTickCount() + FUSION_SETTLE_TIME;
   fusionErrorDeg = 0.0f;
   fusionBadSince = 0;
+  fusionAccelValid = false;
   return true;
 }
 

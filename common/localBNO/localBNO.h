@@ -29,7 +29,9 @@ class LocalBNO : public IMUBase {
     bool beginSPI();
     Quaternion rotate;
     // Fusion check state - see fusionDiverged().
-    float fusionErrorDeg = 0.0f;       // low-passed angle between the quaternion's and the accelerometer's gravity
+    float fusionErrorDeg = 0.0f;       // angle between the quaternion's gravity and fusionAccel
+    Vector3 fusionAccel{0.0f, 0.0f, 0.0f}; // low-passed accelerometer vector (corrected frame)
+    bool fusionAccelValid = false;
     float fusionErrorMaxDeg = 0.0f;    // peak of fusionErrorDeg since the last "BNO reads" log line
     TickType_t fusionCheckFrom = 0;    // no check before this tick (the fusion settling after a reset)
     TickType_t fusionLastCheck = 0;
