@@ -153,6 +153,16 @@ private:
   float dampingOffset = 0.0f; // what the last tick() added to the pulse
   void tickCommand();
   void applyDamping();
+
+  // Streaming (see streamTo()): a setpoint that runs to each waypoint in turn, and the command after it.
+  bool streamActive = false;
+  float streamSetpoint = NAN;       // IMU space: where the link should be now
+  float streamTarget = NAN;         // the latest waypoint
+  float streamSpeed = 0.0f;         // deg/s, the setpoint's speed until it reaches streamTarget
+  float streamLinkSpeed = 0.0f;     // the setpoint's speed this tick - the link's expected rate
+  absolute_time_t streamReachAt = 0;
+  float parentPlannedSpeed = 0.0f;  // deg/s, see setParentPlannedSpeed()
+  bool streamTick(absolute_time_t now, int64_t dtUs);
   // The PWM pulse for `degree`, clamped to the safe range - physicalAngle untouched.
   void writePulse(float degree);
 
@@ -305,6 +315,17 @@ public:
   // command turns it), for this tick only: tick() consumes it, so a joint that stops feeding it - or
   // feeds NaN - gets no damping.
   void setLinkRate(float degPerSec) { linkRate = degPerSec; }
+  // A waypoint of a stream (a straight-line move, one every ~100 ms, see STREAM_MAX_MS): not a move of
+  // its own - a plan would start from rest at every one and the joint would stutter. The setpoint runs
+  // to `angle` (IMU space) in timeMS at a constant speed, picking up from where it is; the command moves
+  // at that speed less the parent's planned speed, plus STREAM_GAIN times the IMU's distance to the
+  // setpoint. The first waypoint starts the setpoint where the link is. STREAM_END_MS after reaching the
+  // last one the joint holds it like any target. Any other target ends the stream.
+  bool streamTo(const float angle, uint16_t timeMS, float deadZone);
+  // The planned speed (deg/s) of the link this one rides on, about a parallel axis, while that one
+  // streams: the command turns against it as planned - no measured rate in the loop (that fed back
+  // through the arm's compliance and swung the whole arm, 2026-11-06). 0 when the parent isn't moving.
+  void setParentPlannedSpeed(float degPerSec) { parentPlannedSpeed = degPerSec; }
   // Hold hysteresis: once the IMU error has come inside the dead zone, the joint isn't corrected
   // again until the error stays above wakeDeg for sustainMS, or at once past wakeNowDeg. A knock's
   // tremor flips sign faster and leaves it alone; a platform tilt, a real slip or a parent's move

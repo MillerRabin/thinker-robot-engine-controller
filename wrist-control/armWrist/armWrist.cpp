@@ -278,10 +278,14 @@ Vector3 ArmWrist::trackTick() {
   if (useIMUMode.load() == USE_IMU_NOT_USE) {
     wristY.setIMUAngle(wristY.getPhysicalAngle());
     wristZ.setIMUAngle(wristZ.getPhysicalAngle());
+    wristY.setParentPlannedSpeed(0.0f); // not-use commands are relative - nothing to cancel
   } else {
     wristY.setIMUAngle(physicalAngles.y);
     wristZ.setIMUAngle(physicalAngles.z);
     wristY.setLinkRate(rate);
+    // Y rides on the forearm: while the elbow streams, turn against its planned speed. Z has no parent
+    // that turns about its axis.
+    wristY.setParentPlannedSpeed(elbowPlan.speed());
   }
   wristY.tick();
   wristZ.tick();
@@ -535,6 +539,15 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
   elbow.dispatchMessage(frame);
   shoulder.dispatchMessage(frame);
 
+  // The elbow's waypoints (the forearm's absolute tilt), for the planned speed Y turns against.
+  if (frame.id == CAN_ELBOW_SET_Y_DEGREE) {
+    uint32_t raw = frame.data32[0];
+    uint16_t angleYS = raw & 0xFFFF;
+    uint16_t timeMS = (raw >> 16) & 0xFFFF;
+    elbowPlan.waypoint(angleYS == PARAMETER_IS_NAN ? NAN : angleYS / 10.0f,
+                       timeMS == PARAMETER_IS_NAN ? 0 : timeMS);
+  }
+
   if (frame.id == CAN_WRIST_SET_YZ_DEGREE) {
     uint32_t raw = frame.data32[0];
     uint16_t angleYS = raw & 0xFFFF;
@@ -546,11 +559,13 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
     uint16_t timeMS = raw1 & 0xFFFF;
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
 
+    // A short timeMS is a waypoint of a stream (a straight-line move) - see Servo::streamTo().
+    const bool stream = (timeMS > 0 && timeMS <= STREAM_MAX_MS);
     if (!isnan(angleY)) {
-      wristY.setTargetAngle(angleY, timeMS, WRIST_DEAD_ZONE);
+      stream ? wristY.streamTo(angleY, timeMS, WRIST_DEAD_ZONE) : wristY.setTargetAngle(angleY, timeMS, WRIST_DEAD_ZONE);
     }
     if (!isnan(angleZ)) {
-      wristZ.setTargetAngle(angleZ, timeMS, WRIST_DEAD_ZONE);
+      stream ? wristZ.streamTo(angleZ, timeMS, WRIST_DEAD_ZONE) : wristZ.setTargetAngle(angleZ, timeMS, WRIST_DEAD_ZONE);
     }
   }
 

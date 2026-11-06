@@ -192,6 +192,13 @@
 #define HOLD_WAKE_DEG 1.0f
 #define HOLD_WAKE_MS 400
 #define HOLD_WAKE_NOW_DEG 2.5f
+// Streaming (Servo::streamTo()): a host command with 0 < timeMS <= STREAM_MAX_MS is a waypoint of a
+// stream (a straight-line move sends one every ~100 ms), not a move of its own. STREAM_END_MS after
+// the last one is reached the joint goes back to its hold. STREAM_GAIN (1/s) pulls the command after
+// the IMU's distance to the setpoint, on top of the setpoint's own speed.
+#define STREAM_MAX_MS 250
+#define STREAM_END_MS 300
+#define STREAM_GAIN 3.0f
 // Active damping of the IMU-held pitch joints (Servo::setDamping(), see ArmShoulder's for the
 // measurements): the link-rate low-pass, the deadband below which a rate doesn't close the loop, and
 // a rate that starts a servo trace.

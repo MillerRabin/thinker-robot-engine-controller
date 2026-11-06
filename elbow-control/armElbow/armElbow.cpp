@@ -285,9 +285,12 @@ Vector3 ArmElbow::trackTick() {
   const float rate = pitchRate.update(imuAngles.y * RAD_TO_DEG, imu.quaternion.age());
   if (useIMUMode.load() == USE_IMU_NOT_USE) {
     elbowY.setIMUAngle(elbowY.getPhysicalAngle());
+    elbowY.setParentPlannedSpeed(0.0f); // not-use commands are relative - nothing to cancel
   } else {
     elbowY.setIMUAngle(physicalAngles.y);
     elbowY.setLinkRate(rate);
+    // The forearm rides on the shoulder: while the shoulder streams, turn against its planned speed.
+    elbowY.setParentPlannedSpeed(shoulderPlan.speed());
     if (!isnan(rate) && fabsf(rate) > DAMPING_TRACE_RATE_DEG_PER_SEC && elbowY.isTraceIdle()) {
       elbowY.requestTrace();
     }
@@ -384,6 +387,14 @@ int ArmElbow::updateAccuracy(IMUBase *position) {
 void ArmElbow::busReceiveCallback(can2040_msg frame) {
   shoulder.dispatchMessage(frame);
 
+  // The shoulder's waypoints, for the planned speed the elbow turns against while both stream.
+  if (frame.id == CAN_SHOULDER_SET_YZ_DEGREE) {
+    uint16_t angleYS = frame.data32[0] & 0xFFFF;
+    uint16_t timeMS = frame.data32[1] & 0xFFFF;
+    shoulderPlan.waypoint(angleYS == PARAMETER_IS_NAN ? NAN : angleYS / 10.0f,
+                          timeMS == PARAMETER_IS_NAN ? 0 : timeMS);
+  }
+
   if (frame.id == CAN_ELBOW_SET_Y_DEGREE) {
 
     uint32_t raw = frame.data32[0];
@@ -395,7 +406,8 @@ void ArmElbow::busReceiveCallback(can2040_msg frame) {
     LogQueue::Log("CAN_ELBOW_SET_Y_DEGREE received: angleY=%.2f timeMS=%u physicalAngle=%.2f\n", angleY, timeMS, elbowY.getPhysicalAngle());
 
     if (!isnan(angleY)) {
-      elbowY.planMove(angleY, timeMS, ELBOW_DEAD_ZONE);
+      // A short timeMS is a waypoint of a stream (a straight-line move) - see Servo::streamTo().
+      (timeMS > 0 && timeMS <= STREAM_MAX_MS) ? elbowY.streamTo(angleY, timeMS, ELBOW_DEAD_ZONE) : elbowY.planMove(angleY, timeMS, ELBOW_DEAD_ZONE);
     }
   }
 

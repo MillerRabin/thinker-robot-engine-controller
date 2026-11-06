@@ -122,8 +122,10 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
     traceTimeMS = newTimeMS;
     traceRequested = true;
   }
-  // A plain target (calibration, home, recovery) ends any planned move - planMove() re-arms it.
+  // A plain target (calibration, home, recovery) ends any planned move - planMove() re-arms it - and
+  // any stream (streamTo() re-arms it).
   planActive = false;
+  streamActive = false;
   holdSettled = false;
   holdWaking = false;
   planSettling = false;
@@ -134,6 +136,56 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
   moveStarted = get_absolute_time();
   resetCorrection();
   fineAnchorPhysical = NAN;
+  return true;
+}
+
+bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
+  if (isnan(angle) || angle < safeMinDegree || angle > safeMaxDegree) {
+    return false;
+  }
+  if (!streamActive || isnan(imuAngle) || isnan(physicalAngle)) {
+    if (!setTargetAngle(angle, newTimeMS, newDeadZone)) {
+      return false;
+    }
+    if (isnan(imuAngle) || isnan(physicalAngle)) {
+      return true; // nothing to stream from yet - a plain target
+    }
+    streamSetpoint = imuAngle;
+    streamActive = true;
+  } else {
+    targetAngle = angle;
+    setDeadZone(newDeadZone);
+  }
+  const float seconds = std::max<uint16_t>(newTimeMS, 20) / 1000.0f;
+  streamTarget = angle;
+  streamSpeed = std::clamp((angle - streamSetpoint) / seconds, -maxAngularSpeed, maxAngularSpeed);
+  streamReachAt = delayed_by_us(get_absolute_time(), (int64_t)(seconds * 1000000.0f));
+  return true;
+}
+
+bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
+  if (!streamActive) {
+    return false;
+  }
+  const float dtSec = std::min(dtUs / 1000000.0f, 0.01f);
+  if (absolute_time_diff_us(now, streamReachAt) > 0) {
+    streamSetpoint += streamSpeed * dtSec;
+    streamLinkSpeed = streamSpeed;
+  } else {
+    streamSetpoint = streamTarget;
+    streamLinkSpeed = 0.0f;
+    if (absolute_time_diff_us(streamReachAt, now) > (int64_t)STREAM_END_MS * 1000) {
+      // No next waypoint: hold the last one like any target (targetAngle is it).
+      streamActive = false;
+      resetCorrection();
+      return false;
+    }
+  }
+  float speed = streamLinkSpeed - parentPlannedSpeed + STREAM_GAIN * (streamSetpoint - imuAngle);
+  speed = std::clamp(speed, -maxAngularSpeed, maxAngularSpeed);
+  appliedSpeedDegPerSec = speed;
+  physicalAngle = std::clamp(physicalAngle + speed * dtSec, safeMinDegree, safeMaxDegree);
+  setDegreeDirect(physicalAngle);
   return true;
 }
 
@@ -279,7 +331,9 @@ void Servo::applyDamping() {
   // small and isn't one). The deadband keeps a small limit cycle from closing the loop on itself - see
   // setDamping().
   const bool moving = planActive || absolute_time_diff_us(moveStarted, get_absolute_time()) < timeUs;
-  const float error = rate - (moving ? appliedSpeedDegPerSec : 0.0f);
+  // Streaming, the link should move at the setpoint's speed - the command's also cancels the parent's.
+  const float expected = streamActive ? streamLinkSpeed : (moving ? appliedSpeedDegPerSec : 0.0f);
+  const float error = rate - expected;
   const float beyond = std::max(fabsf(error) - dampingDeadbandDegPerSec, 0.0f);
   dampingOffset = std::clamp(-dampingGainSec * copysignf(beyond, error), -dampingMaxDeg, dampingMaxDeg);
   writePulse(physicalAngle + dampingOffset);
@@ -300,7 +354,7 @@ void Servo::tickCommand() {
   if ((dtUs <= 0) || isnan(imuAngle) || isnan(physicalAngle) || isnan(targetAngle))
     return;
 
-  if (planTick(now, dtUs) || settleTick(now))
+  if (streamTick(now, dtUs) || planTick(now, dtUs) || settleTick(now))
     return;
 
   const float error = targetAngle - imuAngle;

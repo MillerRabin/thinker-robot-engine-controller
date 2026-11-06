@@ -6,6 +6,7 @@
 #include "../../common/config/config.h"
 #include "../../common/localBNO/localBNO.h"
 #include "../../common/rateEstimator/rateEstimator.h"
+#include "../../common/plannedSpeed/plannedSpeed.h"
 #include "../../common/remoteClaw/remoteClaw.h"
 #include "../../common/remoteElbow/remoteElbow.h"
 #include "../../common/remoteShoulder/remoteShoulder.h"
@@ -36,6 +37,8 @@ private:
   // Wrist Y's pitch rate for the active damping, and its [DAMP] log line.
   RateEstimator pitchRate{DAMPING_RATE_TAU_SEC};
   DampingMonitor dampingMonitor{"wrist y"};
+  // The elbow's planned speed while it streams, off its waypoints on the bus.
+  PlannedSpeed elbowPlan;
   // Only for the arm's turn about the vertical, see armYaw().
   RemoteShoulder shoulder;
   float lastArmYaw = 0.0f;

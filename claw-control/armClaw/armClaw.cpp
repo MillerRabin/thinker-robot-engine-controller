@@ -474,10 +474,11 @@ void ArmClaw::busReceiveCallback(can2040_msg frame) {
     float axisDeadZone = CLAW_OPEN_LOOP_DEAD_ZONE;
 
     if (!isnan(angleX)) {
-      clawX.setTargetAngle(angleX, timeMS, axisDeadZone);
+      // A short timeMS is a waypoint of a stream (a straight-line move) - see Servo::streamTo().
+      (timeMS > 0 && timeMS <= STREAM_MAX_MS) ? clawX.streamTo(angleX, timeMS, axisDeadZone) : clawX.setTargetAngle(angleX, timeMS, axisDeadZone);
     }
     if (!isnan(angleY)) {
-      clawY.setTargetAngle(angleY, timeMS, axisDeadZone);
+      (timeMS > 0 && timeMS <= STREAM_MAX_MS) ? clawY.streamTo(angleY, timeMS, axisDeadZone) : clawY.setTargetAngle(angleY, timeMS, axisDeadZone);
     }
     if (!isnan(angleG)) {
       clawGripper.setTargetAngle(angleG, timeMS, CLAW_OPEN_LOOP_DEAD_ZONE);
