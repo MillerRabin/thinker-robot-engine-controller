@@ -5,6 +5,7 @@
 #include "../../common/bus/bus.h"
 #include "../../common/config/config.h"
 #include "../../common/localBNO/localBNO.h"
+#include "../../common/rateEstimator/rateEstimator.h"
 #include "../../common/remoteClaw/remoteClaw.h"
 #include "../../common/remoteElbow/remoteElbow.h"
 #include "../../common/remoteShoulder/remoteShoulder.h"
@@ -32,6 +33,9 @@ private:
   TaskHandle_t taskHandle = NULL;
   RemoteClaw claw;
   RemoteElbow elbow;
+  // Wrist Y's pitch rate for the active damping, and its [DAMP] log line.
+  RateEstimator pitchRate{DAMPING_RATE_TAU_SEC};
+  DampingMonitor dampingMonitor{"wrist y"};
   // Only for the arm's turn about the vertical, see armYaw().
   RemoteShoulder shoulder;
   float lastArmYaw = 0.0f;

@@ -273,8 +273,13 @@ void Servo::applyDamping() {
     dampingOffset = 0.0f;
     return;
   }
-  // The deadband keeps a small limit cycle from closing the loop on itself - see setDamping().
-  const float error = rate - appliedSpeedDegPerSec;
+  // The rate the link should have: the command's during a commanded move (a plan, or a plain
+  // target's own timeMS), otherwise none - the IMU-held joints hold an absolute angle, so a parent's
+  // move, a platform tilt or a swing are all motion to resist (the hold's own correction speed is
+  // small and isn't one). The deadband keeps a small limit cycle from closing the loop on itself - see
+  // setDamping().
+  const bool moving = planActive || absolute_time_diff_us(moveStarted, get_absolute_time()) < timeUs;
+  const float error = rate - (moving ? appliedSpeedDegPerSec : 0.0f);
   const float beyond = std::max(fabsf(error) - dampingDeadbandDegPerSec, 0.0f);
   dampingOffset = std::clamp(-dampingGainSec * copysignf(beyond, error), -dampingMaxDeg, dampingMaxDeg);
   writePulse(physicalAngle + dampingOffset);
@@ -323,7 +328,9 @@ void Servo::tickCommand() {
       holdWaking = true;
       holdWakeSince = now;
     }
-    if (absolute_time_diff_us(holdWakeSince, now) < holdWakeUs) {
+    // A steadily growing error - a parent's move - doesn't wait (it would be ~9deg off after 0.4 s
+    // behind a 20deg/s shoulder); the knocks' tremor stayed under 1.6deg.
+    if (absolute_time_diff_us(holdWakeSince, now) < holdWakeUs && !(absError > holdWakeNowDeg)) {
       resetCorrection();
       return;
     }

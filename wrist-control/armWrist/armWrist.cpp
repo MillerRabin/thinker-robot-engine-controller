@@ -274,15 +274,18 @@ Vector3 ArmWrist::trackTick() {
   // Z holds its own angle by the IMU too since 2026-11-06 - it keeps the claw upright when the
   // platform rolls sideways, which the Y joints can't. It ran on the servo's own position before,
   // taken for an unobservable yaw like the shoulder's Z (2026-10-31: command 153 vs IMU 136).
+  const float rate = pitchRate.update(imuAngles.y * RAD_TO_DEG, imu.quaternion.age());
   if (useIMUMode.load() == USE_IMU_NOT_USE) {
     wristY.setIMUAngle(wristY.getPhysicalAngle());
     wristZ.setIMUAngle(wristZ.getPhysicalAngle());
   } else {
     wristY.setIMUAngle(physicalAngles.y);
     wristZ.setIMUAngle(physicalAngles.z);
+    wristY.setLinkRate(rate);
   }
   wristY.tick();
   wristZ.tick();
+  dampingMonitor.update(rate, wristY.getDampingOffset());
   // Trace a disturbance from the elbow - the wrist's own target doesn't change for one.
   if (fabsf(wristY.getTargetAngle() - wristY.getIMUAngle()) > 1.5f) {
     wristY.requestTrace();
@@ -490,8 +493,11 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   wristZ.setFineReleaseError(4.0f);
   wristZ.setHoldResponse(1.5f, 40.0f);
   wristZ.setFineCorrectionBudget(5.0f);
-  wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS);
-  wristZ.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS);
+  wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
+  // Active damping of Y, like the shoulder's (see ArmShoulder's) - with it and the elbow's the whole
+  // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.
+  wristY.setDamping(0.05f, 3.0f, DAMPING_DEADBAND_DEG_PER_SEC);
+  wristZ.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   if (taskHandle == NULL) {
     if (xTaskCreateAffinitySet(ArmWrist::engineTask,
                                "ArmWrist::engineTask", 4096, this, 4,

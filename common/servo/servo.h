@@ -135,8 +135,8 @@ private:
   void resetCorrection();
 
   // Active damping, opt-in (see setDamping()): each tick the pulse leads physicalAngle by
-  // -dampingGainSec * (linkRate - appliedSpeedDegPerSec), within +-dampingMaxDeg. physicalAngle
-  // stays the command - the offset only goes to the output.
+  // -dampingGainSec * (linkRate - the rate the link should have), past the deadband and within
+  // +-dampingMaxDeg. physicalAngle stays the command - the offset only goes to the output.
   float dampingGainSec = 0.0f;
   float dampingMaxDeg = 0.0f;
   float dampingDeadbandDegPerSec = 0.0f;
@@ -144,6 +144,7 @@ private:
   // Hold hysteresis, opt-in (see setHoldHysteresis()): once the joint has settled in the dead zone,
   // tick() holds still until the error stays past holdWakeDeg for holdWakeUs. NAN = off.
   float holdWakeDeg = NAN;
+  float holdWakeNowDeg = NAN;
   int64_t holdWakeUs = 0;
   bool holdSettled = false;
   bool holdWaking = false;
@@ -305,11 +306,13 @@ public:
   // feeds NaN - gets no damping.
   void setLinkRate(float degPerSec) { linkRate = degPerSec; }
   // Hold hysteresis: once the IMU error has come inside the dead zone, the joint isn't corrected
-  // again until the error stays above wakeDeg for sustainMS. A knock's tremor flips sign faster
-  // and leaves it alone; a platform tilt or a real slip wakes it. A new target ends the wait.
-  void setHoldHysteresis(float wakeDeg, uint32_t sustainMS) {
+  // again until the error stays above wakeDeg for sustainMS, or at once past wakeNowDeg. A knock's
+  // tremor flips sign faster and leaves it alone; a platform tilt, a real slip or a parent's move
+  // wakes it. A new target ends the wait.
+  void setHoldHysteresis(float wakeDeg, uint32_t sustainMS, float wakeNowDeg) {
     holdWakeDeg = wakeDeg;
     holdWakeUs = (int64_t)sustainMS * 1000;
+    holdWakeNowDeg = wakeNowDeg;
   }
   float getDampingOffset() const { return dampingOffset; }
   void tick();

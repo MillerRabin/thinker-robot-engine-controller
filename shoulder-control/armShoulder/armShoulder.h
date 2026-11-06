@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../common/armPart/armPart.h"
+#include "../../common/rateEstimator/rateEstimator.h"
 #include "../../common/bootsel/bootsel.h"
 #include "../../common/bus/bus.h"
 #include "../../common/config/config.h"
@@ -50,17 +51,9 @@ private:
   absolute_time_t shakeWindowStart = 0;
   Vector3 shakePeak{0.0f, 0.0f, 0.0f};
   void monitorShake(const Quaternion &q);
-  // Shoulder Y's pitch rate for the active damping, from the IMU angle at each new IMU sample - see
-  // pitchRateDegPerSec().
-  TickType_t rateSampleTick = 0;
-  bool rateSampleValid = false;
-  float ratePitchDeg = 0.0f;
-  float pitchRate = 0.0f;
-  float pitchRateDegPerSec(float pitchDeg);
-  // Peaks per window for the [DAMP] log line.
-  float dampRatePeak = 0.0f;
-  float dampOffsetPeak = 0.0f;
-  absolute_time_t dampWindowStart = 0;
+  // Shoulder Y's pitch rate for the active damping, and its [DAMP] log line.
+  RateEstimator pitchRate{DAMPING_RATE_TAU_SEC};
+  DampingMonitor dampingMonitor{"shoulder y"};
 public:
   Servo shoulderZ;
   Servo shoulderY;

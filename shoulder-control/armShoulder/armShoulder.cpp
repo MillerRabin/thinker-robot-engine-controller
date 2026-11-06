@@ -191,68 +191,31 @@ bool ArmShoulder::calibrateZLoop() {
 // 2.5deg at 47deg/s, 0.15-0.4deg at rest. 0.1 s: one rebound (+2.9..4.6), done in ~1 s - but at rest
 // the loop sustained a ~6 Hz tremor (offset +-0.7deg, link +-0.3, command still): there the rate
 // filter, IMU and servo lag turn the damping around. Hence the slower filter and the deadband: a
-// small tremor can't close the loop, a swing (10-40deg/s) still does. Bounded, so a bad rate can only
-// nudge the joint.
+// small tremor can't close the loop, a swing (10-40deg/s) still does. After a calibration or a push
+// the arm can still sway +-0.25-0.5deg at ~1.7 Hz for 10-30 s with every command still - the servos
+// hunting in their backlash at 2-6deg/s. With the elbow and wrist damped too (0.05 s) the whole arm
+// answers a push (the user: "now the whole arm responds, not only the shoulder"), but a 1.5deg/s
+// deadband didn't stop that sway (offsets 0.05-0.2deg) and made the tremor look stronger, so all
+// three keep 3deg/s. Bounded, so a bad rate can only nudge the joint.
 constexpr float SHOULDER_DAMPING_GAIN_SEC = 0.1f;
 constexpr float SHOULDER_DAMPING_MAX_DEG = 5.0f;
-constexpr float SHOULDER_DAMPING_DEADBAND_DEG_PER_SEC = 3.0f;
-// Rate low-pass: 94% and 21deg of lag at the 1 Hz swing, 40% at the 6 Hz tremor (was 20 ms: 80%).
-constexpr float SHOULDER_RATE_TAU_SEC = 0.06f;
-// A swing this fast starts a servo trace (4 s at 5 ms, command and damping offset included).
-constexpr float SHOULDER_TRACE_RATE_DEG_PER_SEC = 20.0f;
-
-// The pitch angle differenced at each new IMU sample (stamped with its store time), not at each
-// tick: the IMU and this loop both run at 5 ms, unsynchronised, so per-tick differences alternate
-// between 0 and twice the step. NaN once the IMU has gone quiet - no rate, no damping.
-float ArmShoulder::pitchRateDegPerSec(float pitchDeg) {
-  const TickType_t now = xTaskGetTickCount();
-  const TickType_t sampleTick = now - imu.quaternion.age();
-  if (!rateSampleValid || sampleTick != rateSampleTick) {
-    const float dt = (int32_t)(sampleTick - rateSampleTick) / (float)configTICK_RATE_HZ;
-    if (rateSampleValid && dt > 0.0f && dt < 0.05f) {
-      const float raw = (pitchDeg - ratePitchDeg) / dt;
-      pitchRate += dt / (SHOULDER_RATE_TAU_SEC + dt) * (raw - pitchRate);
-    } else {
-      pitchRate = 0.0f;
-    }
-    rateSampleTick = sampleTick;
-    ratePitchDeg = pitchDeg;
-    rateSampleValid = true;
-  }
-  if ((int32_t)(now - rateSampleTick) > (int32_t)pdMS_TO_TICKS(30)) {
-    return NAN;
-  }
-  return pitchRate;
-}
 
 Vector3 ArmShoulder::trackTick() {
   Vector3 imuAngles = getIMUAngles();
   Vector3 physicalAngles = getPhysicalAngles(imuAngles);
-  const float rate = pitchRateDegPerSec(imuAngles.y * RAD_TO_DEG);
+  const float rate = pitchRate.update(imuAngles.y * RAD_TO_DEG, imu.quaternion.age());
   if (useIMUMode.load() == USE_IMU_NOT_USE) {
     // The fallback stays inert: no damping either.
     shoulderY.setIMUAngle(shoulderY.getPhysicalAngle());
   } else {
     shoulderY.setIMUAngle(physicalAngles.y);
     shoulderY.setLinkRate(rate);
-    if (!isnan(rate) && fabsf(rate) > SHOULDER_TRACE_RATE_DEG_PER_SEC && shoulderY.isTraceIdle()) {
+    if (!isnan(rate) && fabsf(rate) > DAMPING_TRACE_RATE_DEG_PER_SEC && shoulderY.isTraceIdle()) {
       shoulderY.requestTrace();
     }
   }
   shoulderY.setTraceAux(shoulderY.getDampingOffset());
-  const absolute_time_t now = get_absolute_time();
-  if (!isnan(rate)) {
-    dampRatePeak = fmaxf(dampRatePeak, fabsf(rate));
-  }
-  dampOffsetPeak = fmaxf(dampOffsetPeak, fabsf(shoulderY.getDampingOffset()));
-  if (absolute_time_diff_us(dampWindowStart, now) >= 500000) {
-    if (dampRatePeak > 2.0f) {
-      LogQueue::Log("[DAMP] shoulder y rate peak %.1f deg/s, offset peak %.2f deg\n", dampRatePeak, dampOffsetPeak);
-    }
-    dampRatePeak = 0.0f;
-    dampOffsetPeak = 0.0f;
-    dampWindowStart = now;
-  }
+  dampingMonitor.update(rate, shoulderY.getDampingOffset());
   // Z always runs on the servo's own position, never on yawZ: rotation about the vertical axis
   // doesn't change gravity, and the game rotation vector absorbs a slow one into its gyro-bias
   // estimate - confirmed live (2026-10-31): the arm turned ~20deg about Z while yawZ stayed at
@@ -443,8 +406,8 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     shoulderY.setHoldResponse(1.5f, 40.0f);
     // Learn the resting offset only once the joint has stopped - see Servo::setPlanSettle().
     shoulderY.setPlanSettle(3000);
-    shoulderY.setDamping(SHOULDER_DAMPING_GAIN_SEC, SHOULDER_DAMPING_MAX_DEG, SHOULDER_DAMPING_DEADBAND_DEG_PER_SEC);
-    shoulderY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS);
+    shoulderY.setDamping(SHOULDER_DAMPING_GAIN_SEC, SHOULDER_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
+    shoulderY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
     shoulderY.enableTrace();
 }

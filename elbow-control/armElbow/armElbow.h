@@ -5,6 +5,7 @@
 #include "../../common/bus/bus.h"
 #include "../../common/config/config.h"
 #include "../../common/localBNO/localBNO.h"
+#include "../../common/rateEstimator/rateEstimator.h"
 #include "../../common/remoteShoulder/remoteShoulder.h"
 #include "../../common/servo/servo.h"
 #include "../../common/statusLed/statusLed.h"
@@ -18,6 +19,9 @@ public:
 class ArmElbow : public ArmPart {
 private:
   LocalBNO imu;
+  // Elbow Y's pitch rate for the active damping, and its [DAMP] log line.
+  RateEstimator pitchRate{DAMPING_RATE_TAU_SEC};
+  DampingMonitor dampingMonitor{"elbow y"};
   static void engineTask(void *instance);
   void busReceiveCallback(can2040_msg frame);
   bool calibrateYLoop();

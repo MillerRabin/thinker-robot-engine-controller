@@ -272,16 +272,28 @@ float ArmElbow::accelPitchDeg() {
   return atan2f(sinf(d), cosf(d)) * RAD_TO_DEG + elbowYHomeAngle;
 }
 
+// Active damping of the elbow, like the shoulder's (see ArmShoulder's): a push at the wrist bends it
+// more than the shoulder, and with it damped the whole arm answers a push, not only the shoulder
+// (2026-11-06). Half the shoulder's gain - the elbow servo is the weaker one.
+constexpr float ELBOW_DAMPING_GAIN_SEC = 0.05f;
+constexpr float ELBOW_DAMPING_MAX_DEG = 3.0f;
+
 Vector3 ArmElbow::trackTick() {
   Vector3 imuAngles = getIMUAngles();
   Vector3 physicalAngles = getPhysicalAngles(imuAngles);
+  const float rate = pitchRate.update(imuAngles.y * RAD_TO_DEG, imu.quaternion.age());
   if (useIMUMode.load() == USE_IMU_NOT_USE) {
     elbowY.setIMUAngle(elbowY.getPhysicalAngle());
   } else {
     elbowY.setIMUAngle(physicalAngles.y);
+    elbowY.setLinkRate(rate);
+    if (!isnan(rate) && fabsf(rate) > DAMPING_TRACE_RATE_DEG_PER_SEC && elbowY.isTraceIdle()) {
+      elbowY.requestTrace();
+    }
   }
   elbowY.setTraceAux(accelPitchDeg());
   elbowY.tick();
+  dampingMonitor.update(rate, elbowY.getDampingOffset());
   updateStatuses();
   return physicalAngles;
 }
@@ -329,7 +341,8 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   elbowY.enableTrace();
   // The elbow servo ran at 8-15deg/s on 2026-11-02 (27deg/s that morning) - see Servo::settleTick().
   elbowY.setPlanSettle(3000);
-  elbowY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS);
+  elbowY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
+  elbowY.setDamping(ELBOW_DAMPING_GAIN_SEC, ELBOW_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
   // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
   // elbow's planned-move peak of ~28deg/s.

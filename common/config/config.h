@@ -191,6 +191,13 @@
 // stay above this long before the joint is corrected again (2026-11-06, knock-on-the-table hunting).
 #define HOLD_WAKE_DEG 1.0f
 #define HOLD_WAKE_MS 400
+#define HOLD_WAKE_NOW_DEG 2.5f
+// Active damping of the IMU-held pitch joints (Servo::setDamping(), see ArmShoulder's for the
+// measurements): the link-rate low-pass, the deadband below which a rate doesn't close the loop, and
+// a rate that starts a servo trace.
+#define DAMPING_RATE_TAU_SEC 0.06f
+#define DAMPING_DEADBAND_DEG_PER_SEC 3.0f
+#define DAMPING_TRACE_RATE_DEG_PER_SEC 20.0f
 
 #define FLASH_EEPROM_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_EEPROM_SIZE FLASH_SECTOR_SIZE
