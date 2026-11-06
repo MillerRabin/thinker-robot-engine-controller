@@ -53,6 +53,19 @@ int ArmPart::updateHeight(uint32_t height, uint16_t temperature) {
   return 0;
 }
 
+static uint64_t packHomeAngle(float degrees) {
+  if (isnan(degrees)) {
+    return STATUS_HOME_NONE;
+  }
+  long centi = lroundf(degrees * 100.0f);
+  return (uint64_t)(centi < 0 ? 0 : (centi > STATUS_HOME_NONE - 1 ? STATUS_HOME_NONE - 1 : centi));
+}
+
+void ArmPart::setHomeAngles(float first, float second) {
+  statuses = (statuses & 0xFFFFFFFFull) | packHomeAngle(first) << STATUS_HOME_SHIFT_FIRST |
+             packHomeAngle(second) << STATUS_HOME_SHIFT_SECOND;
+}
+
 int ArmPart::updateStatuses() {
   uint8_t id = getStatusesMessageId();
   if (id == 0)

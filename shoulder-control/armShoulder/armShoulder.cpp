@@ -285,6 +285,7 @@ void ArmShoulder::onIMUReset() {
 
 int ArmShoulder::updateStatuses() {
   setUseIMUStatus(useIMUMode.load());
+  setHomeAngles(shoulderYHomeAngle, shoulderZ.getPhysicalAngle());
   return ArmPart::updateStatuses();
 }
 

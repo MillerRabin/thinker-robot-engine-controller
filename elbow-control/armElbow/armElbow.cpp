@@ -3,6 +3,7 @@
 
 int ArmElbow::updateStatuses() {
   setUseIMUStatus(useIMUMode.load());
+  setHomeAngles(elbowYHomeAngle, NAN);
   return ArmPart::updateStatuses();
 }
 

@@ -226,6 +226,17 @@
 #define ARM_CALIBRATED 256
 #define ARM_USE_IMU_ENABLED 512
 #define ARM_USE_IMU_AUTO 1024
+// The status frame's upper half carries the joint's calibrated home commands - the command that holds
+// the calibration pose (2026-11-06, for the kinematics on the host's clients, see
+// ArmPart::setHomeAngles()): bits 32-47 the first, 48-63 the second, 0.01deg each, 0xFFFF = none.
+// Shoulder: Y, and Z's command now - Z runs open-loop, so that's its angle (its home is always
+// SHOULDER_Z_HOME_POSITION), and its IMU yaw drifts several degrees in minutes. Elbow: Y, none.
+// Wrist: Y, Z. Claw: Y, and Y's command now - it runs open-loop, so that's its angle; its IMU only
+// estimates it (2 deg off on 2026-11-06, which jumped the claw at the start of a line).
+// Valid while ARM_CALIBRATED is set.
+#define STATUS_HOME_SHIFT_FIRST 32
+#define STATUS_HOME_SHIFT_SECOND 48
+#define STATUS_HOME_NONE 0xFFFF
 
 #define ERROR_ENGINE_TASK_CREATION_FAILED -1
 #define ERROR_PART_IS_NOT_CALIBRATED -2

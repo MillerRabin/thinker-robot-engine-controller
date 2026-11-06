@@ -358,6 +358,7 @@ void ArmWrist::onIMUReset() {
 
 int ArmWrist::updateStatuses() {
   setUseIMUStatus(useIMUMode.load());
+  setHomeAngles(wristYHomeAngle, wristZHomeAngle);
   return ArmPart::updateStatuses();
 }
 

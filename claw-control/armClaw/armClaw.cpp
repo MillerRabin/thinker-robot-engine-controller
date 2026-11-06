@@ -228,6 +228,7 @@ void ArmClaw::onIMUReset() {
 
 int ArmClaw::updateStatuses() {
   setUseIMUStatus(useIMUMode.load());
+  setHomeAngles(clawYHomeAngle, clawY.getPhysicalAngle());
   return ArmPart::updateStatuses();
 }
 

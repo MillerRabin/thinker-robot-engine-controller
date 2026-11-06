@@ -77,6 +77,8 @@ public:
   virtual int updateRange(float longRange, float shortRange);
   virtual int sendFirmwareUpgradeMessage();
   virtual int updateStatuses();
+  // Publishes the joint's calibrated home commands with the statuses - see STATUS_HOME_SHIFT_FIRST.
+  void setHomeAngles(float first, float second);
   virtual Vector3 getIMUAngles(float physicalX, float physicalY, float physicalZ) { return Vector3{0, 0, 0}; };
   virtual Vector3 getIMUAngles() { return Vector3{0, 0, 0}; };
   virtual Vector3 getPhysicalAngles( Vector3& imuAngles) { return Vector3{0, 0, 0}; };
