@@ -50,6 +50,17 @@ private:
   absolute_time_t shakeWindowStart = 0;
   Vector3 shakePeak{0.0f, 0.0f, 0.0f};
   void monitorShake(const Quaternion &q);
+  // Shoulder Y's pitch rate for the active damping, from the IMU angle at each new IMU sample - see
+  // pitchRateDegPerSec().
+  TickType_t rateSampleTick = 0;
+  bool rateSampleValid = false;
+  float ratePitchDeg = 0.0f;
+  float pitchRate = 0.0f;
+  float pitchRateDegPerSec(float pitchDeg);
+  // Peaks per window for the [DAMP] log line.
+  float dampRatePeak = 0.0f;
+  float dampOffsetPeak = 0.0f;
+  absolute_time_t dampWindowStart = 0;
 public:
   Servo shoulderZ;
   Servo shoulderY;

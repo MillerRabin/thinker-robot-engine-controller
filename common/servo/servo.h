@@ -134,6 +134,19 @@ private:
   // Restarts the speed ramp and the fine-budget release timer - see tick().
   void resetCorrection();
 
+  // Active damping, opt-in (see setDamping()): each tick the pulse leads physicalAngle by
+  // -dampingGainSec * (linkRate - appliedSpeedDegPerSec), within +-dampingMaxDeg. physicalAngle
+  // stays the command - the offset only goes to the output.
+  float dampingGainSec = 0.0f;
+  float dampingMaxDeg = 0.0f;
+  float dampingDeadbandDegPerSec = 0.0f;
+  float linkRate = NAN;       // deg/s, from setLinkRate(); consumed by tick()
+  float dampingOffset = 0.0f; // what the last tick() added to the pulse
+  void tickCommand();
+  void applyDamping();
+  // The PWM pulse for `degree`, clamped to the safe range - physicalAngle untouched.
+  void writePulse(float degree);
+
   // Planned move (see planMove()): the command follows a minimum-jerk curve from planStart to
   // planEnd over planDurationUs, by time rather than by IMU error; tick() then falls back to its
   // slow IMU trim. planActive is written last by planMove() (CAN task) and read first by tick().
@@ -270,6 +283,20 @@ public:
   }
   // Allocates the trace buffer (~19 KB) - see TraceSample. False if the heap can't spare it.
   bool enableTrace();
+  bool isTraceIdle() const { return traceState == TraceState::Idle && !traceRequested; }
+  // Active damping: the servo yields against the link's own swing. gainSec = degrees of pulse per
+  // deg/s of the link moving faster than the command does, past deadbandDegPerSec; maxDeg bounds the
+  // offset. 0 = off.
+  void setDamping(float gainSec, float maxDeg, float deadbandDegPerSec) {
+    dampingGainSec = gainSec;
+    dampingMaxDeg = maxDeg;
+    dampingDeadbandDegPerSec = deadbandDegPerSec;
+  }
+  // The link's angular rate about this joint's axis (deg/s, IMU-measured, positive the way a growing
+  // command turns it), for this tick only: tick() consumes it, so a joint that stops feeding it - or
+  // feeds NaN - gets no damping.
+  void setLinkRate(float degPerSec) { linkRate = degPerSec; }
+  float getDampingOffset() const { return dampingOffset; }
   void tick();
 
   void stop() {

@@ -99,9 +99,7 @@ int Servo::setDegreeDirect(const float degree) {
     return SERVO_DEGREE_IS_ABOVE_MAXIMUM;
   }
 
-  uint16_t slices =
-      lowSlices + (uint16_t)roundf((degree - minDegree) * pulseStep);
-  pwm_set_chan_level(slice, channel, slices);
+  writePulse(degree);
   outputActive = true;
   if (positionTime == 0) {
     positionTime = xTaskGetTickCount();
@@ -249,7 +247,38 @@ void Servo::resetCorrection() {
   coarseSince = 0;
 }
 
+void Servo::writePulse(float degree) {
+  degree = std::clamp(degree, safeMinDegree, safeMaxDegree);
+  uint16_t slices =
+      lowSlices + (uint16_t)roundf((degree - minDegree) * pulseStep);
+  pwm_set_chan_level(slice, channel, slices);
+}
+
 void Servo::tick() {
+  tickCommand();
+  applyDamping();
+}
+
+// After tickCommand(), whichever way it returned, so the offset follows the swing on every tick -
+// in the dead zone and at rest too, where the command itself doesn't move.
+void Servo::applyDamping() {
+  const float rate = linkRate;
+  linkRate = NAN;
+  if (dampingGainSec <= 0.0f || !outputActive || !initialized || isnan(physicalAngle) || isnan(rate)) {
+    if (dampingOffset != 0.0f && outputActive && initialized && !isnan(physicalAngle)) {
+      writePulse(physicalAngle);
+    }
+    dampingOffset = 0.0f;
+    return;
+  }
+  // The deadband keeps a small limit cycle from closing the loop on itself - see setDamping().
+  const float error = rate - appliedSpeedDegPerSec;
+  const float beyond = std::max(fabsf(error) - dampingDeadbandDegPerSec, 0.0f);
+  dampingOffset = std::clamp(-dampingGainSec * copysignf(beyond, error), -dampingMaxDeg, dampingMaxDeg);
+  writePulse(physicalAngle + dampingOffset);
+}
+
+void Servo::tickCommand() {
   if (!pulseStepLogged) {
     pulseStepLogged = true;
     LogQueue::Log("[DIAG] Servo pin=%u pulseStep=%.3f slices/deg (min PWM step ~%.4f deg)\n",
