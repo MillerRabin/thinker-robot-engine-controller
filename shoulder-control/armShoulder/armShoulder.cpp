@@ -445,8 +445,12 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame) {
     if (!isnan(angleY)) {
       shoulderY.planMove(angleY, timeMS, SHOULDER_DEAD_ZONE);
     }
+    // Z on the minimum-jerk curve too (2026-11-06): the plain target jumped to the turn's speed at
+    // 180deg/s^2 and dropped from it the same way at the deadline (0->13deg/s in 0.07 s and 13->~2
+    // 3 s later for a 40deg turn in 3000 ms), and each step set the arm swaying sideways at ~1 Hz,
+    // +-2deg at the wrist. Open-loop, so the plan's IMU offset is ~0 and it just shapes the command.
     if (!isnan(angleZ)) {
-      shoulderZ.setTargetAngle(angleZ, timeMS, SHOULDER_DEAD_ZONE);
+      shoulderZ.planMove(angleZ, timeMS, SHOULDER_DEAD_ZONE);
     }
   }
 
