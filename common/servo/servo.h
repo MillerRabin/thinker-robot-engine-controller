@@ -151,8 +151,21 @@ private:
   absolute_time_t holdWakeSince = 0;
   float linkRate = NAN;       // deg/s, from setLinkRate(); consumed by tick()
   float dampingOffset = 0.0f; // what the last tick() added to the pulse
+  float pulseOffset = 0.0f;   // damping + dither on the output after the last tick()
   void tickCommand();
   void applyDamping();
+
+  // Dither, opt-in (see setDither()): a square wave on the output while the joint moves.
+  float ditherAmpDeg = 0.0f;
+  int64_t ditherHalfPeriodUs = 0;
+  float ditherLevel = 0.0f;           // 0..1, ramped in and out
+  float ditherSign = 1.0f;
+  float ditherOffset = 0.0f;          // what the last tick() added to the pulse
+  bool ditherAllowed = false;         // from allowDither(); consumed by tick()
+  absolute_time_t ditherFlipAt = 0;
+  absolute_time_t ditherMotionAt = 0; // the last tick the joint was moving
+  absolute_time_t ditherTickAt = 0;
+  void ditherTick();
 
   // Streaming (see streamTo()): a setpoint that runs to each waypoint in turn, and the command after it.
   bool streamActive = false;
@@ -160,6 +173,21 @@ private:
   float streamTarget = NAN;         // the latest waypoint
   float streamSpeed = 0.0f;         // deg/s, the setpoint's speed until it reaches streamTarget
   float streamLinkSpeed = 0.0f;     // the setpoint's speed this tick - the link's expected rate
+  float streamErrorLP = 0.0f;       // setpoint - IMU, low-passed over STREAM_ERROR_TAU_SEC
+  float streamStartIMU = NAN;       // where the link was when the stream began
+  // End-of-stream overshoot compensation (see streamTick()).
+  float streamPeakSpeed = 0.0f;     // deg/s, the setpoint's fastest so far
+  float streamEndWeight = 0.0f;     // 0 cruising .. 1 stopped, never decreasing within a stream
+  float streamEndWeightLP = 0.0f;   // the same, smoothed - the shift moves the command, so no steps
+  float streamShift = 0.0f;         // deg, the shift now (signed, opposite the travel)
+  // Learned, deg in the direction of travel: how far the link ran past the last waypoint by the time
+  // a stream ended - [0] for streams toward growing angles, [1] toward falling ones.
+  float streamEndShift[2] = {0.0f, 0.0f};
+  float streamCorrection = 0.0f;    // deg, what the correction has added to the command this stream
+  bool streamCorrectionCapped = false;
+  bool streamCorrectWhenStill = true; // see setStreamCorrectWhenStill()
+  // After a stream the hold corrects at no more than STREAM_SETTLE_SPEED_DEG_PER_SEC until it settles.
+  bool gentleHold = false;
   absolute_time_t streamReachAt = 0;
   float parentPlannedSpeed = 0.0f;  // deg/s, see setParentPlannedSpeed()
   bool streamTick(absolute_time_t now, int64_t dtUs);
@@ -197,10 +225,10 @@ private:
   int8_t planZone = -1; // zone the running planned target learns into, -1 = none or done
   int8_t zoneOf(float target, float from) const;
 
-  // Diagnostic trace, opt-in (see enableTrace()): every tick() for traceCapacity ticks after a
-  // target change of at least traceMinMoveDeg, then dumped to the log a few samples per tick so the
-  // printing doesn't disturb the 5 ms loop while recording. Shows whether the command itself swings
-  // with the IMU, and with what lag.
+  // Diagnostic trace, opt-in (see enableTrace()): every traceEvery-th tick() for traceCapacity
+  // samples after a target change of at least traceMinMoveDeg or a stream's start, then dumped to the
+  // log a few samples per tick so the printing doesn't disturb the 5 ms loop while recording. Shows
+  // whether the command itself swings with the IMU, and with what lag.
   struct TraceSample {
     uint32_t tUs;
     float target;
@@ -211,6 +239,9 @@ private:
   };
   enum class TraceState : uint8_t { Idle, Recording, Dumping };
   static constexpr uint16_t traceCapacity = 800;
+  // Every traceEvery-th tick is recorded: 800 x 2 x 5 ms = 8 s, a whole host move and the hold after it.
+  static constexpr uint8_t traceEvery = 2;
+  uint8_t traceSkip = 0;
   static constexpr float traceMinMoveDeg = 1.0f;
   TraceSample *trace = nullptr;
   TraceState traceState = TraceState::Idle;
@@ -319,7 +350,8 @@ public:
   // its own - a plan would start from rest at every one and the joint would stutter. The setpoint runs
   // to `angle` (IMU space) in timeMS at a constant speed, picking up from where it is; the command moves
   // at that speed less the parent's planned speed, plus STREAM_GAIN times the IMU's distance to the
-  // setpoint. The first waypoint starts the setpoint where the link is. STREAM_END_MS after reaching the
+  // setpoint low-passed over STREAM_ERROR_TAU_SEC. The first waypoint starts the setpoint where the
+  // link is. STREAM_END_MS after reaching the
   // last one the joint holds it like any target. Any other target ends the stream.
   bool streamTo(const float angle, uint16_t timeMS, float deadZone);
   // The planned speed (deg/s) of the link this one rides on, about a parallel axis, while that one
@@ -336,6 +368,27 @@ public:
     holdWakeNowDeg = wakeNowDeg;
   }
   float getDampingOffset() const { return dampingOffset; }
+  // Everything the last tick() added to the pulse on top of the command: damping and dither.
+  float getPulseOffset() const { return pulseOffset; }
+  // Dither: a square wave of +-ampDeg flipping every halfPeriodMS, added to the output while the joint
+  // moves - a stream's setpoint or a planned move's curve travelling, never a hold or a settle (see
+  // ditherTick()) - and ramped out DITHER_HOLD_MS after it stops. Measured live (2026-11-07, servo trace): at the slow end of a host
+  // move the elbow stood still while its command crept on at 2-7deg/s, then jumped ~1deg at 18-20deg/s
+  // every ~250 ms - the servo doesn't move its output for a small command change (its dead band and
+  // the gear's static friction). A dither keeps the servo working so the link follows the command.
+  // The joint has to allowDither() each tick too (the module's normal tracking only - never during a
+  // calibration). 0 = off.
+  void setDither(float ampDeg, uint16_t halfPeriodMS) {
+    ditherAmpDeg = ampDeg;
+    ditherHalfPeriodUs = (int64_t)halfPeriodMS * 1000;
+  }
+  // This tick may dither (see setDither()); tick() consumes it.
+  void allowDither() { ditherAllowed = true; }
+  // false: while a stream's own setpoint stays within STREAM_STILL_DEG of where the link started (the
+  // plan doesn't move this joint) the command just holds - no IMU correction until the hold after the
+  // stream. For wrist Z: measured live (2026-11-10), its twist reading wandered ~1deg while the wrist
+  // pitched 108deg, and the correction wound its command 8deg off before the bound stopped it.
+  void setStreamCorrectWhenStill(bool on) { streamCorrectWhenStill = on; }
   void tick();
 
   void stop() {

@@ -283,6 +283,7 @@ Vector3 ArmWrist::trackTick() {
     wristY.setIMUAngle(physicalAngles.y);
     wristZ.setIMUAngle(physicalAngles.z);
     wristY.setLinkRate(rate);
+    wristY.allowDither();
     // Y rides on the forearm: while the elbow streams, turn against its planned speed. Z has no parent
     // that turns about its axis.
     wristY.setParentPlannedSpeed(elbowPlan.speed());
@@ -498,10 +499,17 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   wristZ.setFineReleaseError(4.0f);
   wristZ.setHoldResponse(1.5f, 40.0f);
   wristZ.setFineCorrectionBudget(5.0f);
+  wristZ.setStreamCorrectWhenStill(false);
   wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   // Active damping of Y, like the shoulder's (see ArmShoulder's) - with it and the elbow's the whole
   // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.
   wristY.setDamping(0.05f, 3.0f, DAMPING_DEADBAND_DEG_PER_SEC);
+  // Dither while moving, like the elbow's (see Servo::setDither()): with only the elbow dithered the
+  // wrist still jumped every ~250 ms at the slow end of a host move (2026-11-07). +-0.5deg at 25 Hz
+  // stopped that, but shoulder-z then hunted for minutes at rest in the extended pose (yaw-rate spikes
+  // 15-27deg/s instead of 1-2; returning to vertical stopped it). +-0.3deg at 50 Hz - ~3 of the wrist
+  // servo's 330 Hz pulses each way - shakes the arm less.
+  wristY.setDither(0.3f, 10);
   wristZ.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   if (taskHandle == NULL) {
     if (xTaskCreateAffinitySet(ArmWrist::engineTask,

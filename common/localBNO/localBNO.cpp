@@ -210,6 +210,11 @@ void LocalBNO::compassTask(void *instance) {
         break;
     }
 
+    if (bno->resetRequested) {
+      bno->resetRequested = false;
+      LogQueue::Log("BNO reset on request\n");
+      resetFusion = true;
+    }
     if (resetFusion) {
       fusionResetsTotal++;
       // begin() pulses the RST pin (SPI) or soft-resets (I2C) and re-enables the reports.

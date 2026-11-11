@@ -278,6 +278,11 @@ float ArmElbow::accelPitchDeg() {
 // (2026-11-06). Half the shoulder's gain - the elbow servo is the weaker one.
 constexpr float ELBOW_DAMPING_GAIN_SEC = 0.05f;
 constexpr float ELBOW_DAMPING_MAX_DEG = 3.0f;
+// Dither while moving (see Servo::setDither()): +-0.5deg - the elbow stuck for ~1deg of command at the
+// end of a host move - at 25 Hz, two of the servo's 100 Hz pulses each way. EXPERIMENT 2026-11-07,
+// the elbow only.
+constexpr float ELBOW_DITHER_DEG = 0.5f;
+constexpr uint16_t ELBOW_DITHER_HALF_PERIOD_MS = 20;
 
 Vector3 ArmElbow::trackTick() {
   Vector3 imuAngles = getIMUAngles();
@@ -289,13 +294,16 @@ Vector3 ArmElbow::trackTick() {
   } else {
     elbowY.setIMUAngle(physicalAngles.y);
     elbowY.setLinkRate(rate);
+    elbowY.allowDither();
     // The forearm rides on the shoulder: while the shoulder streams, turn against its planned speed.
     elbowY.setParentPlannedSpeed(shoulderPlan.speed());
     if (!isnan(rate) && fabsf(rate) > DAMPING_TRACE_RATE_DEG_PER_SEC && elbowY.isTraceIdle()) {
       elbowY.requestTrace();
     }
   }
-  elbowY.setTraceAux(accelPitchDeg());
+  // The pulse's offset from the command, damping and dither - what the servo gets on top (2026-11-07;
+  // was accelPitchDeg(), for the 2026-11-02 BNO-lag diagnosis).
+  elbowY.setTraceAux(elbowY.getPulseOffset());
   elbowY.tick();
   dampingMonitor.update(rate, elbowY.getDampingOffset());
   updateStatuses();
@@ -347,6 +355,7 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   elbowY.setPlanSettle(3000);
   elbowY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   elbowY.setDamping(ELBOW_DAMPING_GAIN_SEC, ELBOW_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
+  elbowY.setDither(ELBOW_DITHER_DEG, ELBOW_DITHER_HALF_PERIOD_MS);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
   // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
   // elbow's planned-move peak of ~28deg/s.

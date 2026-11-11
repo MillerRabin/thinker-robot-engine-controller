@@ -38,6 +38,7 @@ class LocalBNO : public IMUBase {
     TickType_t fusionBadSince = 0;     // 0 = fusionErrorDeg is under the limit
     TickType_t fusionLastReset = 0;
     int fusionResets = 0;              // resets within FUSION_RESET_WINDOW of each other
+    volatile bool resetRequested = false; // see requestReset()
     bool fusionDiverged(const Accelerometer &acc, TickType_t now);
   protected:
     void initIMU();
@@ -47,6 +48,12 @@ class LocalBNO : public IMUBase {
     SemaphoreHandle_t quaternionSemaphore;
     bool updateAccuracy(uint16_t quaternionRadianAccuracy, uint8_t quaternionAccuracy, uint8_t gyroscopeAccuracy, uint8_t accelerometerAccuracy);    
   public:
+    // The angle between the quaternion's gravity and the (low-passed) accelerometer's, deg - see
+    // fusionDiverged(). 0 until FUSION_SETTLE_TIME after a reset.
+    float getFusionErrorDeg() const { return fusionErrorDeg; }
+    // Reset the BNO from its own task at its next report, the way fusionDiverged() does (the part's
+    // onIMUReset() follows).
+    void requestReset() { resetRequested = true; }
     void setRotate(Quaternion rotate) {
       this->rotate = rotate;
     }

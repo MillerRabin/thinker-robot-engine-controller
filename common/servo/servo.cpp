@@ -126,6 +126,7 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
   // any stream (streamTo() re-arms it).
   planActive = false;
   streamActive = false;
+  gentleHold = false;
   holdSettled = false;
   holdWaking = false;
   planSettling = false;
@@ -151,7 +152,23 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
       return true; // nothing to stream from yet - a plain target
     }
     streamSetpoint = imuAngle;
+    streamErrorLP = 0.0f;
+    streamStartIMU = imuAngle;
+    streamPeakSpeed = 0.0f;
+    streamEndWeight = 0.0f;
+    streamEndWeightLP = 0.0f;
+    streamShift = 0.0f;
+    streamCorrection = 0.0f;
+    streamCorrectionCapped = false;
     streamActive = true;
+    // Each stream's start is traced, whatever its first step: its waypoints move the target by far
+    // less than traceMinMoveDeg each, so setTargetAngle() never would.
+    if (trace != nullptr && traceState == TraceState::Idle) {
+      traceFrom = imuAngle;
+      traceTo = angle;
+      traceTimeMS = newTimeMS;
+      traceRequested = true;
+    }
   } else {
     targetAngle = angle;
     setDeadZone(newDeadZone);
@@ -175,13 +192,74 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     streamSetpoint = streamTarget;
     streamLinkSpeed = 0.0f;
     if (absolute_time_diff_us(streamReachAt, now) > (int64_t)STREAM_END_MS * 1000) {
-      // No next waypoint: hold the last one like any target (targetAngle is it).
+      // No next waypoint: hold the last one like any target (targetAngle is it). First learn how far
+      // the link ran past it - the next stream the same way ends its command that much short.
+      const float travel = streamTarget - streamStartIMU;
+      if (fabsf(travel) >= STREAM_LEARN_MIN_TRAVEL_DEG && streamPeakSpeed >= STREAM_END_MIN_PEAK_DEG_PER_SEC) {
+        const int way = travel >= 0.0f ? 0 : 1;
+        const float overshoot = (travel >= 0.0f ? 1.0f : -1.0f) * (imuAngle - streamTarget);
+        const float before = streamEndShift[way];
+        streamEndShift[way] = std::clamp(before + STREAM_LEARN_RATE * overshoot, -STREAM_END_SHIFT_MIN_DEG,
+                                         STREAM_END_SHIFT_MAX_DEG);
+        LogQueue::Log("Servo pin=%u stream end: travel %.1f, overshoot %.2f with shift %.2f -> learned %.2f\n",
+                      pin, travel, overshoot, before, streamEndShift[way]);
+      }
       streamActive = false;
+      gentleHold = true;
       resetCorrection();
       return false;
     }
   }
-  float speed = streamLinkSpeed - parentPlannedSpeed + STREAM_GAIN * (streamSetpoint - imuAngle);
+  // Measured live (2026-11-11, servo traces of 4 s host moves, dither off in the hold): the wrist's
+  // command-minus-link offset was 143.6deg while it moved and 139deg once it stopped - moving, the
+  // motor drags the link through the joint's friction; braking, the claw's weight takes the link to
+  // the other side of the backlash, ~4.5deg ahead (the user: "the arm overshot the point, then came
+  // back"). The same every time, so the command ends short by what the link overran last time the
+  // same way (streamEndShift), blended in as the setpoint slows from its peak. The correction aims at
+  // the shifted setpoint, and holds still from the moment the setpoint arrives: pulling the command
+  // back then only drags the link back after it has rolled over - what's left is the hold's.
+  // (A first try, 2026-11-10, faded the correction out over the braking and learned with the dither
+  // still on in the hold, which let the claw creep; the shift grew instead of settling.)
+  const float travel = streamTarget - streamStartIMU;
+  const int way = travel >= 0.0f ? 0 : 1;
+  const float speedNow = fabsf(streamLinkSpeed);
+  // Only once the setpoint is well on its way: the first waypoint's step from where the link is to the
+  // plan's start can be fast and short, and the slow start of the curve after it isn't braking.
+  if (fabsf(streamSetpoint - streamStartIMU) >= STREAM_END_ARM_DEG) {
+    streamPeakSpeed = std::max(streamPeakSpeed, speedNow);
+  }
+  if (streamPeakSpeed >= STREAM_END_MIN_PEAK_DEG_PER_SEC) {
+    streamEndWeight = std::max(streamEndWeight, 1.0f - speedNow / streamPeakSpeed);
+  }
+  streamEndWeightLP += (streamEndWeight - streamEndWeightLP) * std::min(dtSec / STREAM_END_SMOOTH_SEC, 1.0f);
+  const float shift = (travel >= 0.0f ? -1.0f : 1.0f) * streamEndShift[way] * streamEndWeightLP;
+  const float shiftSpeed = dtSec > 0.0f ? (shift - streamShift) / dtSec : 0.0f;
+  streamShift = shift;
+  // The correction follows the error low-passed: it takes up the slow sag under a changing load but
+  // not the link's 2-4 Hz swing through its backlash, which it only pumped (see STREAM_GAIN).
+  streamErrorLP += ((streamSetpoint + shift - imuAngle) - streamErrorLP) * std::min(dtSec / STREAM_ERROR_TAU_SEC, 1.0f);
+  float correctionSpeed = STREAM_GAIN * streamErrorLP;
+  // A joint the plan doesn't move holds its command (see setStreamCorrectWhenStill()), and so does
+  // every joint once its setpoint has arrived (see above).
+  if ((!streamCorrectWhenStill && fabsf(streamSetpoint - streamStartIMU) < STREAM_STILL_DEG) ||
+      absolute_time_diff_us(now, streamReachAt) <= 0) {
+    correctionSpeed = 0.0f;
+  }
+  // Bounded: measured live (2026-11-10), the shoulder's BNO came up turning about the wrong axis
+  // (see LocalBNO::fusionDiverged()) and read a 5.7deg tilt as ~4; chasing it the correction drove the
+  // command 15deg past the plan - the shoulder tilted that much further and the arm dipped - before
+  // the fusion check reset the BNO. A real sag needed at most ~6deg (the shoulder at the work pose).
+  if (dtSec > 0.0f && fabsf(streamCorrection + correctionSpeed * dtSec) > STREAM_CORRECTION_MAX_DEG) {
+    const float bound = copysignf(STREAM_CORRECTION_MAX_DEG, streamCorrection + correctionSpeed * dtSec);
+    correctionSpeed = (bound - streamCorrection) / dtSec;
+    if (!streamCorrectionCapped) {
+      streamCorrectionCapped = true;
+      LogQueue::Log("Servo pin=%u stream correction capped at %.1f: IMU %.2f, setpoint %.2f\n", pin, bound,
+                    imuAngle, streamSetpoint);
+    }
+  }
+  streamCorrection += correctionSpeed * dtSec;
+  float speed = streamLinkSpeed + shiftSpeed - parentPlannedSpeed + correctionSpeed;
   speed = std::clamp(speed, -maxAngularSpeed, maxAngularSpeed);
   appliedSpeedDegPerSec = speed;
   physicalAngle = std::clamp(physicalAngle + speed * dtSec, safeMinDegree, safeMaxDegree);
@@ -310,7 +388,42 @@ void Servo::writePulse(float degree) {
 
 void Servo::tick() {
   tickCommand();
+  ditherTick();
   applyDamping();
+}
+
+void Servo::ditherTick() {
+  const bool allowed = ditherAllowed;
+  ditherAllowed = false;
+  const absolute_time_t now = get_absolute_time();
+  const float dtSec = std::clamp(absolute_time_diff_us(ditherTickAt, now) / 1000000.0f, 0.0f, 0.01f);
+  ditherTickAt = now;
+  if (ditherAmpDeg <= 0.0f || ditherHalfPeriodUs <= 0 || !allowed || !outputActive || !initialized ||
+      isnan(physicalAngle)) {
+    ditherLevel = 0.0f;
+    ditherOffset = 0.0f;
+    return;
+  }
+  // Moving: a stream's setpoint or a planned move's curve travels. Not a hold correcting, nor a plan
+  // settling: measured live (2026-11-10), dithered through the slow correction after a host move the
+  // wrist link crept 1deg further along gravity in 2 s while its command walked back 3.6deg - the
+  // shaking let the claw's weight slide it across the backlash.
+  const bool moving = (streamActive && fabsf(streamLinkSpeed) > DITHER_MIN_SPEED_DEG_PER_SEC) || planActive;
+  if (moving) {
+    ditherMotionAt = now;
+  }
+  const bool on = absolute_time_diff_us(ditherMotionAt, now) < (int64_t)DITHER_HOLD_MS * 1000;
+  const float step = dtSec / DITHER_RAMP_SEC;
+  ditherLevel = std::clamp(ditherLevel + (on ? step : -step), 0.0f, 1.0f);
+  if (ditherLevel <= 0.0f) {
+    ditherOffset = 0.0f;
+    return;
+  }
+  if (absolute_time_diff_us(ditherFlipAt, now) >= 0) {
+    ditherSign = -ditherSign;
+    ditherFlipAt = delayed_by_us(now, ditherHalfPeriodUs);
+  }
+  ditherOffset = ditherSign * ditherAmpDeg * ditherLevel;
 }
 
 // After tickCommand(), whichever way it returned, so the offset follows the swing on every tick -
@@ -318,25 +431,29 @@ void Servo::tick() {
 void Servo::applyDamping() {
   const float rate = linkRate;
   linkRate = NAN;
-  if (dampingGainSec <= 0.0f || !outputActive || !initialized || isnan(physicalAngle) || isnan(rate)) {
-    if (dampingOffset != 0.0f && outputActive && initialized && !isnan(physicalAngle)) {
-      writePulse(physicalAngle);
-    }
+  const bool live = outputActive && initialized && !isnan(physicalAngle);
+  if (dampingGainSec <= 0.0f || !live || isnan(rate)) {
     dampingOffset = 0.0f;
-    return;
+  } else {
+    // The rate the link should have: the command's during a commanded move (a plan, or a plain
+    // target's own timeMS), otherwise none - the IMU-held joints hold an absolute angle, so a parent's
+    // move, a platform tilt or a swing are all motion to resist (the hold's own correction speed is
+    // small and isn't one). The deadband keeps a small limit cycle from closing the loop on itself -
+    // see setDamping().
+    const bool moving = planActive || absolute_time_diff_us(moveStarted, get_absolute_time()) < timeUs;
+    // Streaming, the link should move at the setpoint's speed - the command's also cancels the parent's.
+    const float expected = streamActive ? streamLinkSpeed : (moving ? appliedSpeedDegPerSec : 0.0f);
+    const float error = rate - expected;
+    const float beyond = std::max(fabsf(error) - dampingDeadbandDegPerSec, 0.0f);
+    dampingOffset = std::clamp(-dampingGainSec * copysignf(beyond, error), -dampingMaxDeg, dampingMaxDeg);
   }
-  // The rate the link should have: the command's during a commanded move (a plan, or a plain
-  // target's own timeMS), otherwise none - the IMU-held joints hold an absolute angle, so a parent's
-  // move, a platform tilt or a swing are all motion to resist (the hold's own correction speed is
-  // small and isn't one). The deadband keeps a small limit cycle from closing the loop on itself - see
-  // setDamping().
-  const bool moving = planActive || absolute_time_diff_us(moveStarted, get_absolute_time()) < timeUs;
-  // Streaming, the link should move at the setpoint's speed - the command's also cancels the parent's.
-  const float expected = streamActive ? streamLinkSpeed : (moving ? appliedSpeedDegPerSec : 0.0f);
-  const float error = rate - expected;
-  const float beyond = std::max(fabsf(error) - dampingDeadbandDegPerSec, 0.0f);
-  dampingOffset = std::clamp(-dampingGainSec * copysignf(beyond, error), -dampingMaxDeg, dampingMaxDeg);
-  writePulse(physicalAngle + dampingOffset);
+  // tickCommand() wrote the bare command when it moved it; put the offsets on top, and take them off
+  // once they're gone.
+  const float offset = live ? dampingOffset + ditherOffset : 0.0f;
+  if (live && (offset != 0.0f || pulseOffset != 0.0f)) {
+    writePulse(physicalAngle + offset);
+  }
+  pulseOffset = offset;
 }
 
 void Servo::tickCommand() {
@@ -394,6 +511,7 @@ void Servo::tickCommand() {
   }
   if (absError <= deadZone) {
     holdSettled = true;
+    gentleHold = false;
     resetCorrection();
     return;
   }
@@ -439,6 +557,11 @@ void Servo::tickCommand() {
     desiredSpeedDegPerSec = absError * stabilizationGainPerSec;
   }
   float speedCeiling = pastDeadline ? stabilizationSpeed : maxAngularSpeed;
+  if (gentleHold) {
+    // After a stream the motor may have backlash to cross before it reaches the link - slowly, or it
+    // yanks the link when it gets there (see STREAM_SETTLE_SPEED_DEG_PER_SEC).
+    speedCeiling = std::min(speedCeiling, STREAM_SETTLE_SPEED_DEG_PER_SEC);
+  }
   float limitedSpeedDegPerSec = fminf(desiredSpeedDegPerSec, speedCeiling);
 
   // Ramp toward the desired speed instead of jumping to it - a noisy/moving target otherwise looks jerky.
@@ -529,12 +652,18 @@ void Servo::traceTick(absolute_time_t now) {
   if (traceState == TraceState::Idle && traceRequested) {
     traceRequested = false;
     traceCount = 0;
+    traceSkip = 0;
     traceStart = now;
     traceState = TraceState::Recording;
   }
   if (traceState == TraceState::Recording) {
-    trace[traceCount++] = {(uint32_t)absolute_time_diff_us(traceStart, now), targetAngle, rawIMUAngle,
-                           imuAngle, physicalAngle, traceAux};
+    if (traceSkip++ % traceEvery != 0) {
+      return;
+    }
+    // While streaming, the target column is the stream's setpoint (the waypoints show as its bends).
+    trace[traceCount++] = {(uint32_t)absolute_time_diff_us(traceStart, now),
+                           streamActive ? streamSetpoint : targetAngle, rawIMUAngle, imuAngle, physicalAngle,
+                           traceAux};
     if (traceCount == traceCapacity) {
       traceDumped = 0;
       traceState = TraceState::Dumping;

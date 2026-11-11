@@ -15,10 +15,40 @@ bool ArmShoulder::settled(bool withinTolerance, TickType_t &stableSince) {
   return (xTaskGetTickCount() - stableSince) >= pdMS_TO_TICKS(CALIBRATION_STABLE_TIME_MS);
 }
 
+// Measured live (2026-11-11): the shoulder's BNO came up turning about the wrong axis (see
+// LocalBNO::fusionDiverged()) and its fusion drifted 30-95deg off its accelerometer during the
+// calibration. The Y passes run on the accelerometer, but they ended on a home 15deg off (72 vs the
+// usual 86-89), and the final settle - on the fusion - read the shoulder flipping between -18 and
+// 162deg and drove its servo across 2-23deg until the user cut the engines. So every calibration
+// step checks the fusion and stops at once on a bad one: the servos hold where they are, the BNO is
+// reset, and the calibration starts over.
+bool ArmShoulder::calibrationFusionBad() {
+  const float error = imu.getFusionErrorDeg();
+  const TickType_t now = xTaskGetTickCount();
+  if (error <= CALIBRATION_FUSION_MAX_DEG) {
+    calibrationFusionBadSince = 0;
+    return false;
+  }
+  if (calibrationFusionBadSince == 0) {
+    calibrationFusionBadSince = now;
+    return false;
+  }
+  if (now - calibrationFusionBadSince < pdMS_TO_TICKS(CALIBRATION_FUSION_MAX_MS)) {
+    return false;
+  }
+  calibrationFusionBadSince = 0;
+  calibrationFusionAborts++;
+  LogQueue::Log("[DIAG] calibration stopped: BNO fusion %.1fdeg off its accelerometer - holding, resetting the "
+                "BNO (%d of %d)\n", error, calibrationFusionAborts, CALIBRATION_MAX_FUSION_ABORTS);
+  imu.requestReset();
+  return true;
+}
+
 void ArmShoulder::updateStatusLed(bool calibrating, bool ready) {
   bool enginesEnabled = platform.getEnginesPowerStatus();
   if (lastEnginesEnabled && !enginesEnabled) {
     onIMUReset();
+    calibrationFusionAborts = 0;
   }
   lastEnginesEnabled = enginesEnabled;
   // The one place servos go limp: everywhere else reset() keeps holding (see Servo::reset()). Not on
@@ -121,6 +151,10 @@ bool ArmShoulder::calibrateYLoop() {
     // error even with no servo power - it then snaps to that stale value once power returns.
     if (!platform.getEnginesPowerStatus()) {
       LogQueue::Log("[DIAG] calibrateYLoop: aborted, engines powered off\n");
+      setYCalibrating(false);
+      return false;
+    }
+    if (calibrationFusionBad()) {
       setYCalibrating(false);
       return false;
     }
@@ -254,6 +288,10 @@ bool ArmShoulder::calibrateLoop() {
         ok = false;
         break;
       }
+      if (calibrationFusionBad()) {
+        ok = false;
+        break;
+      }
       Vector3 physicalAngles = trackTick();
       iterations++;
       // Z by the servo's own position, matching trackTick() - physicalAngles.z is yaw, unobservable.
@@ -272,6 +310,9 @@ bool ArmShoulder::calibrateLoop() {
     LogQueue::Log("[DIAG] calibrateLoop: exit after %lu settle iterations\n", (unsigned long)iterations);
   }
 
+  if (ok) {
+    calibrationFusionAborts = 0;
+  }
   setArmCalibrated(ok);
   updateStatuses();
   return ok;
@@ -365,6 +406,19 @@ void ArmShoulder::engineTask(void *instance) {
       continue;
     }
 
+    if (shoulder->calibrationFusionAborts >= CALIBRATION_MAX_FUSION_ABORTS) {
+      // A BNO that resets don't cure: hold where it is until the engines go off and on again.
+      static Periodic giveUpPrinter(pdMS_TO_TICKS(10000));
+      giveUpPrinter.interval([&]() {
+        LogQueue::Log("[DIAG] engineTask: calibration stopped %d times by the BNO - holding, turn the engines "
+                      "off and on to retry\n", shoulder->calibrationFusionAborts);
+      });
+      shoulder->updateStatusLed(false);
+      shoulder->setEngineTaskStatus(false);
+      shoulder->updateStatuses();
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
+    }
     LogQueue::Log("[DIAG] engineTask: position OK -> entering calibrateLoop (physicalY=%.2f physicalZ=%.2f)\n", shoulder->shoulderY.getPhysicalAngle(), shoulder->shoulderZ.getPhysicalAngle());
     wasOK = true;
     shoulder->setEngineTaskStatus(true);

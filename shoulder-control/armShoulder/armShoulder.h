@@ -27,6 +27,9 @@ private:
   void engineLoop();
   Vector3 trackTick();
   bool settled(bool withinTolerance, TickType_t &stableSince);
+  bool calibrationFusionBad();
+  TickType_t calibrationFusionBadSince = 0;
+  int calibrationFusionAborts = 0; // in a row; an engines off clears it
   StatusLed statusLed{STATUS_LED_PIN};
   void updateStatusLed(bool calibrating, bool ready = false);
   // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively

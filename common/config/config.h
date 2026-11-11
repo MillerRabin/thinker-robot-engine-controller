@@ -143,6 +143,12 @@
 #define ELBOW_DEAD_ZONE 0.3f
 // Looser than *_DEAD_ZONE: resting accelerometer noise alone spans ~+/-0.5-1 deg.
 #define CALIBRATION_SETTLE_TOLERANCE 1.0f
+// A calibration stops, holding the servos where they are, once the BNO's fusion has disagreed with
+// its accelerometer by more than CALIBRATION_FUSION_MAX_DEG for CALIBRATION_FUSION_MAX_MS, and resets
+// the BNO; after CALIBRATION_MAX_FUSION_ABORTS such stops in a row it waits for an engines off/on.
+#define CALIBRATION_FUSION_MAX_DEG 10.0f
+#define CALIBRATION_FUSION_MAX_MS 300
+#define CALIBRATION_MAX_FUSION_ABORTS 3
 #define CALIBRATION_STABLE_TIME_MS 500
 #define SHOULDER_Y_RECOVERY_TIME_MS 4000
 #define WRIST_Z_HOME_POSITION 135
@@ -197,10 +203,43 @@
 // Streaming (Servo::streamTo()): a host command with 0 < timeMS <= STREAM_MAX_MS is a waypoint of a
 // stream (a straight-line move sends one every ~100 ms), not a move of its own. STREAM_END_MS after
 // the last one is reached the joint goes back to its hold. STREAM_GAIN (1/s) pulls the command after
-// the IMU's distance to the setpoint, on top of the setpoint's own speed.
+// the IMU's distance to the setpoint, low-passed over STREAM_ERROR_TAU_SEC, on top of the setpoint's
+// own speed. Measured live (2026-11-07, servo traces of a 4 s host move): at 3/s on the raw error this
+// term swung the motors back and forth - the link slips through its backlash ahead of the setpoint and
+// the correction yanks the motor back, pumping a 2-4 Hz swing (elbow 1.6deg rms); at 0.5/s the swing
+// fell 2.5x but the sag under the growing load wasn't taken up (the tip stopped 12 mm low, then the
+// hold crept it up for 2-3 s). Low-passed, 2/s acts like ~0.4/s on the swing and takes up the sag in
+// ~0.5 s (the loop: zeta ~0.65).
 #define STREAM_MAX_MS 250
 #define STREAM_END_MS 300
-#define STREAM_GAIN 3.0f
+#define STREAM_GAIN 2.0f
+#define STREAM_ERROR_TAU_SEC 0.3f
+// After a stream the hold corrects at no more than STREAM_SETTLE_SPEED_DEG_PER_SEC until it settles:
+// the motor may have backlash to cross before it reaches the link, and at the hold's own speed it
+// yanked the link back when it got there (2026-11-10). A setpoint within STREAM_STILL_DEG of where its
+// link started is a joint the plan doesn't move (Servo::setStreamCorrectWhenStill()).
+#define STREAM_STILL_DEG 1.0f
+// End-of-stream overshoot (Servo::streamTick()): a stream that travelled at least
+// STREAM_LEARN_MIN_TRAVEL_DEG with a setpoint peak of STREAM_END_MIN_PEAK_DEG_PER_SEC (counted once
+// the setpoint is STREAM_END_ARM_DEG on its way) learns STREAM_LEARN_RATE of how far its link ran past
+// the last waypoint, within -STREAM_END_SHIFT_MIN_DEG..STREAM_END_SHIFT_MAX_DEG, per direction; the
+// next one's command ends short by it, blended in as the setpoint slows (smoothed over
+// STREAM_END_SMOOTH_SEC). Kept until the module reboots.
+#define STREAM_LEARN_MIN_TRAVEL_DEG 10.0f
+#define STREAM_END_MIN_PEAK_DEG_PER_SEC 8.0f
+#define STREAM_END_ARM_DEG 3.0f
+#define STREAM_LEARN_RATE 0.7f
+#define STREAM_END_SHIFT_MIN_DEG 2.0f
+#define STREAM_END_SHIFT_MAX_DEG 6.0f
+#define STREAM_END_SMOOTH_SEC 0.1f
+#define STREAM_SETTLE_SPEED_DEG_PER_SEC 1.0f
+// The most the stream correction may add to a joint's command over one stream (Servo::streamTick()).
+#define STREAM_CORRECTION_MAX_DEG 8.0f
+// Dither (Servo::setDither()): ramped in and out over DITHER_RAMP_SEC, kept DITHER_HOLD_MS after the
+// joint stops moving; a stream setpoint slower than DITHER_MIN_SPEED_DEG_PER_SEC isn't motion.
+#define DITHER_RAMP_SEC 0.1f
+#define DITHER_HOLD_MS 100
+#define DITHER_MIN_SPEED_DEG_PER_SEC 0.5f
 // Active damping of the IMU-held pitch joints (Servo::setDamping(), see ArmShoulder's for the
 // measurements): the link-rate low-pass, the deadband below which a rate doesn't close the loop, and
 // a rate that starts a servo trace.
