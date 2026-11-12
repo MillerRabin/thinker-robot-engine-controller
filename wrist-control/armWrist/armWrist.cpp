@@ -284,6 +284,7 @@ Vector3 ArmWrist::trackTick() {
     wristZ.setIMUAngle(physicalAngles.z);
     wristY.setLinkRate(rate);
     wristY.allowDither();
+    wristZ.allowDither();
     // Y rides on the forearm: while the elbow streams, turn against its planned speed. Z has no parent
     // that turns about its axis.
     wristY.setParentPlannedSpeed(elbowPlan.speed());
@@ -499,7 +500,11 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   wristZ.setFineReleaseError(4.0f);
   wristZ.setHoldResponse(1.5f, 40.0f);
   wristZ.setFineCorrectionBudget(5.0f);
-  wristZ.setStreamCorrectWhenStill(false);
+  // The claw twists under its own weight as the wrist pitches - 4.6-10deg at the work pose, really
+  // (it hangs plumb once Z is corrected, 2026-11-11) - so Z is corrected through a stream like any
+  // joint. Moved slowly by a feed-forward, Z stuck and slipped under that load and shook the whole arm
+  // 3-4x more; dithered like Y's while its command moves.
+  wristZ.setDither(0.3f, 10);
   wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   // Active damping of Y, like the shoulder's (see ArmShoulder's) - with it and the elbow's the whole
   // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.

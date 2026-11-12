@@ -180,6 +180,7 @@ private:
   float streamEndWeight = 0.0f;     // 0 cruising .. 1 stopped, never decreasing within a stream
   float streamEndWeightLP = 0.0f;   // the same, smoothed - the shift moves the command, so no steps
   float streamShift = 0.0f;         // deg, the shift now (signed, opposite the travel)
+  float streamSpeedLP = 0.0f;       // |setpoint speed| low-passed over STREAM_END_SPEED_TAU_SEC
   // Learned, deg in the direction of travel: how far the link ran past the last waypoint by the time
   // a stream ended - [0] for streams toward growing angles, [1] toward falling ones.
   float streamEndShift[2] = {0.0f, 0.0f};
@@ -368,6 +369,8 @@ public:
     holdWakeNowDeg = wakeNowDeg;
   }
   float getDampingOffset() const { return dampingOffset; }
+  // The stream setpoint's speed this tick, deg/s (0 when not streaming) - see streamTo().
+  float getStreamLinkSpeed() const { return streamActive ? streamLinkSpeed : 0.0f; }
   // Everything the last tick() added to the pulse on top of the command: damping and dither.
   float getPulseOffset() const { return pulseOffset; }
   // Dither: a square wave of +-ampDeg flipping every halfPeriodMS, added to the output while the joint

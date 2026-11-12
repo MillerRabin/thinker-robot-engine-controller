@@ -155,6 +155,7 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamErrorLP = 0.0f;
     streamStartIMU = imuAngle;
     streamPeakSpeed = 0.0f;
+    streamSpeedLP = 0.0f;
     streamEndWeight = 0.0f;
     streamEndWeightLP = 0.0f;
     streamShift = 0.0f;
@@ -207,6 +208,32 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
       streamActive = false;
       gentleHold = true;
       resetCorrection();
+      // What's left, the command takes out in one minimum-jerk move (dithered, see ditherTick()).
+      // Measured live (2026-11-11): left to the hold's slow correction it went in steps - the servo
+      // sticks at ~1deg/s - and wrist Z jumped 1.3deg after seconds of creeping (the user: "make the
+      // final approach smooth, without jerks").
+      const float error = targetAngle - imuAngle;
+      if (!isnan(error) && !isnan(holdWakeDeg) && fabsf(error) <= STREAM_SETTLE_TOLERANCE_DEG) {
+        // Close enough: a fraction of a degree costs the motor the whole backlash to put right, and
+        // the link jumps when it gets there - measured live (2026-11-11): the shoulder 0.5deg behind,
+        // its hold crept the command 1.9deg on for 3 s and the link then jumped 0.8deg, the whole arm
+        // with it. The hold's hysteresis still wakes it for a real error.
+        holdSettled = true;
+        holdWaking = false;
+        gentleHold = false;
+        LogQueue::Log("Servo pin=%u stream end: %.2fdeg off, left\n", pin, error);
+      } else if (!isnan(error) && fabsf(error) > deadZone) {
+        planZone = -1;
+        planStart = physicalAngle;
+        planEnd = std::clamp(physicalAngle + error, safeMinDegree, safeMaxDegree);
+        const int64_t minDurationUs =
+            (int64_t)(1.875f * fabsf(planEnd - planStart) / STREAM_SETTLE_PLAN_SPEED_DEG_PER_SEC * 1000000.0f);
+        planDurationUs = std::max((int64_t)STREAM_SETTLE_PLAN_MS * 1000, minDurationUs);
+        planStarted = now;
+        planActive = true;
+        LogQueue::Log("Servo pin=%u stream end: settling %.2fdeg in %lu ms\n", pin, error,
+                      (unsigned long)(planDurationUs / 1000));
+      }
       return false;
     }
   }
@@ -222,7 +249,10 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   // still on in the hold, which let the claw creep; the shift grew instead of settling.)
   const float travel = streamTarget - streamStartIMU;
   const int way = travel >= 0.0f ? 0 : 1;
-  const float speedNow = fabsf(streamLinkSpeed);
+  // Low-passed: the host's waypoints come in 0.1deg steps, so a slow setpoint's speed jitters by
+  // ~1.7deg/s from one waypoint to the next - too much against the shoulder's ~3deg/s peak.
+  streamSpeedLP += (fabsf(streamLinkSpeed) - streamSpeedLP) * std::min(dtSec / STREAM_END_SPEED_TAU_SEC, 1.0f);
+  const float speedNow = streamSpeedLP;
   // Only once the setpoint is well on its way: the first waypoint's step from where the link is to the
   // plan's start can be fast and short, and the slow start of the curve after it isn't braking.
   if (fabsf(streamSetpoint - streamStartIMU) >= STREAM_END_ARM_DEG) {
@@ -408,7 +438,11 @@ void Servo::ditherTick() {
   // settling: measured live (2026-11-10), dithered through the slow correction after a host move the
   // wrist link crept 1deg further along gravity in 2 s while its command walked back 3.6deg - the
   // shaking let the claw's weight slide it across the backlash.
-  const bool moving = (streamActive && fabsf(streamLinkSpeed) > DITHER_MIN_SPEED_DEG_PER_SEC) || planActive;
+  // The command's own speed counts too: a joint the plan doesn't move can still have its command
+  // turned by the stream's correction - wrist Z taking up the claw's twist (2026-11-12).
+  const bool moving = (streamActive && (fabsf(streamLinkSpeed) > DITHER_MIN_SPEED_DEG_PER_SEC ||
+                                        fabsf(appliedSpeedDegPerSec) > DITHER_MIN_SPEED_DEG_PER_SEC)) ||
+                      planActive;
   if (moving) {
     ditherMotionAt = now;
   }

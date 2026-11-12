@@ -225,16 +225,25 @@
 // the last waypoint, within -STREAM_END_SHIFT_MIN_DEG..STREAM_END_SHIFT_MAX_DEG, per direction; the
 // next one's command ends short by it, blended in as the setpoint slows (smoothed over
 // STREAM_END_SMOOTH_SEC). Kept until the module reboots.
-#define STREAM_LEARN_MIN_TRAVEL_DEG 10.0f
-#define STREAM_END_MIN_PEAK_DEG_PER_SEC 8.0f
-#define STREAM_END_ARM_DEG 3.0f
+#define STREAM_LEARN_MIN_TRAVEL_DEG 4.0f
+#define STREAM_END_MIN_PEAK_DEG_PER_SEC 2.0f
+#define STREAM_END_ARM_DEG 2.0f
 #define STREAM_LEARN_RATE 0.7f
 #define STREAM_END_SHIFT_MIN_DEG 2.0f
 #define STREAM_END_SHIFT_MAX_DEG 6.0f
 #define STREAM_END_SMOOTH_SEC 0.1f
+#define STREAM_END_SPEED_TAU_SEC 0.15f // the setpoint speed the end weight is taken from (low-passed)
+// A stream that ends this close to its target leaves it to the hold's hysteresis (Servo::streamTick()).
+#define STREAM_SETTLE_TOLERANCE_DEG 0.7f
 #define STREAM_SETTLE_SPEED_DEG_PER_SEC 1.0f
-// The most the stream correction may add to a joint's command over one stream (Servo::streamTick()).
-#define STREAM_CORRECTION_MAX_DEG 8.0f
+// What a stream leaves of the IMU error its command takes out in one minimum-jerk move of at least
+// STREAM_SETTLE_PLAN_MS, peaking at no more than STREAM_SETTLE_PLAN_SPEED_DEG_PER_SEC
+// (Servo::streamTick()); the hold after it is the gentle one above.
+#define STREAM_SETTLE_PLAN_MS 1000
+#define STREAM_SETTLE_PLAN_SPEED_DEG_PER_SEC 10.0f
+// The most the stream correction may add to a joint's command over one stream (Servo::streamTick()):
+// a real sag took up to ~6deg at the shoulder and over 8 at the elbow lifting the forearm (2026-11-11).
+#define STREAM_CORRECTION_MAX_DEG 12.0f
 // Dither (Servo::setDither()): ramped in and out over DITHER_RAMP_SEC, kept DITHER_HOLD_MS after the
 // joint stops moving; a stream setpoint slower than DITHER_MIN_SPEED_DEG_PER_SEC isn't motion.
 #define DITHER_RAMP_SEC 0.1f
@@ -243,6 +252,10 @@
 // Active damping of the IMU-held pitch joints (Servo::setDamping(), see ArmShoulder's for the
 // measurements): the link-rate low-pass, the deadband below which a rate doesn't close the loop, and
 // a rate that starts a servo trace.
+// Not faster or stronger on the elbow and wrist: with 30 ms and 0.08 s (instead of 60 ms, 0.05 s) a 4 s
+// host move ended in a violent swing of the whole arm at the work pose - links at 120-190deg/s, the
+// damping offsets pinned at +-3deg - until the user cut the engines (2026-11-12). At rest by
+// vertical it had looked fine.
 #define DAMPING_RATE_TAU_SEC 0.06f
 #define DAMPING_DEADBAND_DEG_PER_SEC 3.0f
 #define DAMPING_TRACE_RATE_DEG_PER_SEC 20.0f
