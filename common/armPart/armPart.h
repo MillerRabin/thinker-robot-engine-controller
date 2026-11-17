@@ -55,6 +55,10 @@ public:
   void setZCalibrating(bool value);
   void setXCalibrating(bool value);
   void setArmCalibrated(bool value);
+  void setStreamWaiting(bool value);
+  // Answers a CAN_TUNE request (see common/tuning/tuning.h): value NaN = no such parameter here.
+  void replyTune(uint8_t joint, uint8_t param, bool set, float value);
+  void setSettling(bool value);
   void setUpgrading(bool value);
   void setUseIMUStatus(uint8_t mode);
   void setOffsetZYX(const float angleX, const float angleY, const float angleZ,
@@ -68,6 +72,7 @@ public:
   virtual uint32_t getHeightMessageId() { return 0; };
   virtual uint32_t getRangeMessageId() { return 0; };
   virtual uint32_t getStatusesMessageId() { return 0; };
+  virtual uint32_t getTunedMessageId() { return 0; };
   virtual uint32_t getFirmwareUpgradeMessageId() { return 0; };
   virtual int updateQuaternion(IMUBase *position) { return 0; };
   virtual int updateAccelerometer(IMUBase *position) { return 0; };

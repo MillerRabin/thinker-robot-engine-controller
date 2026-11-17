@@ -80,6 +80,7 @@ public:
   uint32_t getGyroscopeMessageId() { return CAN_WRIST_GYROSCOPE; };
   uint32_t getAccuracyMessageId() { return CAN_WRIST_ACCURACY; };
   uint32_t getStatusesMessageId() { return CAN_WRIST_STATUSES; };
+  uint32_t getTunedMessageId() { return CAN_WRIST_TUNED; };
   Vector3 getIMUAngles();
   Vector3 getPhysicalAngles(Vector3 &imuAngles);
   int updateQuaternion(IMUBase *position);

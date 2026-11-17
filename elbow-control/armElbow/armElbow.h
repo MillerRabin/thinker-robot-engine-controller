@@ -66,6 +66,7 @@ private:
     uint32_t getGyroscopeMessageId() { return CAN_ELBOW_GYROSCOPE; };
     uint32_t getAccuracyMessageId() { return CAN_ELBOW_ACCURACY; };
     uint32_t getStatusesMessageId() { return CAN_ELBOW_STATUSES; };
+    uint32_t getTunedMessageId() { return CAN_ELBOW_TUNED; };
     int updateQuaternion(IMUBase * position);
     int updateAccelerometer(IMUBase * position);
     int updateGyroscope(IMUBase * position);

@@ -1,4 +1,5 @@
 #include "servo.h"
+#include "../tuning/tuning.h"
 
 Servo::Servo(const uint pin, Range degreeRange, const float homePosition,
              const float freq, const float lowPeriod, const float highPeriod, Range safeRange)
@@ -126,6 +127,8 @@ bool Servo::setTargetAngle(const float angle, uint16_t newTimeMS,
   // any stream (streamTo() re-arms it).
   planActive = false;
   streamActive = false;
+  streamWaiting = false;
+  streamSettlePlan = false;
   gentleHold = false;
   holdSettled = false;
   holdWaking = false;
@@ -193,47 +196,24 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     streamSetpoint = streamTarget;
     streamLinkSpeed = 0.0f;
     if (absolute_time_diff_us(streamReachAt, now) > (int64_t)STREAM_END_MS * 1000) {
-      // No next waypoint: hold the last one like any target (targetAngle is it). First learn how far
-      // the link ran past it - the next stream the same way ends its command that much short.
-      const float travel = streamTarget - streamStartIMU;
-      if (fabsf(travel) >= STREAM_LEARN_MIN_TRAVEL_DEG && streamPeakSpeed >= STREAM_END_MIN_PEAK_DEG_PER_SEC) {
-        const int way = travel >= 0.0f ? 0 : 1;
-        const float overshoot = (travel >= 0.0f ? 1.0f : -1.0f) * (imuAngle - streamTarget);
-        const float before = streamEndShift[way];
-        streamEndShift[way] = std::clamp(before + STREAM_LEARN_RATE * overshoot, -STREAM_END_SHIFT_MIN_DEG,
-                                         STREAM_END_SHIFT_MAX_DEG);
-        LogQueue::Log("Servo pin=%u stream end: travel %.1f, overshoot %.2f with shift %.2f -> learned %.2f\n",
-                      pin, travel, overshoot, before, streamEndShift[way]);
-      }
+      // No next waypoint: hold the last one like any target (targetAngle is it) - once the link has
+      // calmed (see streamWaitTick()). A new waypoint meanwhile starts a new stream.
+      LogQueue::Log("Servo pin=%u stream end: travel %.1f, link %.2f past the target with shift %.2f\n", pin,
+                    streamTarget - streamStartIMU, imuAngle - streamTarget, streamEndShift);
       streamActive = false;
       gentleHold = true;
       resetCorrection();
-      // What's left, the command takes out in one minimum-jerk move (dithered, see ditherTick()).
-      // Measured live (2026-11-11): left to the hold's slow correction it went in steps - the servo
-      // sticks at ~1deg/s - and wrist Z jumped 1.3deg after seconds of creeping (the user: "make the
-      // final approach smooth, without jerks").
-      const float error = targetAngle - imuAngle;
-      if (!isnan(error) && !isnan(holdWakeDeg) && fabsf(error) <= STREAM_SETTLE_TOLERANCE_DEG) {
-        // Close enough: a fraction of a degree costs the motor the whole backlash to put right, and
-        // the link jumps when it gets there - measured live (2026-11-11): the shoulder 0.5deg behind,
-        // its hold crept the command 1.9deg on for 3 s and the link then jumped 0.8deg, the whole arm
-        // with it. The hold's hysteresis still wakes it for a real error.
-        holdSettled = true;
-        holdWaking = false;
-        gentleHold = false;
-        LogQueue::Log("Servo pin=%u stream end: %.2fdeg off, left\n", pin, error);
-      } else if (!isnan(error) && fabsf(error) > deadZone) {
-        planZone = -1;
-        planStart = physicalAngle;
-        planEnd = std::clamp(physicalAngle + error, safeMinDegree, safeMaxDegree);
-        const int64_t minDurationUs =
-            (int64_t)(1.875f * fabsf(planEnd - planStart) / STREAM_SETTLE_PLAN_SPEED_DEG_PER_SEC * 1000000.0f);
-        planDurationUs = std::max((int64_t)STREAM_SETTLE_PLAN_MS * 1000, minDurationUs);
-        planStarted = now;
-        planActive = true;
-        LogQueue::Log("Servo pin=%u stream end: settling %.2fdeg in %lu ms\n", pin, error,
-                      (unsigned long)(planDurationUs / 1000));
-      }
+      streamWaiting = true;
+      streamEndedAt = now;
+      streamWaitStart = now;
+      streamParentWaitLogged = false;
+      streamBlockParentBusy = false;
+      streamBlockStart = now;
+      streamBlockMin = NAN;
+      streamBlockMax = NAN;
+      streamBlockSum = 0.0f;
+      streamBlockCount = 0;
+      streamBlocksDone = 0;
       return false;
     }
   }
@@ -242,13 +222,14 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   // motor drags the link through the joint's friction; braking, the claw's weight takes the link to
   // the other side of the backlash, ~4.5deg ahead (the user: "the arm overshot the point, then came
   // back"). The same every time, so the command ends short by what the link overran last time the
-  // same way (streamEndShift), blended in as the setpoint slows from its peak. The correction aims at
-  // the shifted setpoint, and holds still from the moment the setpoint arrives: pulling the command
-  // back then only drags the link back after it has rolled over - what's left is the hold's.
+  // same way (streamEndShift, learned by the host), blended in as the setpoint slows from its peak.
+  // The host learns it in joint angles: learned here from the absolute angle each module holds, the
+  // wrist took the elbow's overrun for its own and its shift flipped sign move to move. The
+  // correction aims at the shifted setpoint, and holds still from the moment the setpoint arrives:
+  // pulling the command back then only drags the link back after it has rolled over - what's left is
+  // the hold's.
   // (A first try, 2026-11-10, faded the correction out over the braking and learned with the dither
   // still on in the hold, which let the claw creep; the shift grew instead of settling.)
-  const float travel = streamTarget - streamStartIMU;
-  const int way = travel >= 0.0f ? 0 : 1;
   // Low-passed: the host's waypoints come in 0.1deg steps, so a slow setpoint's speed jitters by
   // ~1.7deg/s from one waypoint to the next - too much against the shoulder's ~3deg/s peak.
   streamSpeedLP += (fabsf(streamLinkSpeed) - streamSpeedLP) * std::min(dtSec / STREAM_END_SPEED_TAU_SEC, 1.0f);
@@ -262,13 +243,13 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     streamEndWeight = std::max(streamEndWeight, 1.0f - speedNow / streamPeakSpeed);
   }
   streamEndWeightLP += (streamEndWeight - streamEndWeightLP) * std::min(dtSec / STREAM_END_SMOOTH_SEC, 1.0f);
-  const float shift = (travel >= 0.0f ? -1.0f : 1.0f) * streamEndShift[way] * streamEndWeightLP;
+  const float shift = -streamEndShift * streamEndWeightLP;
   const float shiftSpeed = dtSec > 0.0f ? (shift - streamShift) / dtSec : 0.0f;
   streamShift = shift;
   // The correction follows the error low-passed: it takes up the slow sag under a changing load but
   // not the link's 2-4 Hz swing through its backlash, which it only pumped (see STREAM_GAIN).
-  streamErrorLP += ((streamSetpoint + shift - imuAngle) - streamErrorLP) * std::min(dtSec / STREAM_ERROR_TAU_SEC, 1.0f);
-  float correctionSpeed = STREAM_GAIN * streamErrorLP;
+  streamErrorLP += ((streamSetpoint + shift - imuAngle) - streamErrorLP) * std::min(dtSec / streamErrorTauSec, 1.0f);
+  float correctionSpeed = streamGain * streamErrorLP;
   // A joint the plan doesn't move holds its command (see setStreamCorrectWhenStill()), and so does
   // every joint once its setpoint has arrived (see above).
   if ((!streamCorrectWhenStill && fabsf(streamSetpoint - streamStartIMU) < STREAM_STILL_DEG) ||
@@ -295,6 +276,167 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   physicalAngle = std::clamp(physicalAngle + speed * dtSec, safeMinDegree, safeMaxDegree);
   setDegreeDirect(physicalAngle);
   return true;
+}
+
+bool Servo::streamWaitTick(absolute_time_t now, int64_t dtUs) {
+  if (!streamWaiting) {
+    return false;
+  }
+  // The command holds; it only takes out a parent's streamed move, as in the stream (the link holds
+  // an absolute angle).
+  const float dtSec = std::min(dtUs / 1000000.0f, 0.01f);
+  const float speed = std::clamp(-parentPlannedSpeed, -maxAngularSpeed, maxAngularSpeed);
+  appliedSpeedDegPerSec = speed;
+  if (speed != 0.0f) {
+    physicalAngle = std::clamp(physicalAngle + speed * dtSec, safeMinDegree, safeMaxDegree);
+    setDegreeDirect(physicalAngle);
+  }
+  streamBlockMin = isnan(streamBlockMin) ? imuAngle : std::min(streamBlockMin, imuAngle);
+  streamBlockMax = isnan(streamBlockMax) ? imuAngle : std::max(streamBlockMax, imuAngle);
+  streamBlockSum += targetAngle - imuAngle;
+  streamBlockCount++;
+  streamBlockParentBusy = streamBlockParentBusy || (parentWait && ancestorsSettling);
+  if (absolute_time_diff_us(streamBlockStart, now) < (int64_t)calmBlockMs * 1000) {
+    return true;
+  }
+  // A parent still settling - this block or any part of it - moves this link with it: the calm wait
+  // starts over once it's done (see setAncestorsSettling()).
+  if (streamBlockParentBusy &&
+      absolute_time_diff_us(streamEndedAt, now) < (int64_t)STREAM_PARENT_WAIT_MAX_MS * 1000) {
+    if (!streamParentWaitLogged) {
+      streamParentWaitLogged = true;
+      LogQueue::Log("Servo pin=%u stream end: waiting for a parent to settle\n", pin);
+    }
+    streamWaitStart = now;
+    streamBlocksDone = 0;
+    streamBlockStart = now;
+    streamBlockMin = NAN;
+    streamBlockMax = NAN;
+    streamBlockSum = 0.0f;
+    streamBlockCount = 0;
+    streamBlockParentBusy = false;
+    return true;
+  }
+  const float mean = streamBlockSum / (float)std::max<uint32_t>(streamBlockCount, 1);
+  const float span = streamBlockMax - streamBlockMin;
+  streamBlockMeans[streamBlocksDone % STREAM_CALM_MEAN_BLOCKS] = mean;
+  streamBlocksDone++;
+  const unsigned long waitedMs = (unsigned long)(absolute_time_diff_us(streamWaitStart, now) / 1000);
+  const unsigned long sinceEndMs = (unsigned long)(absolute_time_diff_us(streamEndedAt, now) / 1000);
+  if (span <= calmSpanDeg) {
+    LogQueue::Log("Servo pin=%u stream end: calm after %lu ms (%lu since the end, span %.2f), %.2fdeg off on average\n",
+                  pin, waitedMs, sinceEndMs, span, mean);
+    streamWaiting = false;
+    streamSettle(now, mean);
+    return true;
+  }
+  if (waitedMs >= calmWaitMaxMs) {
+    const uint8_t n = std::min<uint8_t>(streamBlocksDone, STREAM_CALM_MEAN_BLOCKS);
+    float sum = 0.0f;
+    for (uint8_t i = 0; i < n; i++) {
+      sum += streamBlockMeans[i];
+    }
+    LogQueue::Log("Servo pin=%u stream end: still swinging after %lu ms (span %.2f), %.2fdeg off on average\n",
+                  pin, waitedMs, span, sum / n);
+    streamWaiting = false;
+    streamSettle(now, sum / n);
+    return true;
+  }
+  streamBlockStart = now;
+  streamBlockMin = NAN;
+  streamBlockMax = NAN;
+  streamBlockSum = 0.0f;
+  streamBlockCount = 0;
+  streamBlockParentBusy = false;
+  return true;
+}
+
+void Servo::streamSettle(absolute_time_t now, float error) {
+  // What's left, the command takes out in one minimum-jerk move (dithered, see ditherTick()).
+  // Measured live (2026-11-11): left to the hold's slow correction it went in steps - the servo
+  // sticks at ~1deg/s - and wrist Z jumped 1.3deg after seconds of creeping (the user: "make the
+  // final approach smooth, without jerks").
+  if (!isnan(error) && !isnan(holdWakeDeg) && fabsf(error) <= settleToleranceDeg) {
+    // Close enough: a fraction of a degree costs the motor the whole backlash to put right, and
+    // the link jumps when it gets there - measured live (2026-11-11): the shoulder 0.5deg behind,
+    // its hold crept the command 1.9deg on for 3 s and the link then jumped 0.8deg, the whole arm
+    // with it. The hold's hysteresis still wakes it for a real error.
+    holdSettled = true;
+    holdWaking = false;
+    gentleHold = false;
+    LogQueue::Log("Servo pin=%u stream end: %.2fdeg off, left\n", pin, error);
+  } else if (!isnan(error) && fabsf(error) > deadZone) {
+    planZone = -1;
+    planStart = physicalAngle;
+    planEnd = std::clamp(physicalAngle + error, safeMinDegree, safeMaxDegree);
+    const int64_t minDurationUs =
+        (int64_t)(1.875f * fabsf(planEnd - planStart) / settlePlanSpeed * 1000000.0f);
+    planDurationUs = std::max((int64_t)STREAM_SETTLE_PLAN_MS * 1000, minDurationUs);
+    planStarted = now;
+    streamSettlePlan = true;
+    planActive = true;
+    LogQueue::Log("Servo pin=%u stream end: settling %.2fdeg in %lu ms\n", pin, error,
+                  (unsigned long)(planDurationUs / 1000));
+  }
+}
+
+float Servo::tune(uint8_t param, bool set, float value) {
+  const bool apply = set && !isnan(value);
+  auto clampTo = [value](float lo, float hi) { return std::min(std::max(value, lo), hi); };
+  switch (param) {
+  case TUNE_DAMPING_GAIN:
+    // Not past the shoulder's 0.1 s: 0.08 on the elbow and the wrist with a faster rate swung the whole
+    // arm violently (2026-11-12).
+    if (apply) dampingGainSec = clampTo(0.0f, 0.1f);
+    return dampingGainSec;
+  case TUNE_DAMPING_MAX:
+    if (apply) dampingMaxDeg = clampTo(0.0f, 3.0f);
+    return dampingMaxDeg;
+  case TUNE_DAMPING_DEADBAND:
+    if (apply) dampingDeadbandDegPerSec = clampTo(0.0f, 30.0f);
+    return dampingDeadbandDegPerSec;
+  case TUNE_DITHER_DEG:
+    if (apply) ditherAmpDeg = clampTo(0.0f, 1.0f);
+    return ditherAmpDeg;
+  case TUNE_DITHER_HALF_PERIOD_MS:
+    if (apply) ditherHalfPeriodUs = (int64_t)(clampTo(5.0f, 100.0f) * 1000.0f);
+    return ditherHalfPeriodUs / 1000.0f;
+  case TUNE_STREAM_GAIN:
+    if (apply) streamGain = clampTo(0.0f, 3.0f);
+    return streamGain;
+  case TUNE_STREAM_ERROR_TAU:
+    if (apply) streamErrorTauSec = clampTo(0.05f, 2.0f);
+    return streamErrorTauSec;
+  case TUNE_SETTLE_TOLERANCE:
+    if (apply) settleToleranceDeg = clampTo(0.0f, 5.0f);
+    return settleToleranceDeg;
+  case TUNE_SETTLE_SPEED:
+    if (apply) settlePlanSpeed = clampTo(0.5f, 10.0f);
+    return settlePlanSpeed;
+  case TUNE_CALM_SPAN:
+    if (apply) calmSpanDeg = clampTo(0.05f, 5.0f);
+    return calmSpanDeg;
+  case TUNE_CALM_BLOCK_MS:
+    if (apply) calmBlockMs = (uint32_t)clampTo(100.0f, 2000.0f);
+    return (float)calmBlockMs;
+  case TUNE_CALM_WAIT_MAX_MS:
+    if (apply) calmWaitMaxMs = (uint32_t)clampTo(0.0f, 10000.0f);
+    return (float)calmWaitMaxMs;
+  case TUNE_HOLD_WAKE_DEG:
+    if (apply) holdWakeDeg = clampTo(0.1f, 10.0f);
+    return holdWakeDeg;
+  case TUNE_HOLD_WAKE_MS:
+    if (apply) holdWakeUs = (int64_t)(clampTo(0.0f, 5000.0f) * 1000.0f);
+    return holdWakeUs / 1000.0f;
+  case TUNE_HOLD_WAKE_NOW_DEG:
+    if (apply) holdWakeNowDeg = clampTo(0.5f, 20.0f);
+    return holdWakeNowDeg;
+  case TUNE_PARENT_WAIT:
+    if (apply) parentWait = value >= 0.5f;
+    return parentWait ? 1.0f : 0.0f;
+  default:
+    return NAN;
+  }
 }
 
 bool Servo::planMove(const float angle, uint16_t newTimeMS, float newDeadZone) {
@@ -442,6 +584,7 @@ void Servo::ditherTick() {
   // turned by the stream's correction - wrist Z taking up the claw's twist (2026-11-12).
   const bool moving = (streamActive && (fabsf(streamLinkSpeed) > DITHER_MIN_SPEED_DEG_PER_SEC ||
                                         fabsf(appliedSpeedDegPerSec) > DITHER_MIN_SPEED_DEG_PER_SEC)) ||
+                      (streamWaiting && fabsf(appliedSpeedDegPerSec) > DITHER_MIN_SPEED_DEG_PER_SEC) ||
                       planActive;
   if (moving) {
     ditherMotionAt = now;
@@ -505,7 +648,7 @@ void Servo::tickCommand() {
   if ((dtUs <= 0) || isnan(imuAngle) || isnan(physicalAngle) || isnan(targetAngle))
     return;
 
-  if (streamTick(now, dtUs) || planTick(now, dtUs) || settleTick(now))
+  if (streamTick(now, dtUs) || streamWaitTick(now, dtUs) || planTick(now, dtUs) || settleTick(now))
     return;
 
   const float error = targetAngle - imuAngle;

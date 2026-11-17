@@ -1,4 +1,5 @@
 #include "armWrist.h"
+#include "../../common/tuning/tuning.h"
 #include "../common/periodic/periodic.h"
 #include "../common/quaternion/quaternion.h"
 
@@ -289,6 +290,9 @@ Vector3 ArmWrist::trackTick() {
     // that turns about its axis.
     wristY.setParentPlannedSpeed(elbowPlan.speed());
   }
+  // Y settles only after the shoulder and the elbow have (see Servo::setAncestorsSettling()).
+  wristY.setAncestorsSettling((shoulder.isOnline() && (shoulder.status.load() & ARM_SETTLING) != 0) ||
+                              (elbow.isOnline() && (elbow.status.load() & ARM_SETTLING) != 0));
   wristY.tick();
   wristZ.tick();
   dampingMonitor.update(rate, wristY.getDampingOffset());
@@ -296,6 +300,8 @@ Vector3 ArmWrist::trackTick() {
   if (fabsf(wristY.getTargetAngle() - wristY.getIMUAngle()) > 1.5f) {
     wristY.requestTrace();
   }
+  setStreamWaiting(wristY.isStreamWaiting());
+  setSettling(wristY.isStreamSettling());
   updateStatuses();
   return physicalAngles;
 }
@@ -508,6 +514,7 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   // Active damping of Y, like the shoulder's (see ArmShoulder's) - with it and the elbow's the whole
   // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.
+  // The link rate filtered over 0.15 s - see DAMPING_RATE_TAU_SEC (2026-11-17).
   wristY.setDamping(0.05f, 3.0f, DAMPING_DEADBAND_DEG_PER_SEC);
   // Dither while moving, like the elbow's (see Servo::setDither()): with only the elbow dithered the
   // wrist still jumped every ~250 ms at the slow end of a host move (2026-11-07). +-0.5deg at 25 Hz
@@ -552,6 +559,21 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
   elbow.dispatchMessage(frame);
   shoulder.dispatchMessage(frame);
 
+  if (frame.id == CAN_TUNE) {
+    const TuneRequest r = decodeTune(frame.data);
+    if (r.joint == TUNE_JOINT_WRIST_Y || r.joint == TUNE_JOINT_WRIST_Z) {
+      const bool y = r.joint == TUNE_JOINT_WRIST_Y;
+      float value;
+      if (r.param == TUNE_DAMPING_RATE_TAU) {
+        value = y ? pitchRate.tune(r.set, r.value) : NAN;  // Z isn't damped
+      } else {
+        value = (y ? wristY : wristZ).tune(r.param, r.set, r.value);
+      }
+      replyTune(r.joint, r.param, r.set, value);
+    }
+    return;
+  }
+
   // The elbow's waypoints (the forearm's absolute tilt), for the planned speed Y turns against.
   if (frame.id == CAN_ELBOW_SET_Y_DEGREE) {
     uint32_t raw = frame.data32[0];
@@ -571,10 +593,13 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
     uint32_t raw1 = frame.data32[1];
     uint16_t timeMS = raw1 & 0xFFFF;
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
+    // The host's end-of-stream shift for Y, 0.01deg signed (see Servo::setStreamEndShift()).
+    const uint16_t shiftYS = (raw1 >> 16) & 0xFFFF;
 
     // A short timeMS is a waypoint of a stream (a straight-line move) - see Servo::streamTo().
     const bool stream = (timeMS > 0 && timeMS <= STREAM_MAX_MS);
     if (!isnan(angleY)) {
+      wristY.setStreamEndShift((shiftYS == PARAMETER_IS_NAN ? NAN : (int16_t)shiftYS / 100.0f));
       stream ? wristY.streamTo(angleY, timeMS, WRIST_DEAD_ZONE) : wristY.setTargetAngle(angleY, timeMS, WRIST_DEAD_ZONE);
     }
     if (!isnan(angleZ)) {

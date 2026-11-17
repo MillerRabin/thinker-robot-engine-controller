@@ -181,9 +181,7 @@ private:
   float streamEndWeightLP = 0.0f;   // the same, smoothed - the shift moves the command, so no steps
   float streamShift = 0.0f;         // deg, the shift now (signed, opposite the travel)
   float streamSpeedLP = 0.0f;       // |setpoint speed| low-passed over STREAM_END_SPEED_TAU_SEC
-  // Learned, deg in the direction of travel: how far the link ran past the last waypoint by the time
-  // a stream ended - [0] for streams toward growing angles, [1] toward falling ones.
-  float streamEndShift[2] = {0.0f, 0.0f};
+  float streamEndShift = 0.0f;      // deg, from setStreamEndShift()
   float streamCorrection = 0.0f;    // deg, what the correction has added to the command this stream
   bool streamCorrectionCapped = false;
   bool streamCorrectWhenStill = true; // see setStreamCorrectWhenStill()
@@ -192,6 +190,35 @@ private:
   absolute_time_t streamReachAt = 0;
   float parentPlannedSpeed = 0.0f;  // deg/s, see setParentPlannedSpeed()
   bool streamTick(absolute_time_t now, int64_t dtUs);
+  // After a stream: the command held while the link calms, the error averaged in blocks of
+  // STREAM_CALM_BLOCK_MS (see streamWaitTick()).
+  // Tunable at runtime (see tune()), the compiled defaults to start with.
+  float streamGain = STREAM_GAIN;
+  float streamErrorTauSec = STREAM_ERROR_TAU_SEC;
+  float settleToleranceDeg = STREAM_SETTLE_TOLERANCE_DEG;
+  float settlePlanSpeed = STREAM_SETTLE_PLAN_SPEED_DEG_PER_SEC;
+  float calmSpanDeg = STREAM_CALM_SPAN_DEG;
+  uint32_t calmBlockMs = STREAM_CALM_BLOCK_MS;
+  uint32_t calmWaitMaxMs = STREAM_CALM_WAIT_MAX_MS;
+  bool parentWait = true;
+  bool streamWaiting = false;
+  absolute_time_t streamEndedAt = 0;    // the stream's end - the parent wait's bound counts from it
+  absolute_time_t streamWaitStart = 0;  // the calm wait's own start - again once the parents are done
+  bool streamParentWaitLogged = false;
+  bool streamBlockParentBusy = false;   // a parent was settling at some point of this block
+  bool streamSettlePlan = false;        // the plan running is a stream's settle (see isStreamSettling())
+  volatile bool ancestorsSettling = false; // from setAncestorsSettling()
+  absolute_time_t streamBlockStart = 0;
+  float streamBlockMin = NAN;       // IMU, this block
+  float streamBlockMax = NAN;
+  float streamBlockSum = 0.0f;      // target - IMU, summed over this block
+  uint32_t streamBlockCount = 0;
+  float streamBlockMeans[STREAM_CALM_MEAN_BLOCKS] = {};
+  uint8_t streamBlocksDone = 0;
+  bool streamWaitTick(absolute_time_t now, int64_t dtUs);
+  // What's left after a stream, `error` (target - IMU): left to the hold's hysteresis, or taken out in
+  // one planned move.
+  void streamSettle(absolute_time_t now, float error);
   // The PWM pulse for `degree`, clamped to the safe range - physicalAngle untouched.
   void writePulse(float degree);
 
@@ -369,8 +396,24 @@ public:
     holdWakeNowDeg = wakeNowDeg;
   }
   float getDampingOffset() const { return dampingOffset; }
+  // How far this joint's link overruns the end of a stream, deg, signed (+ = past the end toward
+  // growing angles): the setpoint ends that much short, blended in as it slows (see streamTick()).
+  // The host learns it per joint and direction - in joint angles, so a child doesn't take its parent's
+  // overrun for its own - and sends it with each waypoint. NaN = 0.
+  void setStreamEndShift(float deg) { streamEndShift = isnan(deg) ? 0.0f : deg; }
   // The stream setpoint's speed this tick, deg/s (0 when not streaming) - see streamTo().
   float getStreamLinkSpeed() const { return streamActive ? streamLinkSpeed : 0.0f; }
+  // After a stream, waiting for the link to calm before it settles (see streamWaitTick()).
+  bool isStreamWaiting() const { return streamWaiting; }
+  // Still putting the last stream right: waiting to calm, or settling (ARM_SETTLING for the children).
+  bool isStreamSettling() const { return streamWaiting || (planActive && streamSettlePlan); }
+  // Whether a parent joint (any up the chain) is still settling its last stream, set every tick before
+  // tick(): this joint then waits for it, its command held, and settles after it - in one move, what
+  // the parent's settle left it too (see STREAM_PARENT_WAIT_MAX_MS).
+  void setAncestorsSettling(bool value) { ancestorsSettling = value; }
+  // Sets (set, value not NaN) and/or reads one of the TUNE_* parameters (common/tuning/tuning.h),
+  // clamped to a safe range; returns the value in effect, NaN for one a Servo doesn't have.
+  float tune(uint8_t param, bool set, float value);
   // Everything the last tick() added to the pulse on top of the command: damping and dither.
   float getPulseOffset() const { return pulseOffset; }
   // Dither: a square wave of +-ampDeg flipping every halfPeriodMS, added to the output while the joint

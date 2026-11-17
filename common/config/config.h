@@ -22,6 +22,10 @@
 #define CAN_CLAW_FIRMWARE_UPGRADE 0x08
 #define CAN_TARE 0x09
 #define CAN_USE_IMU 0x0A
+// Runtime tuning (2026-11-17, see common/tuning/tuning.h): the host sets or reads one parameter of one
+// joint; the joint's module answers on its *_TUNED id with the value now in effect. Kept in RAM - a
+// reboot goes back to the compiled defaults.
+#define CAN_TUNE 0x0B
 
 #define USE_IMU_NOT_USE 0
 #define USE_IMU_USE 1
@@ -41,6 +45,7 @@
 #define CAN_SHOULDER_GYROSCOPE 0x22
 #define CAN_SHOULDER_ACCURACY 0x23
 #define CAN_SHOULDER_STATUSES 0x24
+#define CAN_SHOULDER_TUNED 0x25
 #define CAN_SHOULDER_FIRMWARE_UPGRADE_CONFIRMED 0x28
 
 #define CAN_ELBOW_QUATERNION 0x30
@@ -48,6 +53,7 @@
 #define CAN_ELBOW_GYROSCOPE 0x32
 #define CAN_ELBOW_ACCURACY 0x33
 #define CAN_ELBOW_STATUSES 0x34
+#define CAN_ELBOW_TUNED 0x35
 #define CAN_ELBOW_FIRMWARE_UPGRADE_CONFIRMED 0x38
 
 #define CAN_WRIST_QUATERNION 0x40
@@ -55,6 +61,7 @@
 #define CAN_WRIST_GYROSCOPE 0x42
 #define CAN_WRIST_ACCURACY 0x43
 #define CAN_WRIST_STATUSES 0x44
+#define CAN_WRIST_TUNED 0x45
 #define CAN_WRIST_FIRMWARE_UPGRADE_CONFIRMED 0x48
 
 #define CAN_CLAW_QUATERNION 0x50
@@ -219,18 +226,11 @@
 // yanked the link back when it got there (2026-11-10). A setpoint within STREAM_STILL_DEG of where its
 // link started is a joint the plan doesn't move (Servo::setStreamCorrectWhenStill()).
 #define STREAM_STILL_DEG 1.0f
-// End-of-stream overshoot (Servo::streamTick()): a stream that travelled at least
-// STREAM_LEARN_MIN_TRAVEL_DEG with a setpoint peak of STREAM_END_MIN_PEAK_DEG_PER_SEC (counted once
-// the setpoint is STREAM_END_ARM_DEG on its way) learns STREAM_LEARN_RATE of how far its link ran past
-// the last waypoint, within -STREAM_END_SHIFT_MIN_DEG..STREAM_END_SHIFT_MAX_DEG, per direction; the
-// next one's command ends short by it, blended in as the setpoint slows (smoothed over
-// STREAM_END_SMOOTH_SEC). Kept until the module reboots.
-#define STREAM_LEARN_MIN_TRAVEL_DEG 4.0f
+// End-of-stream overshoot shift (Servo::streamTick(), learned by the host): blended in once the
+// setpoint is STREAM_END_ARM_DEG on its way, has peaked at STREAM_END_MIN_PEAK_DEG_PER_SEC or more and
+// slows from that peak (smoothed over STREAM_END_SMOOTH_SEC).
 #define STREAM_END_MIN_PEAK_DEG_PER_SEC 2.0f
 #define STREAM_END_ARM_DEG 2.0f
-#define STREAM_LEARN_RATE 0.7f
-#define STREAM_END_SHIFT_MIN_DEG 2.0f
-#define STREAM_END_SHIFT_MAX_DEG 6.0f
 #define STREAM_END_SMOOTH_SEC 0.1f
 #define STREAM_END_SPEED_TAU_SEC 0.15f // the setpoint speed the end weight is taken from (low-passed)
 // A stream that ends this close to its target leaves it to the hold's hysteresis (Servo::streamTick()).
@@ -238,9 +238,29 @@
 #define STREAM_SETTLE_SPEED_DEG_PER_SEC 1.0f
 // What a stream leaves of the IMU error its command takes out in one minimum-jerk move of at least
 // STREAM_SETTLE_PLAN_MS, peaking at no more than STREAM_SETTLE_PLAN_SPEED_DEG_PER_SEC
-// (Servo::streamTick()); the hold after it is the gentle one above.
+// (Servo::streamTick()); the hold after it is the gentle one above. At 10deg/s the elbow, 6.4deg
+// short at the top of a move back to vertical, swung 4deg past and 9 back, the wrist 15 (tip -109 mm)
+// - by vertical the backlash isn't loaded (2026-11-12); 4deg/s makes that a 3 s settle, a 1.5deg one
+// still 1 s.
 #define STREAM_SETTLE_PLAN_MS 1000
-#define STREAM_SETTLE_PLAN_SPEED_DEG_PER_SEC 10.0f
+#define STREAM_SETTLE_PLAN_SPEED_DEG_PER_SEC 4.0f
+// Before it settles, a stream's end waits for the link to calm (Servo::streamWaitTick()): the command
+// held, the link's IMU taken in blocks of STREAM_CALM_BLOCK_MS; a block spanning no more than
+// STREAM_CALM_SPAN_DEG is calm and its mean error is what's left. Still swinging after
+// STREAM_CALM_WAIT_MAX_MS, the mean of the last STREAM_CALM_MEAN_BLOCKS blocks (~one swing) is.
+// Measured live (2026-11-17, two moves back up to a 1deg lean): at the top the arm swings with a ~2 s
+// period, and the settle took a snapshot of it - once the elbow 3.5deg and the wrist 3.3 behind on the
+// way back, all three joints settled at once while the arm was swinging back anyway, and the tip went
+// from +38 to -36 mm.
+#define STREAM_CALM_BLOCK_MS 500
+#define STREAM_CALM_SPAN_DEG 0.6f
+#define STREAM_CALM_WAIT_MAX_MS 3000
+#define STREAM_CALM_MEAN_BLOCKS 4
+// A child joint settles only once its parents have (Servo::setAncestorsSettling()): measured live
+// (2026-11-17), the elbow settling 0.8-1.3deg after a move took the wrist's absolute angle with it,
+// and the wrist's hold woke 0.4 s later and crept after it, jumping 1-1.5deg (the shoulder's settle
+// did the same to the elbow). Waiting on a parent stuck settling ends after STREAM_PARENT_WAIT_MAX_MS.
+#define STREAM_PARENT_WAIT_MAX_MS 8000
 // The most the stream correction may add to a joint's command over one stream (Servo::streamTick()):
 // a real sag took up to ~6deg at the shoulder and over 8 at the elbow lifting the forearm (2026-11-11).
 #define STREAM_CORRECTION_MAX_DEG 12.0f
@@ -256,7 +276,13 @@
 // host move ended in a violent swing of the whole arm at the work pose - links at 120-190deg/s, the
 // damping offsets pinned at +-3deg - until the user cut the engines (2026-11-12). At rest by
 // vertical it had looked fine.
-#define DAMPING_RATE_TAU_SEC 0.06f
+// 0.15 s since 2026-11-17: braking a 4 s move down the whole arm shook at ~3.5 Hz (elbow and wrist
+// +-1.5deg, their link speed 20-35deg/s off the setpoint's), and the damping filtered over 60 ms came
+// 20-40 ms late on top of the servo's own lag - it pumped that shake. Undamped, the braking shake
+// halved but a slower ~1.5 Hz sway grew while accelerating; over 0.15 s the filter passes that sway
+// and not the shake: braking 0.34 instead of 1.02deg rms at the wrist, accelerating 0.28-0.57 instead
+// of 0.62 (tuned over CAN, two moves each way).
+#define DAMPING_RATE_TAU_SEC 0.15f
 #define DAMPING_DEADBAND_DEG_PER_SEC 3.0f
 #define DAMPING_TRACE_RATE_DEG_PER_SEC 20.0f
 
@@ -287,6 +313,14 @@
 #define ARM_CALIBRATED 256
 #define ARM_USE_IMU_ENABLED 512
 #define ARM_USE_IMU_AUTO 1024
+// The joint's link is calming after a stream, its command held (Servo::streamWaitTick()) - the host
+// averages the joint angles over it to learn the end-of-move overshoot (2026-11-17). Shoulder: Y,
+// elbow: Y, wrist: Y.
+#define ARM_STREAM_WAITING 2048
+// The joint is still putting its last stream right - calming or settling (Servo::isStreamSettling()).
+// Its children wait for it before they settle (Servo::setAncestorsSettling()). Shoulder: Y, elbow: Y,
+// wrist: Y.
+#define ARM_SETTLING 4096
 // The status frame's upper half carries the joint's calibrated home commands - the command that holds
 // the calibration pose (2026-11-06, for the kinematics on the host's clients, see
 // ArmPart::setHomeAngles()): bits 32-47 the first, 48-63 the second, 0.01deg each, 0xFFFF = none.

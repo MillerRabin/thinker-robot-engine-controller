@@ -1,4 +1,5 @@
 #include "armElbow.h"
+#include "../../common/tuning/tuning.h"
 #include "../common/periodic/periodic.h"
 
 int ArmElbow::updateStatuses() {
@@ -276,6 +277,7 @@ float ArmElbow::accelPitchDeg() {
 // Active damping of the elbow, like the shoulder's (see ArmShoulder's): a push at the wrist bends it
 // more than the shoulder, and with it damped the whole arm answers a push, not only the shoulder
 // (2026-11-06). Half the shoulder's gain - the elbow servo is the weaker one.
+// With the link rate filtered over 0.15 s, not 0.06 - see DAMPING_RATE_TAU_SEC (2026-11-17).
 constexpr float ELBOW_DAMPING_GAIN_SEC = 0.05f;
 constexpr float ELBOW_DAMPING_MAX_DEG = 3.0f;
 // Dither while moving (see Servo::setDither()): +-0.5deg - the elbow stuck for ~1deg of command at the
@@ -304,8 +306,12 @@ Vector3 ArmElbow::trackTick() {
   // The pulse's offset from the command, damping and dither - what the servo gets on top (2026-11-07;
   // was accelPitchDeg(), for the 2026-11-02 BNO-lag diagnosis).
   elbowY.setTraceAux(elbowY.getPulseOffset());
+  // Settles only after the shoulder has (see Servo::setAncestorsSettling()).
+  elbowY.setAncestorsSettling(shoulder.isOnline() && (shoulder.status.load() & ARM_SETTLING) != 0);
   elbowY.tick();
   dampingMonitor.update(rate, elbowY.getDampingOffset());
+  setStreamWaiting(elbowY.isStreamWaiting());
+  setSettling(elbowY.isStreamSettling());
   updateStatuses();
   return physicalAngles;
 }
@@ -396,6 +402,16 @@ int ArmElbow::updateAccuracy(IMUBase *position) {
 void ArmElbow::busReceiveCallback(can2040_msg frame) {
   shoulder.dispatchMessage(frame);
 
+  if (frame.id == CAN_TUNE) {
+    const TuneRequest r = decodeTune(frame.data);
+    if (r.joint == TUNE_JOINT_ELBOW_Y) {
+      const float value = r.param == TUNE_DAMPING_RATE_TAU ? pitchRate.tune(r.set, r.value)
+                                                           : elbowY.tune(r.param, r.set, r.value);
+      replyTune(r.joint, r.param, r.set, value);
+    }
+    return;
+  }
+
   // The shoulder's waypoints, for the planned speed the elbow turns against while both stream.
   if (frame.id == CAN_SHOULDER_SET_YZ_DEGREE) {
     uint16_t angleYS = frame.data32[0] & 0xFFFF;
@@ -411,10 +427,13 @@ void ArmElbow::busReceiveCallback(can2040_msg frame) {
     float angleY = (angleYS == PARAMETER_IS_NAN) ? NAN : angleYS / 10.0f;
     uint16_t timeMS = (raw >> 16) & 0xFFFF;
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
+    // The host's end-of-stream shift, 0.01deg signed (see Servo::setStreamEndShift()).
+    const uint16_t shiftYS = frame.data32[1] & 0xFFFF;
 
     LogQueue::Log("CAN_ELBOW_SET_Y_DEGREE received: angleY=%.2f timeMS=%u physicalAngle=%.2f\n", angleY, timeMS, elbowY.getPhysicalAngle());
 
     if (!isnan(angleY)) {
+      elbowY.setStreamEndShift((shiftYS == PARAMETER_IS_NAN ? NAN : (int16_t)shiftYS / 100.0f));
       // A short timeMS is a waypoint of a stream (a straight-line move) - see Servo::streamTo().
       (timeMS > 0 && timeMS <= STREAM_MAX_MS) ? elbowY.streamTo(angleY, timeMS, ELBOW_DEAD_ZONE) : elbowY.planMove(angleY, timeMS, ELBOW_DEAD_ZONE);
     }

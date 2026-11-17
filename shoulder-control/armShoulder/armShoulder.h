@@ -68,6 +68,7 @@ public:
   uint32_t getGyroscopeMessageId() { return CAN_SHOULDER_GYROSCOPE; };
   uint32_t getAccuracyMessageId() { return CAN_SHOULDER_ACCURACY; };
   uint32_t getStatusesMessageId() { return CAN_SHOULDER_STATUSES; };
+  uint32_t getTunedMessageId() { return CAN_SHOULDER_TUNED; };
   uint32_t getUpgradeConfimedMessageId() {
     return CAN_SHOULDER_FIRMWARE_UPGRADE_CONFIRMED;
   };

@@ -1,4 +1,5 @@
 #include "armShoulder.h"
+#include "../../common/tuning/tuning.h"
 #include "../common/periodic/periodic.h"
 #include "../common/quaternion/quaternion.h"
 #include "../common/speedBuffer/speedBuffer.h"
@@ -231,7 +232,10 @@ bool ArmShoulder::calibrateZLoop() {
 // answers a push (the user: "now the whole arm responds, not only the shoulder"), but a 1.5deg/s
 // deadband didn't stop that sway (offsets 0.05-0.2deg) and made the tremor look stronger, so all
 // three keep 3deg/s. Bounded, so a bad rate can only nudge the joint.
-constexpr float SHOULDER_DAMPING_GAIN_SEC = 0.1f;
+// Off since 2026-11-17: in the ~3.5 Hz shake braking a move down the shoulder swung with the elbow and
+// the wrist, its damping late like theirs (see DAMPING_RATE_TAU_SEC); undamped it stayed at 0.1-0.2deg
+// rms through every move. (A push at rest is the elbow's and the wrist's to answer now.)
+constexpr float SHOULDER_DAMPING_GAIN_SEC = 0.0f;
 constexpr float SHOULDER_DAMPING_MAX_DEG = 5.0f;
 
 Vector3 ArmShoulder::trackTick() {
@@ -258,6 +262,8 @@ Vector3 ArmShoulder::trackTick() {
   shoulderZ.setIMUAngle(shoulderZ.getPhysicalAngle());
   shoulderY.tick();
   shoulderZ.tick();
+  setStreamWaiting(shoulderY.isStreamWaiting());
+  setSettling(shoulderY.isStreamSettling());
   updateStatuses();
   return physicalAngles;
 }
@@ -515,6 +521,20 @@ int ArmShoulder::updateAccuracy(IMUBase *position) {
 }
 
 void ArmShoulder::busReceiveCallback(can2040_msg frame) {
+  if (frame.id == CAN_TUNE) {
+    const TuneRequest r = decodeTune(frame.data);
+    if (r.joint == TUNE_JOINT_SHOULDER_Y || r.joint == TUNE_JOINT_SHOULDER_Z) {
+      const bool y = r.joint == TUNE_JOINT_SHOULDER_Y;
+      float value;
+      if (r.param == TUNE_DAMPING_RATE_TAU) {
+        value = y ? pitchRate.tune(r.set, r.value) : NAN;  // Z isn't damped
+      } else {
+        value = (y ? shoulderY : shoulderZ).tune(r.param, r.set, r.value);
+      }
+      replyTune(r.joint, r.param, r.set, value);
+    }
+    return;
+  }
 
   if (frame.id == CAN_SHOULDER_SET_YZ_DEGREE) {
     uint32_t raw = frame.data32[0];
@@ -525,10 +545,13 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame) {
     uint32_t raw1 = frame.data32[1];
     uint16_t timeMS = raw1 & 0xFFFF;
     timeMS = (timeMS == PARAMETER_IS_NAN) ? 0 : timeMS;
+    // The host's end-of-stream shift for Y, 0.01deg signed (see Servo::setStreamEndShift()).
+    const uint16_t shiftYS = (raw1 >> 16) & 0xFFFF;
 
     // A short timeMS is a waypoint of a stream (a straight-line move) - see Servo::streamTo().
     const bool stream = (timeMS > 0 && timeMS <= STREAM_MAX_MS);
     if (!isnan(angleY)) {
+      shoulderY.setStreamEndShift((shiftYS == PARAMETER_IS_NAN ? NAN : (int16_t)shiftYS / 100.0f));
       stream ? shoulderY.streamTo(angleY, timeMS, SHOULDER_DEAD_ZONE)
              : shoulderY.planMove(angleY, timeMS, SHOULDER_DEAD_ZONE);
     }

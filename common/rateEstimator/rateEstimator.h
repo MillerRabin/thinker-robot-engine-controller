@@ -11,7 +11,7 @@
 // both run at 5 ms, unsynchronised, so per-tick differences alternate between 0 and twice the step.
 // Low-passed (tauSec). NaN once the IMU has gone quiet - no rate, no damping.
 class RateEstimator {
-  const float tauSec;
+  float tauSec;
   TickType_t sampleTick = 0;
   bool valid = false;
   float lastDeg = 0.0f;
@@ -19,6 +19,14 @@ class RateEstimator {
 
 public:
   explicit RateEstimator(float tauSec) : tauSec(tauSec) {}
+  // Runtime tuning (TUNE_DAMPING_RATE_TAU): never faster than 60 ms - at 30 ms the damping swung the
+  // arm violently (2026-11-12).
+  float tune(bool set, float value) {
+    if (set && !isnan(value)) {
+      tauSec = fminf(fmaxf(value, 0.06f), 0.5f);
+    }
+    return tauSec;
+  }
 
   // angleDeg: the IMU angle now (unwrapped); sampleAge: how old the IMU sample it came from is
   // (AtomicValue::age()).

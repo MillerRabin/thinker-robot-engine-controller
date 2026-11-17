@@ -1,4 +1,5 @@
 #include "armPart.h"
+#include "../tuning/tuning.h"
 
 ArmPart::ArmPart(const uint canRxPin, const uint canTxPin)
     : bus(canRxPin, canTxPin, this, canCallback) {
@@ -139,6 +140,32 @@ void ArmPart::setXCalibrating(bool value) {
     statuses |= ARM_X_CALIBRATING;
   } else {
     statuses &= ~ARM_X_CALIBRATING;
+  }
+}
+
+void ArmPart::replyTune(uint8_t joint, uint8_t param, bool set, float value) {
+  if (set) {
+    LogQueue::Log("tune: joint %u parameter %u set to %.4f\n", joint, param, value);
+  }
+  const uint32_t id = getTunedMessageId();
+  if (id != 0) {
+    bus.send(id, encodeTuned(joint, param, value));
+  }
+}
+
+void ArmPart::setStreamWaiting(bool value) {
+  if (value) {
+    statuses |= ARM_STREAM_WAITING;
+  } else {
+    statuses &= ~ARM_STREAM_WAITING;
+  }
+}
+
+void ArmPart::setSettling(bool value) {
+  if (value) {
+    statuses |= ARM_SETTLING;
+  } else {
+    statuses &= ~ARM_SETTLING;
   }
 }
 
