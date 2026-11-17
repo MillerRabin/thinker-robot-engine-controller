@@ -69,6 +69,7 @@ public:
   uint32_t getAccuracyMessageId() { return CAN_SHOULDER_ACCURACY; };
   uint32_t getStatusesMessageId() { return CAN_SHOULDER_STATUSES; };
   uint32_t getTunedMessageId() { return CAN_SHOULDER_TUNED; };
+  uint32_t getSettleSpeedMessageId() { return CAN_SHOULDER_SETTLE_SPEED; };
   uint32_t getUpgradeConfimedMessageId() {
     return CAN_SHOULDER_FIRMWARE_UPGRADE_CONFIRMED;
   };

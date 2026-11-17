@@ -21,6 +21,82 @@ void ArmElbow::onIMUReset() {
   LogQueue::Log("elbow onIMUReset: invalidating base\n");
   base = Quaternion();
   pitchIntegrationValid = false;
+  // With the engines on (a BNO reset mid-run - the engines-off edge calls this too, with them off),
+  // rebuild base where the arm is instead of a recalibration's drive to vertical (see recoverInPlace()).
+  recoverPending = platform.getEnginesPowerStatus() && !isnan(elbowRawAtCal);
+}
+
+// Measured live (2026-11-17): the elbow's BNO under-read its rotation through a move down (20deg short
+// in 2.3 s), the fusion check reset it, and the recalibration that followed drove the forearm 45deg
+// back up to vertical at the work pose. The link's pitch from gravity tracks the IMU angle one to one
+// (IMU angle - gravity pitch held at 48.0 +-0.3deg from vertical to the work pose at rest), so base
+// can be rebuilt where the arm stands: the IMU then reads home plus the gravity pitch's change since
+// the calibration. The command holds meanwhile. Called each engine tick while base is invalid; true
+// while it's still at it, false once done or given up (then the engine loop recalibrates as before).
+bool ArmElbow::recoverInPlace() {
+  constexpr TickType_t RECOVERY_WINDOW = pdMS_TO_TICKS(300);
+  constexpr TickType_t RECOVERY_TIMEOUT = pdMS_TO_TICKS(3000);
+  constexpr float RECOVERY_STILL_DEG = 0.5f;
+  const TickType_t now = xTaskGetTickCount();
+  if (!recovering) {
+    recovering = true;
+    recoveryStart = now;
+    recoveryWindowStart = now;
+    recoveryMin = recoveryMax = NAN;
+    recoverySum = 0.0f;
+    recoveryCount = 0;
+    elbowY.reset();  // holds the command; the next tick() takes the damping/dither offsets off
+    setIMURecovering(true);
+    LogQueue::Log("elbow: IMU reset with the engines on - holding the command, re-anchoring in place\n");
+  }
+  elbowY.tick();
+  updateStatuses();
+  if (now - recoveryStart > RECOVERY_TIMEOUT) {
+    LogQueue::Log("elbow: in-place re-anchoring gave up (the link didn't keep still) - recalibrating\n");
+    recovering = false;
+    recoverPending = false;
+    setIMURecovering(false);
+    return false;
+  }
+  const float raw = imu.isPositionOK() ? rawGravityYDeg() : NAN;
+  if (isnan(raw)) {
+    recoveryWindowStart = now;
+    recoveryMin = recoveryMax = NAN;
+    recoverySum = 0.0f;
+    recoveryCount = 0;
+    return true;
+  }
+  recoveryMin = isnan(recoveryMin) ? raw : std::min(recoveryMin, raw);
+  recoveryMax = isnan(recoveryMax) ? raw : std::max(recoveryMax, raw);
+  recoverySum += raw;
+  recoveryCount++;
+  if (now - recoveryWindowStart < RECOVERY_WINDOW) {
+    return true;
+  }
+  if (recoveryMax - recoveryMin > RECOVERY_STILL_DEG) {
+    recoveryWindowStart = now;
+    recoveryMin = recoveryMax = NAN;
+    recoverySum = 0.0f;
+    recoveryCount = 0;
+    return true;
+  }
+  float delta = recoverySum / recoveryCount - elbowRawAtCal;
+  delta -= 360.0f * roundf(delta / 360.0f);
+  const Quaternion q = imu.quaternion.load();
+  base = (q * Quaternion::AngleAxis(-delta * DEG_TO_RAD, 0.0f, 1.0f, 0.0f)).invert();
+  pitchIntegrationValid = false;
+  Vector3 imuAngles = getIMUAngles();
+  const float angle = getPhysicalAngles(imuAngles).y;
+  elbowY.setIMUAngle(angle);
+  elbowY.setTargetAngle(angle, 500, ELBOW_DEAD_ZONE);
+  LogQueue::Log("elbow: re-anchored in place in %lu ms: gravity pitch %.2f (%.2f at the calibration), IMU %.2f, "
+                "command %.2f\n",
+                (unsigned long)((now - recoveryStart) * portTICK_PERIOD_MS), recoverySum / recoveryCount,
+                elbowRawAtCal, angle, elbowY.getPhysicalAngle());
+  recovering = false;
+  recoverPending = false;
+  setIMURecovering(false);
+  return false;
 }
 
 void ArmElbow::updateStatusLed(bool calibrating, bool ready) {
@@ -181,6 +257,8 @@ bool ArmElbow::calibrateYLoop() {
     elbowY.setGravityNeutral(elbowYHomeAngle);
     base = imu.quaternion.load().invert();
     pitchIntegrationValid = false; // re-anchor pitchY to 0 at the new base
+    elbowRawAtCal = rawGravityYDeg();
+    recoverPending = false;
   } else {
     elbowY.reset();
   }
@@ -308,10 +386,12 @@ Vector3 ArmElbow::trackTick() {
   elbowY.setTraceAux(elbowY.getPulseOffset());
   // Settles only after the shoulder has (see Servo::setAncestorsSettling()).
   elbowY.setAncestorsSettling(shoulder.isOnline() && (shoulder.status.load() & ARM_SETTLING) != 0);
+  elbowY.setParentSettleSpeed(shoulder.getSettleSpeed());
   elbowY.tick();
   dampingMonitor.update(rate, elbowY.getDampingOffset());
   setStreamWaiting(elbowY.isStreamWaiting());
   setSettling(elbowY.isStreamSettling());
+  publishSettleSpeed(elbowY.getStreamSettleSpeed());
   updateStatuses();
   return physicalAngles;
 }
@@ -326,8 +406,19 @@ void ArmElbow::engineLoop() {
     auto sp = imu.isPositionOK();
     auto pp = shoulder.isPositionOK();
     auto ep = platform.getEnginesPowerStatus();
-    // A BNO reset (see LocalBNO::fusionDiverged()) invalidates base - recalibrate, like the shoulder and wrist.
+    // A BNO reset (see LocalBNO::fusionDiverged()) invalidates base: with the engines on it's rebuilt in
+    // place (recoverInPlace()), the command held; failing that - and like the shoulder and wrist -
+    // recalibrate.
     auto bp = base.isValid();
+    if (!bp && recoverPending && pp && ep) {
+      if (recoverInPlace()) {
+        vTaskDelayUntil(&lastWakeTime, taskInterval);
+        continue;
+      }
+      if (base.isValid()) {
+        continue;
+      }
+    }
     if (!sp || !pp || !bp || !ep) {
       LogQueue::Log("Engine is turned off (sp=%d pp=%d bp=%d ep=%d)\n", sp, pp, bp, ep);
       elbowY.reset();
@@ -380,9 +471,14 @@ int ArmElbow::begin() {
 
 int ArmElbow::updateQuaternion(IMUBase *position) {
   if (!base.isValid()) {
+    // Rebuilding base in place: the last one sent, so the wrist keeps its parent (see recoverInPlace()).
+    if (recoverPending && lastSentQuat.isValid()) {
+      return ArmPart::updateQuaternion(lastSentQuat);
+    }
     return ERROR_PART_IS_NOT_CALIBRATED;
   }
   Quaternion quat = base * position->quaternion.load();
+  lastSentQuat = quat;
   return ArmPart::updateQuaternion(quat);
 }
 
@@ -405,8 +501,16 @@ void ArmElbow::busReceiveCallback(can2040_msg frame) {
   if (frame.id == CAN_TUNE) {
     const TuneRequest r = decodeTune(frame.data);
     if (r.joint == TUNE_JOINT_ELBOW_Y) {
-      const float value = r.param == TUNE_DAMPING_RATE_TAU ? pitchRate.tune(r.set, r.value)
-                                                           : elbowY.tune(r.param, r.set, r.value);
+      float value;
+      if (r.param == TUNE_RESET_IMU) {
+        if (r.set && r.value >= 0.5f) {
+          imu.requestReset();
+        }
+        value = 0.0f;
+      } else {
+        value = r.param == TUNE_DAMPING_RATE_TAU ? pitchRate.tune(r.set, r.value)
+                                                 : elbowY.tune(r.param, r.set, r.value);
+      }
       replyTune(r.joint, r.param, r.set, value);
     }
     return;
@@ -523,6 +627,15 @@ float ArmElbow::angleFromGravityY() {
     return NAN;
   }
   return res;
+}
+
+float ArmElbow::rawGravityYDeg() {
+  Quaternion q = imu.quaternion.load();
+  if (!q.isValid()) {
+    return NAN;
+  }
+  Vector3 g = q.getGravityVector();
+  return atan2(-g.x, g.z) * RAD_TO_DEG + ELBOW_GRAVITY_Y_PWM_OFFSET;
 }
 
 Vector3 ArmElbow::getIMUAngles() {

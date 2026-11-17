@@ -175,6 +175,11 @@ private:
   float streamLinkSpeed = 0.0f;     // the setpoint's speed this tick - the link's expected rate
   float streamErrorLP = 0.0f;       // setpoint - IMU, low-passed over STREAM_ERROR_TAU_SEC
   float streamStartIMU = NAN;       // where the link was when the stream began
+  // The gap from the link to the first waypoint, faded out (see STREAM_ENTRY_SEC).
+  float streamEntryOffset = 0.0f;   // deg, at the start
+  float streamEntrySec = 0.0f;      // this stream's fade
+  float streamEntry = 0.0f;         // deg, what's left of it now
+  absolute_time_t streamStartedAt = 0;
   // End-of-stream overshoot compensation (see streamTick()).
   float streamPeakSpeed = 0.0f;     // deg/s, the setpoint's fastest so far
   float streamEndWeight = 0.0f;     // 0 cruising .. 1 stopped, never decreasing within a stream
@@ -201,6 +206,10 @@ private:
   uint32_t calmBlockMs = STREAM_CALM_BLOCK_MS;
   uint32_t calmWaitMaxMs = STREAM_CALM_WAIT_MAX_MS;
   bool parentWait = true;
+  bool parentFollow = true;
+  float entrySec = STREAM_ENTRY_SEC;
+  float correctionMaxDeg = STREAM_CORRECTION_MAX_DEG;
+  float parentSettleSpeed = 0.0f;       // deg/s, from setParentSettleSpeed()
   bool streamWaiting = false;
   absolute_time_t streamEndedAt = 0;    // the stream's end - the parent wait's bound counts from it
   absolute_time_t streamWaitStart = 0;  // the calm wait's own start - again once the parents are done
@@ -411,6 +420,12 @@ public:
   // tick(): this joint then waits for it, its command held, and settles after it - in one move, what
   // the parent's settle left it too (see STREAM_PARENT_WAIT_MAX_MS).
   void setAncestorsSettling(bool value) { ancestorsSettling = value; }
+  // The parent joint's command speed while it settles its last stream (its getStreamSettleSpeed(), off
+  // the bus; 0 otherwise), set every tick before tick(): waiting for the parent, this joint's command
+  // turns against it so its link holds its absolute angle (see SETTLE_SPEED_STALE_MS).
+  void setParentSettleSpeed(float degPerSec) { parentSettleSpeed = degPerSec; }
+  // This joint's command speed while it settles its last stream, else 0 - for its child.
+  float getStreamSettleSpeed() const { return (planActive && streamSettlePlan) ? appliedSpeedDegPerSec : 0.0f; }
   // Sets (set, value not NaN) and/or reads one of the TUNE_* parameters (common/tuning/tuning.h),
   // clamped to a safe range; returns the value in effect, NaN for one a Servo doesn't have.
   float tune(uint8_t param, bool set, float value);

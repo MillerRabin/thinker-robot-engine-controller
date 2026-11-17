@@ -153,11 +153,32 @@ void ArmPart::replyTune(uint8_t joint, uint8_t param, bool set, float value) {
   }
 }
 
+void ArmPart::publishSettleSpeed(float degPerSec) {
+  const uint32_t id = getSettleSpeedMessageId();
+  const bool moving = degPerSec != 0.0f && !isnan(degPerSec);
+  if (id == 0 || (!moving && !settleSpeedSent)) {
+    return;
+  }
+  const float value = moving ? degPerSec : 0.0f;
+  uint64_t data = 0;
+  memcpy(&data, &value, sizeof(float));
+  bus.send(id, data);
+  settleSpeedSent = moving;
+}
+
 void ArmPart::setStreamWaiting(bool value) {
   if (value) {
     statuses |= ARM_STREAM_WAITING;
   } else {
     statuses &= ~ARM_STREAM_WAITING;
+  }
+}
+
+void ArmPart::setIMURecovering(bool value) {
+  if (value) {
+    statuses |= ARM_IMU_RECOVERING;
+  } else {
+    statuses &= ~ARM_IMU_RECOVERING;
   }
 }
 

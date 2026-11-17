@@ -54,6 +54,20 @@ private:
   // reading into PWM-space for the next seed, see calibrateYLoop().
   float elbowYHomeAngle = ELBOW_Y_PWM_AT_VERTICAL;
   float accelPitchDeg();
+  // In-place recovery after a BNO reset with the engines on (see recoverInPlace()): the link's pitch
+  // from gravity (the IMU's own, no shoulder correction) where the last calibration landed, the
+  // quaternion last sent (sent again while base is being rebuilt, so the wrist doesn't lose its parent),
+  // and the recovery's state.
+  float rawGravityYDeg();
+  float elbowRawAtCal = NAN;
+  volatile bool recoverPending = false;
+  bool recovering = false;
+  TickType_t recoveryStart = 0;
+  TickType_t recoveryWindowStart = 0;
+  float recoveryMin = NAN, recoveryMax = NAN, recoverySum = 0.0f;
+  int recoveryCount = 0;
+  Quaternion lastSentQuat;
+  bool recoverInPlace();
   public:
     Servo elbowY;
     ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
@@ -67,6 +81,7 @@ private:
     uint32_t getAccuracyMessageId() { return CAN_ELBOW_ACCURACY; };
     uint32_t getStatusesMessageId() { return CAN_ELBOW_STATUSES; };
     uint32_t getTunedMessageId() { return CAN_ELBOW_TUNED; };
+    uint32_t getSettleSpeedMessageId() { return CAN_ELBOW_SETTLE_SPEED; };
     int updateQuaternion(IMUBase * position);
     int updateAccelerometer(IMUBase * position);
     int updateGyroscope(IMUBase * position);

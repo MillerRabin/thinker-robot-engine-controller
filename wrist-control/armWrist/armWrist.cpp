@@ -293,6 +293,8 @@ Vector3 ArmWrist::trackTick() {
   // Y settles only after the shoulder and the elbow have (see Servo::setAncestorsSettling()).
   wristY.setAncestorsSettling((shoulder.isOnline() && (shoulder.status.load() & ARM_SETTLING) != 0) ||
                               (elbow.isOnline() && (elbow.status.load() & ARM_SETTLING) != 0));
+  // ...and turns against the elbow's settle meanwhile (the elbow turns against the shoulder's).
+  wristY.setParentSettleSpeed(elbow.getSettleSpeed());
   wristY.tick();
   wristZ.tick();
   dampingMonitor.update(rate, wristY.getDampingOffset());

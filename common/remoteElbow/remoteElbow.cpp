@@ -1,7 +1,21 @@
 
 #include "remoteElbow.h"
 
+float RemoteElbow::getSettleSpeed() const {
+  if (time_us_32() - settleSpeedAtUs > SETTLE_SPEED_STALE_MS * 1000u) {
+    return 0.0f;
+  }
+  return settleSpeed;
+}
+
 void RemoteElbow::dispatchMessage(can2040_msg frame) {
+  if (frame.id == CAN_ELBOW_SETTLE_SPEED) {
+    float v;
+    memcpy(&v, frame.data, sizeof(float));
+    settleSpeed = isnan(v) ? 0.0f : v;
+    settleSpeedAtUs = time_us_32();
+    return;
+  }
   if (frame.id == CAN_ELBOW_QUATERNION) {
     Quaternion quat;
     quat.deserialize(frame.data);

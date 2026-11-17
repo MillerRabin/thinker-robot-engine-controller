@@ -46,6 +46,7 @@
 #define CAN_SHOULDER_ACCURACY 0x23
 #define CAN_SHOULDER_STATUSES 0x24
 #define CAN_SHOULDER_TUNED 0x25
+#define CAN_SHOULDER_SETTLE_SPEED 0x26
 #define CAN_SHOULDER_FIRMWARE_UPGRADE_CONFIRMED 0x28
 
 #define CAN_ELBOW_QUATERNION 0x30
@@ -54,6 +55,7 @@
 #define CAN_ELBOW_ACCURACY 0x33
 #define CAN_ELBOW_STATUSES 0x34
 #define CAN_ELBOW_TUNED 0x35
+#define CAN_ELBOW_SETTLE_SPEED 0x36
 #define CAN_ELBOW_FIRMWARE_UPGRADE_CONFIRMED 0x38
 
 #define CAN_WRIST_QUATERNION 0x40
@@ -218,6 +220,13 @@
 // hold crept it up for 2-3 s). Low-passed, 2/s acts like ~0.4/s on the swing and takes up the sag in
 // ~0.5 s (the loop: zeta ~0.65).
 #define STREAM_MAX_MS 250
+// A stream's setpoint starts on the host's first waypoint, and the gap from where the link is fades
+// out over STREAM_ENTRY_SEC - longer for a big gap, at most STREAM_ENTRY_MAX_SPEED_DEG_PER_SEC
+// (Servo::streamTo()). Measured live (2026-11-17): the first waypoint was 0.5-0.8deg off each module's
+// own IMU reading (the host's model vs the module's), the setpoint crossed that in 60 ms, and at
+// vertical the kick tipped the whole arm through its backlash - the tip 46 mm forward and back.
+#define STREAM_ENTRY_SEC 0.5f
+#define STREAM_ENTRY_MAX_SPEED_DEG_PER_SEC 5.0f
 #define STREAM_END_MS 300
 #define STREAM_GAIN 2.0f
 #define STREAM_ERROR_TAU_SEC 0.3f
@@ -261,6 +270,12 @@
 // and the wrist's hold woke 0.4 s later and crept after it, jumping 1-1.5deg (the shoulder's settle
 // did the same to the elbow). Waiting on a parent stuck settling ends after STREAM_PARENT_WAIT_MAX_MS.
 #define STREAM_PARENT_WAIT_MAX_MS 8000
+// While a joint settles after a stream it sends its command's speed (CAN_*_SETTLE_SPEED, float deg/s,
+// every engine tick, then one 0), and its child turns against it while it waits (see
+// Servo::setParentSettleSpeed()). Measured live (2026-11-17): the wrist waited with its command still
+// while the shoulder settled 2.2deg and the elbow 1.75, the claw went with them - the tip 40 mm away -
+// and the wrist's own settle brought it back. A speed older than SETTLE_SPEED_STALE_MS is 0.
+#define SETTLE_SPEED_STALE_MS 50
 // The most the stream correction may add to a joint's command over one stream (Servo::streamTick()):
 // a real sag took up to ~6deg at the shoulder and over 8 at the elbow lifting the forearm (2026-11-11).
 #define STREAM_CORRECTION_MAX_DEG 12.0f
@@ -321,6 +336,9 @@
 // Its children wait for it before they settle (Servo::setAncestorsSettling()). Shoulder: Y, elbow: Y,
 // wrist: Y.
 #define ARM_SETTLING 4096
+// The joint's IMU was reset with the engines on and it holds its command while it re-anchors in place
+// (ArmElbow::recoverInPlace()) - the host stops the running move.
+#define ARM_IMU_RECOVERING 8192
 // The status frame's upper half carries the joint's calibrated home commands - the command that holds
 // the calibration pose (2026-11-06, for the kinematics on the host's clients, see
 // ArmPart::setHomeAngles()): bits 32-47 the first, 48-63 the second, 0.01deg each, 0xFFFF = none.

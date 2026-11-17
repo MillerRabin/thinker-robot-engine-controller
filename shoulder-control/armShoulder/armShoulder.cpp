@@ -264,6 +264,7 @@ Vector3 ArmShoulder::trackTick() {
   shoulderZ.tick();
   setStreamWaiting(shoulderY.isStreamWaiting());
   setSettling(shoulderY.isStreamSettling());
+  publishSettleSpeed(shoulderY.getStreamSettleSpeed());
   updateStatuses();
   return physicalAngles;
 }

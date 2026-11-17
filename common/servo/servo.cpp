@@ -154,7 +154,12 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     if (isnan(imuAngle) || isnan(physicalAngle)) {
       return true; // nothing to stream from yet - a plain target
     }
-    streamSetpoint = imuAngle;
+    // The setpoint starts on the first waypoint; the gap from the link fades out (STREAM_ENTRY_SEC).
+    streamSetpoint = angle;
+    streamEntryOffset = imuAngle - angle;
+    streamEntry = streamEntryOffset;
+    streamEntrySec = std::max(entrySec, 1.5f * fabsf(streamEntryOffset) / STREAM_ENTRY_MAX_SPEED_DEG_PER_SEC);
+    streamStartedAt = get_absolute_time();
     streamErrorLP = 0.0f;
     streamStartIMU = imuAngle;
     streamPeakSpeed = 0.0f;
@@ -189,12 +194,24 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     return false;
   }
   const float dtSec = std::min(dtUs / 1000000.0f, 0.01f);
+  // What's left of the entry gap, on a smoothstep (no jump in speed at either end).
+  float entrySpeed = 0.0f;
+  if (streamEntryOffset != 0.0f) {
+    const float tau = absolute_time_diff_us(streamStartedAt, now) / (streamEntrySec * 1000000.0f);
+    if (tau >= 1.0f) {
+      streamEntryOffset = 0.0f;
+      streamEntry = 0.0f;
+    } else {
+      streamEntry = streamEntryOffset * (1.0f - tau * tau * (3.0f - 2.0f * tau));
+      entrySpeed = -streamEntryOffset * 6.0f * tau * (1.0f - tau) / streamEntrySec;
+    }
+  }
   if (absolute_time_diff_us(now, streamReachAt) > 0) {
     streamSetpoint += streamSpeed * dtSec;
-    streamLinkSpeed = streamSpeed;
+    streamLinkSpeed = streamSpeed + entrySpeed;
   } else {
     streamSetpoint = streamTarget;
-    streamLinkSpeed = 0.0f;
+    streamLinkSpeed = entrySpeed;
     if (absolute_time_diff_us(streamReachAt, now) > (int64_t)STREAM_END_MS * 1000) {
       // No next waypoint: hold the last one like any target (targetAngle is it) - once the link has
       // calmed (see streamWaitTick()). A new waypoint meanwhile starts a new stream.
@@ -236,7 +253,8 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   const float speedNow = streamSpeedLP;
   // Only once the setpoint is well on its way: the first waypoint's step from where the link is to the
   // plan's start can be fast and short, and the slow start of the curve after it isn't braking.
-  if (fabsf(streamSetpoint - streamStartIMU) >= STREAM_END_ARM_DEG) {
+  const float setpoint = streamSetpoint + streamEntry;
+  if (fabsf(setpoint - streamStartIMU) >= STREAM_END_ARM_DEG) {
     streamPeakSpeed = std::max(streamPeakSpeed, speedNow);
   }
   if (streamPeakSpeed >= STREAM_END_MIN_PEAK_DEG_PER_SEC) {
@@ -248,11 +266,11 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   streamShift = shift;
   // The correction follows the error low-passed: it takes up the slow sag under a changing load but
   // not the link's 2-4 Hz swing through its backlash, which it only pumped (see STREAM_GAIN).
-  streamErrorLP += ((streamSetpoint + shift - imuAngle) - streamErrorLP) * std::min(dtSec / streamErrorTauSec, 1.0f);
+  streamErrorLP += ((setpoint + shift - imuAngle) - streamErrorLP) * std::min(dtSec / streamErrorTauSec, 1.0f);
   float correctionSpeed = streamGain * streamErrorLP;
   // A joint the plan doesn't move holds its command (see setStreamCorrectWhenStill()), and so does
   // every joint once its setpoint has arrived (see above).
-  if ((!streamCorrectWhenStill && fabsf(streamSetpoint - streamStartIMU) < STREAM_STILL_DEG) ||
+  if ((!streamCorrectWhenStill && fabsf(setpoint - streamStartIMU) < STREAM_STILL_DEG) ||
       absolute_time_diff_us(now, streamReachAt) <= 0) {
     correctionSpeed = 0.0f;
   }
@@ -260,13 +278,13 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   // (see LocalBNO::fusionDiverged()) and read a 5.7deg tilt as ~4; chasing it the correction drove the
   // command 15deg past the plan - the shoulder tilted that much further and the arm dipped - before
   // the fusion check reset the BNO. A real sag needed at most ~6deg (the shoulder at the work pose).
-  if (dtSec > 0.0f && fabsf(streamCorrection + correctionSpeed * dtSec) > STREAM_CORRECTION_MAX_DEG) {
-    const float bound = copysignf(STREAM_CORRECTION_MAX_DEG, streamCorrection + correctionSpeed * dtSec);
+  if (dtSec > 0.0f && fabsf(streamCorrection + correctionSpeed * dtSec) > correctionMaxDeg) {
+    const float bound = copysignf(correctionMaxDeg, streamCorrection + correctionSpeed * dtSec);
     correctionSpeed = (bound - streamCorrection) / dtSec;
     if (!streamCorrectionCapped) {
       streamCorrectionCapped = true;
       LogQueue::Log("Servo pin=%u stream correction capped at %.1f: IMU %.2f, setpoint %.2f\n", pin, bound,
-                    imuAngle, streamSetpoint);
+                    imuAngle, setpoint);
     }
   }
   streamCorrection += correctionSpeed * dtSec;
@@ -282,10 +300,11 @@ bool Servo::streamWaitTick(absolute_time_t now, int64_t dtUs) {
   if (!streamWaiting) {
     return false;
   }
-  // The command holds; it only takes out a parent's streamed move, as in the stream (the link holds
-  // an absolute angle).
+  // The command holds; it only takes out a parent's streamed move, as in the stream, and the parent's
+  // settle (the link holds an absolute angle).
   const float dtSec = std::min(dtUs / 1000000.0f, 0.01f);
-  const float speed = std::clamp(-parentPlannedSpeed, -maxAngularSpeed, maxAngularSpeed);
+  const float follow = parentFollow ? parentSettleSpeed : 0.0f;
+  const float speed = std::clamp(-(parentPlannedSpeed + follow), -maxAngularSpeed, maxAngularSpeed);
   appliedSpeedDegPerSec = speed;
   if (speed != 0.0f) {
     physicalAngle = std::clamp(physicalAngle + speed * dtSec, safeMinDegree, safeMaxDegree);
@@ -434,6 +453,15 @@ float Servo::tune(uint8_t param, bool set, float value) {
   case TUNE_PARENT_WAIT:
     if (apply) parentWait = value >= 0.5f;
     return parentWait ? 1.0f : 0.0f;
+  case TUNE_PARENT_FOLLOW:
+    if (apply) parentFollow = value >= 0.5f;
+    return parentFollow ? 1.0f : 0.0f;
+  case TUNE_ENTRY_SEC:
+    if (apply) entrySec = clampTo(0.06f, 2.0f);
+    return entrySec;
+  case TUNE_CORRECTION_MAX:
+    if (apply) correctionMaxDeg = clampTo(0.0f, STREAM_CORRECTION_MAX_DEG);
+    return correctionMaxDeg;
   default:
     return NAN;
   }
@@ -839,7 +867,7 @@ void Servo::traceTick(absolute_time_t now) {
     }
     // While streaming, the target column is the stream's setpoint (the waypoints show as its bends).
     trace[traceCount++] = {(uint32_t)absolute_time_diff_us(traceStart, now),
-                           streamActive ? streamSetpoint : targetAngle, rawIMUAngle, imuAngle, physicalAngle,
+                           streamActive ? streamSetpoint + streamEntry : targetAngle, rawIMUAngle, imuAngle, physicalAngle,
                            traceAux};
     if (traceCount == traceCapacity) {
       traceDumped = 0;

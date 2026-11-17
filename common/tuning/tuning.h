@@ -37,7 +37,12 @@
 #define TUNE_HOLD_WAKE_MS 15
 #define TUNE_HOLD_WAKE_NOW_DEG 16
 #define TUNE_PARENT_WAIT 17         // 0/1, Servo::setAncestorsSettling() honoured
-#define TUNE_PARAM_COUNT 17
+#define TUNE_PARENT_FOLLOW 18       // 0/1, Servo::setParentSettleSpeed() honoured
+#define TUNE_ENTRY_SEC 19           // s, see STREAM_ENTRY_SEC
+#define TUNE_CORRECTION_MAX 20      // deg, see STREAM_CORRECTION_MAX_DEG
+#define TUNE_RESET_IMU 21           // set 1: reset the joint's BNO now (a test of the in-place recovery);
+                                    // an action, never kept in the host's profile
+#define TUNE_PARAM_COUNT 21
 
 struct TuneRequest {
   uint8_t joint;

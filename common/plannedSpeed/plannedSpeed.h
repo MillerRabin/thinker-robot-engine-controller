@@ -27,7 +27,11 @@ public:
       rate = 0.0f;
       return;
     }
-    if (!active) {
+    // A pause longer than a stream's end is a new stream. Measured live (2026-11-17): the last stream
+    // was cut off down at the work pose, the elbow recalibrated back to vertical, and the next move's
+    // first waypoint looked like the elbow jumping 47deg - the wrist turned against it at the 60deg/s
+    // bound for 0.6 s and threw the claw 37deg forward.
+    if (!active || (uint32_t)(now - lastUs) > STREAM_END_MS * 1000u) {
       // The parent starts its setpoint where its link is, which isn't known here - a stream starts
       // with a short step, so take the first waypoint as the start.
       setpoint = value;

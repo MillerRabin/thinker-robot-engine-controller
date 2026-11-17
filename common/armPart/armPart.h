@@ -33,6 +33,7 @@ private:
   Bus bus;
   static void canCallback(void *pArmPart, can2040_msg frame);
   volatile uint64_t statuses = 0;
+  bool settleSpeedSent = false;
 
 protected:
   constexpr static TickType_t taskInterval =
@@ -58,7 +59,11 @@ public:
   void setStreamWaiting(bool value);
   // Answers a CAN_TUNE request (see common/tuning/tuning.h): value NaN = no such parameter here.
   void replyTune(uint8_t joint, uint8_t param, bool set, float value);
+  // The settling joint's command speed for its child (see SETTLE_SPEED_STALE_MS): every call while
+  // it's not 0, then one 0. Every engine tick.
+  void publishSettleSpeed(float degPerSec);
   void setSettling(bool value);
+  void setIMURecovering(bool value);
   void setUpgrading(bool value);
   void setUseIMUStatus(uint8_t mode);
   void setOffsetZYX(const float angleX, const float angleY, const float angleZ,
@@ -73,6 +78,7 @@ public:
   virtual uint32_t getRangeMessageId() { return 0; };
   virtual uint32_t getStatusesMessageId() { return 0; };
   virtual uint32_t getTunedMessageId() { return 0; };
+  virtual uint32_t getSettleSpeedMessageId() { return 0; };
   virtual uint32_t getFirmwareUpgradeMessageId() { return 0; };
   virtual int updateQuaternion(IMUBase *position) { return 0; };
   virtual int updateAccelerometer(IMUBase *position) { return 0; };
