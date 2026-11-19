@@ -8,10 +8,15 @@
 // within 0.01 over the whole move; twist about body y read 0.78 of it, so a 20deg command turned
 // the wrist 25deg. Z (2026-11-06): 19.6deg about it for +20 PWM, 89.7deg from Y - the IMU turns
 // with Z too. With the arm upright both are horizontal, so gravity calibrates both.
-constexpr Vector3 WRIST_Y_JOINT_AXIS = {-0.555f, 0.778f, -0.292f};
-constexpr Vector3 WRIST_Z_JOINT_AXIS = {-0.221f, 0.208f, 0.953f};
+// Both turned -8.2deg about WRIST_UP_AXIS on 2026-11-19 - the IMU had turned that far on its mount
+// since: with Z held still (open loop), pure pitch moves park <-> down (~80deg) changed the side bend
+// read off gravity by +-23.5deg with the old axes and by 0.3-0.4 with these, and the pitch axis came
+// out horizontal (-0.8deg) and 5.5deg from Y about Z, as far as Z stood from its calibration. With
+// the old axes Z had bent the claw sideways ~5deg at the parking pose and 12-15 at a pose down.
+constexpr Vector3 WRIST_Y_JOINT_AXIS = {-0.5807f, 0.7996f, -0.1531f};
+constexpr Vector3 WRIST_Z_JOINT_AXIS = {-0.1397f, 0.0950f, 0.9856f};
 // Z x Y: the body direction that points up when the wrist stands upright - normal to both axes,
-// so it is the "vertical" for both joints.
+// so it is the "vertical" for both joints. (Gravity at calibration, 2026-11-19: within 1.0deg.)
 constexpr Vector3 WRIST_UP_AXIS = {-0.8026f, -0.5938f, -0.0565f};
 
 constexpr Vector3 cross(const Vector3 &a, const Vector3 &b) {
@@ -22,7 +27,7 @@ static inline float dot(const Vector3 &a, const Vector3 &b) { return a.x * b.x +
 
 static inline float wrapRad(float a) { return atan2f(sinf(a), cosf(a)); }
 
-// up x Z: the Y axis made exactly normal to the other two (they're 0.3deg off normal as measured),
+// up x Z: the Y axis made exactly normal to the other two (0.36deg from WRIST_Y_JOINT_AXIS),
 // so (Z, side, up) is an orthonormal frame - the arm's forward, side and up at calibration.
 constexpr Vector3 WRIST_SIDE_AXIS = cross(WRIST_UP_AXIS, WRIST_Z_JOINT_AXIS);
 
@@ -272,6 +277,12 @@ bool ArmWrist::calibrateZLoop() {
 Vector3 ArmWrist::trackTick() {
   Vector3 imuAngles = getIMUAngles();
   Vector3 physicalAngles = getPhysicalAngles(imuAngles);
+  // The host's starting point for a move (CAN_WRIST_ANGLES): it read them off the quaternion with its
+  // own copy of the axes and the shoulder's raw turn, and with the axes and the yaw offset of
+  // 2026-11-19 that copy saw the claw bent 25deg where gravity saw 2.
+  if (pitchIntegrationValid && twistZIntegrationValid) {
+    publishPair(CAN_WRIST_ANGLES, imuAngles.y * RAD_TO_DEG, imuAngles.z * RAD_TO_DEG);
+  }
   // Z holds its own angle by the IMU too since 2026-11-06 - it keeps the claw upright when the
   // platform rolls sideways, which the Y joints can't. It ran on the servo's own position before,
   // taken for an unobservable yaw like the shoulder's Z (2026-10-31: command 153 vs IMU 136).
@@ -322,6 +333,7 @@ bool ArmWrist::calibrateLoop() {
     base.store(imu.quaternion.load().invert());
     pitchIntegrationValid = false; // re-anchor pitchY and twistZ to 0 at the new base
     twistZIntegrationValid = false;
+    resetYawOffset();
     // Retarget to wristYHomeAngle (PWM-space) - feedback is PWM-space from here on, target must match.
     wristY.setTargetAngle(wristYHomeAngle, WRIST_Y_RECOVERY_TIME_MS, WRIST_DEAD_ZONE);
     wristZ.setTargetAngle(wristZHomeAngle, WRIST_Y_RECOVERY_TIME_MS, WRIST_DEAD_ZONE);
@@ -370,6 +382,7 @@ void ArmWrist::onIMUReset() {
   base.store(Quaternion());
   pitchIntegrationValid = false;
   twistZIntegrationValid = false;
+  resetYawOffset();
 }
 
 int ArmWrist::updateStatuses() {
@@ -637,9 +650,19 @@ float ArmWrist::armYaw() {
   return lastArmYaw;
 }
 
+// How fast getIMUAngles() pulls yawOffset in, 1/s, scaled by how well gravity sees the side bend and
+// how much the offset shows in it (sin^2 cos^2 of the pitch): ~1.8 s at the parking pose (pitch 30),
+// ~3.2 s down (110), frozen upright and with the wrist level. Measured live (2026-11-19): the
+// shoulder's game rotation vector turned 1 -> 7.7deg about the vertical in 40 min with shoulder-z
+// still; taken for the arm's turn, it read as a side bend of the wrist of up to 6deg that Z then bent
+// the claw by. The offset needed isn't one number either: ~0.7 of that turn at the parking pose, ~1.3
+// down. Replayed on that log, 0.5 left a pose down 1.7-2.4deg off for 14-50 s after arriving, 3.0
+// 1.3-1.6deg for 4.5-7.5 s. The servo doesn't feed back into it: both bends see the same claw.
+constexpr float WRIST_YAW_ANCHOR_RATE = 3.0f;
+
 Vector3 ArmWrist::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
-  float yaw = armYaw();
+  float yaw = armYaw() + yawOffset;
 
   // The wrist's rotation since calibration is the arm's turn about the vertical, then a pitch about
   // Y, then a side bend about Z: R = Rz(yaw) Ry(pitch) Rx(bend), with x = the Z axis, y = Y, z = up.
@@ -660,6 +683,25 @@ Vector3 ArmWrist::getIMUAngles() {
     const Vector3 rz = q.rotate(WRIST_UP_AXIS);
     pitchYAbs = atan2f(-dot(WRIST_UP_AXIS, rx), dot(WRIST_Z_JOINT_AXIS, rx));
     twistZAbs = atan2f(-dot(WRIST_SIDE_AXIS, rz), dot(WRIST_SIDE_AXIS, ry));
+
+    // The turn taken off (the shoulder's, see armYaw()) drifts: an error e in it reads as a side bend
+    // of -e sin(pitch). Gravity sees the side bend without any yaw - a turn about up leaves the
+    // components along up as they are: R20 = -sin p, R21 = cos p sin b, R22 = cos p cos b - but only
+    // as well as cos p allows (a level wrist's Z axis stands vertical). Where both show, the offset is
+    // pulled toward what makes the two agree.
+    const float g1 = dot(WRIST_UP_AXIS, qm.rotate(WRIST_SIDE_AXIS));
+    const float g2 = dot(WRIST_UP_AXIS, qm.rotate(WRIST_UP_AXIS));
+    const float cp = cosf(pitchYAbs);
+    const float sp = sinf(pitchYAbs);
+    const float sign = cp >= 0.0f ? 1.0f : -1.0f;
+    gravityBendZ = atan2f(sign * g1, sign * g2);
+    const absolute_time_t now = get_absolute_time();
+    if (!is_nil_time(yawOffsetAt)) {
+      const float dtSec = std::min(absolute_time_diff_us(yawOffsetAt, now) / 1000000.0f, 0.05f);
+      const float mismatch = wrapRad(twistZAbs - gravityBendZ); // ~ -e sin p
+      yawOffset -= WRIST_YAW_ANCHOR_RATE * dtSec * mismatch * sp * cp * cp;
+    }
+    yawOffsetAt = now;
   }
 
   float pitchY;
@@ -698,7 +740,9 @@ Vector3 ArmWrist::getIMUAngles() {
 
   static Periodic axisPrinter(pdMS_TO_TICKS(300));
   axisPrinter.interval([&]() {
-    LogQueue::Log("[DIAG] wrist pitchY=%.2f twistZ=%.2f yaw=%.2f\n", pitchY * RAD_TO_DEG, twistZ * RAD_TO_DEG, yaw * RAD_TO_DEG);
+    // yaw: the shoulder's turn as read (armYaw()), offset: what's added to it.
+    LogQueue::Log("[DIAG] wrist pitchY=%.2f twistZ=%.2f yaw=%.2f offset=%.2f gravityZ=%.2f\n", pitchY * RAD_TO_DEG,
+                  twistZ * RAD_TO_DEG, lastArmYaw * RAD_TO_DEG, yawOffset * RAD_TO_DEG, gravityBendZ * RAD_TO_DEG);
     // The absolute quaternion, to check the twist against the gravity projection offline (2026-11-03).
     Quaternion raw = imu.quaternion.load();
     LogQueue::Log("[DIAG] wrist rawQuat i=%.4f j=%.4f k=%.4f real=%.4f\n", raw.i, raw.j, raw.k, raw.real);

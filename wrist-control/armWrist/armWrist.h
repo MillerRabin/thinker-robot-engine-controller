@@ -43,6 +43,16 @@ private:
   RemoteShoulder shoulder;
   float lastArmYaw = 0.0f;
   float armYaw();
+  // What armYaw() is off by for this wrist, kept by gravity (see getIMUAngles()); 0 at a new base.
+  float yawOffset = 0.0f;              // rad
+  absolute_time_t yawOffsetAt = 0;
+  float gravityBendZ = 0.0f;           // rad, the side bend read off gravity alone (getIMUAngles())
+  // At a new base the arm hasn't turned: whatever the shoulder's game rotation vector has drifted to
+  // since its own start (12deg after an hour, 2026-11-19 - the shoulder's base keeps its yaw) is offset.
+  void resetYawOffset() {
+    yawOffset = -armYaw();
+    yawOffsetAt = 0;
+  }
   StatusLed statusLed{STATUS_LED_PIN};
   void updateStatusLed(bool calibrating, bool ready = false);
   // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively

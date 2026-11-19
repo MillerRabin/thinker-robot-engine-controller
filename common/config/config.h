@@ -64,6 +64,9 @@
 #define CAN_WRIST_ACCURACY 0x43
 #define CAN_WRIST_STATUSES 0x44
 #define CAN_WRIST_TUNED 0x45
+// The wrist's own pitch and side bend since calibration (two floats, deg): the host plans from them
+// instead of working them out of the wrist's quaternion a second time (see ArmWrist::getIMUAngles()).
+#define CAN_WRIST_ANGLES 0x46
 #define CAN_WRIST_FIRMWARE_UPGRADE_CONFIRMED 0x48
 
 #define CAN_CLAW_QUATERNION 0x50

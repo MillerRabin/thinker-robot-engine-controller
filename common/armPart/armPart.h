@@ -62,6 +62,8 @@ public:
   // The settling joint's command speed for its child (see SETTLE_SPEED_STALE_MS): every call while
   // it's not 0, then one 0. Every engine tick.
   void publishSettleSpeed(float degPerSec);
+  // Two floats in one frame on the bus.
+  void publishPair(uint32_t id, float a, float b);
   void setSettling(bool value);
   void setIMURecovering(bool value);
   void setUpgrading(bool value);

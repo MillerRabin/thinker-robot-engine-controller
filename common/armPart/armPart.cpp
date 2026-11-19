@@ -153,6 +153,15 @@ void ArmPart::replyTune(uint8_t joint, uint8_t param, bool set, float value) {
   }
 }
 
+void ArmPart::publishPair(uint32_t id, float a, float b) {
+  uint8_t data[8];
+  memcpy(data, &a, sizeof(float));
+  memcpy(data + 4, &b, sizeof(float));
+  uint64_t out;
+  memcpy(&out, data, sizeof(out));
+  bus.send(id, out);
+}
+
 void ArmPart::publishSettleSpeed(float degPerSec) {
   const uint32_t id = getSettleSpeedMessageId();
   const bool moving = degPerSec != 0.0f && !isnan(degPerSec);
