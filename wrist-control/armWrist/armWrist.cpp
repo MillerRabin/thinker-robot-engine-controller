@@ -659,9 +659,44 @@ float ArmWrist::armYaw() {
 // down. Replayed on that log, 0.5 left a pose down 1.7-2.4deg off for 14-50 s after arriving, 3.0
 // 1.3-1.6deg for 4.5-7.5 s. The servo doesn't feed back into it: both bends see the same claw.
 constexpr float WRIST_YAW_ANCHOR_RATE = 3.0f;
+// The offset needed depends on the pose, back and forth the same: mapped on 2026-11-19, ~0 at pitch
+// 30, +0.5 at 48, +1.8 at 66, -6 past 100 - a twist of the links or the BNO's gyro turning it by the
+// pitch, it isn't one number however it's kept. One number, pulled toward each pose's in turn, put
+// the claw 3-4deg off for seconds after arriving down and 5-9deg off on the way back up. So most of
+// each pull goes to bins by the pitch, learned wherever the arm passes; the rest stays common, for
+// the drift every pose shares. Replayed on that day's log: arriving down 1-1.5deg, then under 0.5;
+// on the way up 2-3deg. Shares 0.5-0.8 did alike, bins of 10-20deg too. Live, park <-> down x6: the
+// first trip after calibration needs another offset down (-1 vs -6), from the second on the bins
+// held within 0.3deg; the claw on the way up 2.4deg off (was 6.5-6.9), arriving down 2.5-3.8 for
+// under a second (was 5 for 2 s, straight after 8 s). Left: the bins can't learn near pitch 90
+// (gravity doesn't see the bend there), so the offset swings +4 -> -7 across 75..105 and Z chases it.
+constexpr float WRIST_YAW_TABLE_STEP = 15.0f * DEG_TO_RAD;
+constexpr float WRIST_YAW_TABLE_SHARE = 0.7f;
+static_assert(WRIST_YAW_TABLE_STEP * 24 > 6.28f && WRIST_YAW_TABLE_STEP * 24 < 6.29f, "24 bins over -180..180");
+
+// The two bins a pitch falls between and its share of the upper one.
+static void yawTableBins(float pitch, int &bin0, int &bin1, float &share1) {
+  constexpr int bins = 24;
+  const float x = (wrapRad(pitch) + (float)M_PI) / WRIST_YAW_TABLE_STEP;
+  const float whole = floorf(x);
+  share1 = x - whole;
+  bin0 = (((int)whole % bins) + bins) % bins;
+  bin1 = (bin0 + 1) % bins;
+}
 
 Vector3 ArmWrist::getIMUAngles() {
   Quaternion qm = base.load() * imu.quaternion.load();
+  if (yawResetPending.exchange(false)) {
+    yawCommon = -armYaw();
+    for (float &bin : yawTable) bin = 0.0f;
+    yawOffsetAt = 0;
+  }
+  int bin0 = 0;
+  int bin1 = 0;
+  float share1 = 0.0f;
+  const bool binned = !isnan(lastPitchYAbs);
+  if (binned) yawTableBins(lastPitchYAbs, bin0, bin1, share1);
+  yawOffset = yawCommon + (binned ? (1.0f - share1) * yawTable[bin0] + share1 * yawTable[bin1] : 0.0f);
   float yaw = armYaw() + yawOffset;
 
   // The wrist's rotation since calibration is the arm's turn about the vertical, then a pitch about
@@ -699,9 +734,20 @@ Vector3 ArmWrist::getIMUAngles() {
     if (!is_nil_time(yawOffsetAt)) {
       const float dtSec = std::min(absolute_time_diff_us(yawOffsetAt, now) / 1000000.0f, 0.05f);
       const float mismatch = wrapRad(twistZAbs - gravityBendZ); // ~ -e sin p
-      yawOffset -= WRIST_YAW_ANCHOR_RATE * dtSec * mismatch * sp * cp * cp;
+      const float pull = -WRIST_YAW_ANCHOR_RATE * dtSec * mismatch * sp * cp * cp;
+      if (binned) {
+        // Split so the offset at this pitch moves by the whole pull.
+        const float share0 = 1.0f - share1;
+        const float norm = share0 * share0 + share1 * share1;
+        yawCommon += (1.0f - WRIST_YAW_TABLE_SHARE) * pull;
+        yawTable[bin0] += WRIST_YAW_TABLE_SHARE * pull * share0 / norm;
+        yawTable[bin1] += WRIST_YAW_TABLE_SHARE * pull * share1 / norm;
+      } else {
+        yawCommon += pull;
+      }
     }
     yawOffsetAt = now;
+    lastPitchYAbs = pitchYAbs;
   }
 
   float pitchY;
@@ -746,6 +792,17 @@ Vector3 ArmWrist::getIMUAngles() {
     // The absolute quaternion, to check the twist against the gravity projection offline (2026-11-03).
     Quaternion raw = imu.quaternion.load();
     LogQueue::Log("[DIAG] wrist rawQuat i=%.4f j=%.4f k=%.4f real=%.4f\n", raw.i, raw.j, raw.k, raw.real);
+  });
+  static Periodic yawTablePrinter(pdMS_TO_TICKS(10000));
+  yawTablePrinter.interval([&]() {
+    // The bins from pitch 0 to 165 (index 12 is pitch 0), common part added.
+    const float *t = yawTable + 12;
+    const float c = yawCommon;
+    LogQueue::Log("[DIAG] wrist yaw common %.1f, by pitch 0..165: %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f\n",
+                  c * RAD_TO_DEG, (c + t[0]) * RAD_TO_DEG, (c + t[1]) * RAD_TO_DEG, (c + t[2]) * RAD_TO_DEG,
+                  (c + t[3]) * RAD_TO_DEG, (c + t[4]) * RAD_TO_DEG, (c + t[5]) * RAD_TO_DEG, (c + t[6]) * RAD_TO_DEG,
+                  (c + t[7]) * RAD_TO_DEG, (c + t[8]) * RAD_TO_DEG, (c + t[9]) * RAD_TO_DEG, (c + t[10]) * RAD_TO_DEG,
+                  (c + t[11]) * RAD_TO_DEG);
   });
 
   return {0, pitchY, twistZ};

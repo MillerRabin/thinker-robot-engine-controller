@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "../../common/armPart/armPart.h"
 #include "../../common/bootsel/bootsel.h"
 #include "../../common/bus/bus.h"
@@ -43,16 +45,21 @@ private:
   RemoteShoulder shoulder;
   float lastArmYaw = 0.0f;
   float armYaw();
-  // What armYaw() is off by for this wrist, kept by gravity (see getIMUAngles()); 0 at a new base.
-  float yawOffset = 0.0f;              // rad
+  // What armYaw() is off by for this wrist, kept by gravity (see getIMUAngles()): a common part plus
+  // one by the wrist's pitch, a bin per WRIST_YAW_TABLE_STEP over -180..180, interpolated.
+  static constexpr int YAW_TABLE_BINS = 24;
+  float yawCommon = 0.0f;              // rad
+  float yawTable[YAW_TABLE_BINS] = {}; // rad
+  float yawOffset = 0.0f;              // rad, the two summed at the last pitch (logged)
+  float lastPitchYAbs = NAN;           // rad, picks the bins (the pitch barely depends on the yaw)
   absolute_time_t yawOffsetAt = 0;
   float gravityBendZ = 0.0f;           // rad, the side bend read off gravity alone (getIMUAngles())
   // At a new base the arm hasn't turned: whatever the shoulder's game rotation vector has drifted to
   // since its own start (12deg after an hour, 2026-11-19 - the shoulder's base keeps its yaw) is offset.
-  void resetYawOffset() {
-    yawOffset = -armYaw();
-    yawOffsetAt = 0;
-  }
+  // The table starts over too: learned against the old base. Done by getIMUAngles() on its next call:
+  // onIMUReset() comes from the BNO's task.
+  std::atomic_bool yawResetPending{true};
+  void resetYawOffset() { yawResetPending.store(true); }
   StatusLed statusLed{STATUS_LED_PIN};
   void updateStatusLed(bool calibrating, bool ready = false);
   // Edge-detected in updateStatusLed() - on the engines-on-to-off transition, proactively
