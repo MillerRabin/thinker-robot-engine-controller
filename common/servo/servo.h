@@ -189,6 +189,14 @@ private:
   float streamEndShift = 0.0f;      // deg, from setStreamEndShift()
   float streamCorrection = 0.0f;    // deg, what the correction has added to the command this stream
   bool streamCorrectionCapped = false;
+  // The stream's largest correction and link-behind-setpoint error (signed, the largest by size),
+  // logged at its end: how much correction a real move needs, to bound it (correctionMaxDeg) by data.
+  float streamCorrectionPeak = 0.0f;
+  float streamErrorPeak = 0.0f;
+  // The correction paused this stream while the IMU disagreed with its accelerometer (see
+  // STREAM_FUSION_GATE_DEG): for how long, and how far off it got.
+  float streamPausedSec = 0.0f;
+  float streamPausedFusionMax = 0.0f;
   bool streamCorrectWhenStill = true; // see setStreamCorrectWhenStill()
   // After a stream the hold corrects at no more than STREAM_SETTLE_SPEED_DEG_PER_SEC until it settles.
   bool gentleHold = false;
@@ -209,6 +217,8 @@ private:
   bool parentFollow = true;
   float entrySec = STREAM_ENTRY_SEC;
   float correctionMaxDeg = STREAM_CORRECTION_MAX_DEG;
+  float fusionGateDeg = STREAM_FUSION_GATE_DEG;
+  float fusionErrorDeg = 0.0f;          // deg, from setFusionError()
   float parentSettleSpeed = 0.0f;       // deg/s, from setParentSettleSpeed()
   bool streamWaiting = false;
   absolute_time_t streamEndedAt = 0;    // the stream's end - the parent wait's bound counts from it
@@ -424,6 +434,10 @@ public:
   // the bus; 0 otherwise), set every tick before tick(): waiting for the parent, this joint's command
   // turns against it so its link holds its absolute angle (see SETTLE_SPEED_STALE_MS).
   void setParentSettleSpeed(float degPerSec) { parentSettleSpeed = degPerSec; }
+  // How far the IMU's quaternion is from its own accelerometer (LocalBNO::getFusionErrorDeg()), every
+  // tick: past the gate the stream correction pauses (see STREAM_FUSION_GATE_DEG).
+  void setFusionError(float deg) { fusionErrorDeg = deg; }
+  void setFusionGate(float deg) { fusionGateDeg = deg; }
   // This joint's command speed while it settles its last stream, else 0 - for its child.
   float getStreamSettleSpeed() const { return (planActive && streamSettlePlan) ? appliedSpeedDegPerSec : 0.0f; }
   // Sets (set, value not NaN) and/or reads one of the TUNE_* parameters (common/tuning/tuning.h),

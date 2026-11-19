@@ -279,6 +279,19 @@
 // The most the stream correction may add to a joint's command over one stream (Servo::streamTick()):
 // a real sag took up to ~6deg at the shoulder and over 8 at the elbow lifting the forearm (2026-11-11).
 #define STREAM_CORRECTION_MAX_DEG 12.0f
+// The stream correction trusts the IMU only while its quaternion agrees with its own accelerometer
+// (LocalBNO::getFusionDriftDeg()): past this it holds still, the plan's feed-forward carries on, and it
+// resumes once they agree again (Servo::setFusionError()). A diverging BNO used to get the whole
+// STREAM_CORRECTION_MAX_DEG: the shoulder's (2026-11-05, 14deg off on a 10deg move) swept the arm, the
+// elbow's (2026-11-17) drove it 12deg past the plan, while the BNO's own reset waits for 15deg over 1 s
+// (localBNO.cpp). The real corrections are as big as the bound - measured live (2026-11-19, five host
+// moves from the park pose) up to 4.5deg at the shoulder, 7.4 at the elbow, 5.6 at the wrist - so the
+// bound can't be what stops a bad IMU. A pause by mistake costs only the correction meanwhile (a test
+// with the wrist's at 2deg: paused 1.5 s of a 4 s move, the link ended 2.0deg past instead of 1.1).
+// The first version paused on LocalBNO::getFusionErrorDeg(), which grows with the joint's speed: the
+// wrist's 12deg tripped on a plain 4 s move (see getFusionDriftDeg()).
+#define STREAM_FUSION_GATE_DEG 6.0f
+#define WRIST_STREAM_FUSION_GATE_DEG 12.0f
 // Dither (Servo::setDither()): ramped in and out over DITHER_RAMP_SEC, kept DITHER_HOLD_MS after the
 // joint stops moving; a stream setpoint slower than DITHER_MIN_SPEED_DEG_PER_SEC isn't motion.
 #define DITHER_RAMP_SEC 0.1f

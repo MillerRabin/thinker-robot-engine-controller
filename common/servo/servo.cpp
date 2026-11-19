@@ -169,6 +169,10 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamShift = 0.0f;
     streamCorrection = 0.0f;
     streamCorrectionCapped = false;
+    streamCorrectionPeak = 0.0f;
+    streamErrorPeak = 0.0f;
+    streamPausedSec = 0.0f;
+    streamPausedFusionMax = 0.0f;
     streamActive = true;
     // Each stream's start is traced, whatever its first step: its waypoints move the target by far
     // less than traceMinMoveDeg each, so setTargetAngle() never would.
@@ -215,8 +219,14 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     if (absolute_time_diff_us(streamReachAt, now) > (int64_t)STREAM_END_MS * 1000) {
       // No next waypoint: hold the last one like any target (targetAngle is it) - once the link has
       // calmed (see streamWaitTick()). A new waypoint meanwhile starts a new stream.
-      LogQueue::Log("Servo pin=%u stream end: travel %.1f, link %.2f past the target with shift %.2f\n", pin,
-                    streamTarget - streamStartIMU, imuAngle - streamTarget, streamEndShift);
+      LogQueue::Log("Servo pin=%u stream end: travel %.1f, link %.2f past the target with shift %.2f, "
+                    "correction %.2f (peak %.2f), error peak %.2f\n", pin, streamTarget - streamStartIMU,
+                    imuAngle - streamTarget, streamEndShift, streamCorrection, streamCorrectionPeak,
+                    streamErrorPeak);
+      if (streamPausedSec > 0.0f) {
+        LogQueue::Log("Servo pin=%u stream correction was paused %lu ms: the IMU up to %.1fdeg off its "
+                      "accelerometer\n", pin, (unsigned long)(streamPausedSec * 1000.0f), streamPausedFusionMax);
+      }
       streamActive = false;
       gentleHold = true;
       resetCorrection();
@@ -266,13 +276,27 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   streamShift = shift;
   // The correction follows the error low-passed: it takes up the slow sag under a changing load but
   // not the link's 2-4 Hz swing through its backlash, which it only pumped (see STREAM_GAIN).
-  streamErrorLP += ((setpoint + shift - imuAngle) - streamErrorLP) * std::min(dtSec / streamErrorTauSec, 1.0f);
+  const float streamError = setpoint + shift - imuAngle;
+  if (fabsf(streamError) > fabsf(streamErrorPeak)) {
+    streamErrorPeak = streamError;
+  }
+  streamErrorLP += (streamError - streamErrorLP) * std::min(dtSec / streamErrorTauSec, 1.0f);
   float correctionSpeed = streamGain * streamErrorLP;
   // A joint the plan doesn't move holds its command (see setStreamCorrectWhenStill()), and so does
   // every joint once its setpoint has arrived (see above).
   if ((!streamCorrectWhenStill && fabsf(setpoint - streamStartIMU) < STREAM_STILL_DEG) ||
       absolute_time_diff_us(now, streamReachAt) <= 0) {
     correctionSpeed = 0.0f;
+  }
+  // Not while the IMU disagrees with its own accelerometer (see STREAM_FUSION_GATE_DEG).
+  if (fusionErrorDeg > fusionGateDeg) {
+    if (streamPausedSec == 0.0f) {
+      LogQueue::Log("Servo pin=%u stream correction paused at %.2f: the IMU %.1fdeg off its accelerometer\n",
+                    pin, streamCorrection, fusionErrorDeg);
+    }
+    correctionSpeed = 0.0f;
+    streamPausedSec += std::max(dtSec, 0.001f);
+    streamPausedFusionMax = std::max(streamPausedFusionMax, fusionErrorDeg);
   }
   // Bounded: measured live (2026-11-10), the shoulder's BNO came up turning about the wrong axis
   // (see LocalBNO::fusionDiverged()) and read a 5.7deg tilt as ~4; chasing it the correction drove the
@@ -288,6 +312,9 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     }
   }
   streamCorrection += correctionSpeed * dtSec;
+  if (fabsf(streamCorrection) > fabsf(streamCorrectionPeak)) {
+    streamCorrectionPeak = streamCorrection;
+  }
   float speed = streamLinkSpeed + shiftSpeed - parentPlannedSpeed + correctionSpeed;
   speed = std::clamp(speed, -maxAngularSpeed, maxAngularSpeed);
   appliedSpeedDegPerSec = speed;
@@ -462,6 +489,9 @@ float Servo::tune(uint8_t param, bool set, float value) {
   case TUNE_CORRECTION_MAX:
     if (apply) correctionMaxDeg = clampTo(0.0f, STREAM_CORRECTION_MAX_DEG);
     return correctionMaxDeg;
+  case TUNE_FUSION_GATE:
+    if (apply) fusionGateDeg = clampTo(2.0f, 30.0f);
+    return fusionGateDeg;
   default:
     return NAN;
   }

@@ -374,6 +374,7 @@ Vector3 ArmElbow::trackTick() {
   } else {
     elbowY.setIMUAngle(physicalAngles.y);
     elbowY.setLinkRate(rate);
+    elbowY.setFusionError(imu.getFusionDriftDeg());
     elbowY.allowDither();
     // The forearm rides on the shoulder: while the shoulder streams, turn against its planned speed.
     elbowY.setParentPlannedSpeed(shoulderPlan.speed());

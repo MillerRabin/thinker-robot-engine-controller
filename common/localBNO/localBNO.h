@@ -33,6 +33,12 @@ class LocalBNO : public IMUBase {
     Vector3 fusionAccel{0.0f, 0.0f, 0.0f}; // low-passed accelerometer vector (corrected frame)
     bool fusionAccelValid = false;
     float fusionErrorMaxDeg = 0.0f;    // peak of fusionErrorDeg since the last "BNO reads" log line
+    // The same angle with both vectors low-passed alike - see getFusionDriftDeg().
+    Vector3 driftAccel{0.0f, 0.0f, 0.0f};   // unit vectors
+    Vector3 driftGravity{0.0f, 0.0f, 0.0f};
+    bool driftValid = false;
+    float fusionDriftDeg = 0.0f;
+    float fusionDriftMaxDeg = 0.0f;    // peak since the last "BNO reads" log line
     TickType_t fusionCheckFrom = 0;    // no check before this tick (the fusion settling after a reset)
     TickType_t fusionLastCheck = 0;
     TickType_t fusionBadSince = 0;     // 0 = fusionErrorDeg is under the limit
@@ -51,6 +57,14 @@ class LocalBNO : public IMUBase {
     // The angle between the quaternion's gravity and the (low-passed) accelerometer's, deg - see
     // fusionDiverged(). 0 until FUSION_SETTLE_TIME after a reset.
     float getFusionErrorDeg() const { return fusionErrorDeg; }
+    // The same, with the quaternion's gravity through the same low-pass as the accelerometer's and a
+    // slower one (FUSION_DRIFT_TAU_SEC): fusionErrorDeg compares the quaternion now with the
+    // accelerometer ~0.1 s ago, so it grew with the joint's speed - measured live (2026-11-19, host
+    // moves from the park pose) up to 2.3deg on the shoulder, 4.3 on the elbow and 12.5 on the wrist
+    // (78deg in 4 s), plus the swing's own acceleration at the end of the arm. What stays here is the
+    // quaternion turning away from gravity for good - a BNO integrating about the wrong axis. For the
+    // stream correction's pause (Servo::setFusionError()). 0 until FUSION_SETTLE_TIME after a reset.
+    float getFusionDriftDeg() const { return fusionDriftDeg; }
     // Reset the BNO from its own task at its next report, the way fusionDiverged() does (the part's
     // onIMUReset() follows).
     void requestReset() { resetRequested = true; }

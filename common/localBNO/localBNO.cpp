@@ -20,6 +20,9 @@ constexpr float FUSION_FILTER_TAU_SEC = 0.1f;
 // can't fake 10deg for 0.5 s on this arm (that would take ~0.9 m/s of speed gained).
 constexpr float FUSION_ACCEL_BAND = 1.5f; // m/s^2 around 9.81
 constexpr TickType_t FUSION_SETTLE_TIME = pdMS_TO_TICKS(3000);
+// See getFusionDriftDeg(): slower than the arm's 3.5-4 Hz swing (~0.15 of it left), fast enough for
+// the stream correction to stop within a few tenths of a second of a BNO going wrong.
+constexpr float FUSION_DRIFT_TAU_SEC = 0.3f;
 // Give up after this many resets each within the window of the previous one - a BNO a reset doesn't
 // cure would otherwise recalibrate the arm forever.
 constexpr int FUSION_MAX_RESETS = 3;
@@ -68,6 +71,32 @@ bool LocalBNO::fusionDiverged(const Accelerometer &acc, TickType_t now) {
   float cosErr = std::clamp((g.x * f.x + g.y * f.y + g.z * f.z) / (gLen * fLen), -1.0f, 1.0f);
   fusionErrorDeg = acosf(cosErr) * RAD_TO_DEG;
   fusionErrorMaxDeg = std::max(fusionErrorMaxDeg, fusionErrorDeg);
+
+  // Both directions through the same low-pass (see getFusionDriftDeg()).
+  const Vector3 aU{a.x / aLen, a.y / aLen, a.z / aLen};
+  const Vector3 gU{g.x / gLen, g.y / gLen, g.z / gLen};
+  if (!driftValid) {
+    driftAccel = aU;
+    driftGravity = gU;
+    driftValid = true;
+  } else {
+    const float kd = std::min(dtSec / FUSION_DRIFT_TAU_SEC, 1.0f);
+    driftAccel = {driftAccel.x + (aU.x - driftAccel.x) * kd, driftAccel.y + (aU.y - driftAccel.y) * kd,
+                  driftAccel.z + (aU.z - driftAccel.z) * kd};
+    driftGravity = {driftGravity.x + (gU.x - driftGravity.x) * kd,
+                    driftGravity.y + (gU.y - driftGravity.y) * kd,
+                    driftGravity.z + (gU.z - driftGravity.z) * kd};
+  }
+  const Vector3 &da = driftAccel;
+  const Vector3 &dg = driftGravity;
+  const float daLen = sqrtf(da.x * da.x + da.y * da.y + da.z * da.z);
+  const float dgLen = sqrtf(dg.x * dg.x + dg.y * dg.y + dg.z * dg.z);
+  if (daLen > 1e-3f && dgLen > 1e-3f) {
+    const float cosDrift =
+        std::clamp((da.x * dg.x + da.y * dg.y + da.z * dg.z) / (daLen * dgLen), -1.0f, 1.0f);
+    fusionDriftDeg = acosf(cosDrift) * RAD_TO_DEG;
+    fusionDriftMaxDeg = std::max(fusionDriftMaxDeg, fusionDriftDeg);
+  }
 
   if (fusionErrorDeg <= FUSION_MAX_ERROR_DEG) {
     fusionBadSince = 0;
@@ -144,9 +173,9 @@ void LocalBNO::compassTask(void *instance) {
     }
         
     if (xTaskGetTickCount() - lastRateLog >= pdMS_TO_TICKS(5000)) {
-      LogQueue::Log("BNO reads 5s: grv %lu acc %lu other %lu empty %lu, fusion error max %.1fdeg\n",
+      LogQueue::Log("BNO reads 5s: grv %lu acc %lu other %lu empty %lu, fusion error max %.1fdeg, drift %.1f\n",
                     (unsigned long)grvReports, (unsigned long)accReports, (unsigned long)otherReports,
-                    (unsigned long)emptyPolls, bno->fusionErrorMaxDeg);
+                    (unsigned long)emptyPolls, bno->fusionErrorMaxDeg, bno->fusionDriftMaxDeg);
       // Its own line: LogQueue cuts messages at LOG_QUEUE_MSG_SIZE (128).
       LogQueue::Log("BNO max grv gap %lu ms; since boot: self resets %lu, restarts %lu, fusion resets %lu\n",
                     (unsigned long)(maxGrvGap * portTICK_PERIOD_MS), (unsigned long)selfResets,
@@ -154,6 +183,7 @@ void LocalBNO::compassTask(void *instance) {
       grvReports = accReports = otherReports = emptyPolls = 0;
       maxGrvGap = 0;
       bno->fusionErrorMaxDeg = 0.0f;
+      bno->fusionDriftMaxDeg = 0.0f;
       lastRateLog = xTaskGetTickCount();
     }
     uint16_t datatype = imu->getReadings();
@@ -357,6 +387,8 @@ bool LocalBNO::begin() {
   fusionErrorDeg = 0.0f;
   fusionBadSince = 0;
   fusionAccelValid = false;
+  fusionDriftDeg = 0.0f;
+  driftValid = false;
   return true;
 }
 

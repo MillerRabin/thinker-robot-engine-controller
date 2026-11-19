@@ -42,7 +42,8 @@
 #define TUNE_CORRECTION_MAX 20      // deg, see STREAM_CORRECTION_MAX_DEG
 #define TUNE_RESET_IMU 21           // set 1: reset the joint's BNO now (a test of the in-place recovery);
                                     // an action, never kept in the host's profile
-#define TUNE_PARAM_COUNT 21
+#define TUNE_FUSION_GATE 22         // deg, see STREAM_FUSION_GATE_DEG (30 = off)
+#define TUNE_PARAM_COUNT 22
 
 struct TuneRequest {
   uint8_t joint;

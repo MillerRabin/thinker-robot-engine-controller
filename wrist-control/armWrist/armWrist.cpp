@@ -284,6 +284,8 @@ Vector3 ArmWrist::trackTick() {
     wristY.setIMUAngle(physicalAngles.y);
     wristZ.setIMUAngle(physicalAngles.z);
     wristY.setLinkRate(rate);
+    wristY.setFusionError(imu.getFusionDriftDeg());
+    wristZ.setFusionError(imu.getFusionDriftDeg());
     wristY.allowDither();
     wristZ.allowDither();
     // Y rides on the forearm: while the elbow streams, turn against its planned speed. Z has no parent
@@ -518,6 +520,10 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.
   // The link rate filtered over 0.15 s - see DAMPING_RATE_TAU_SEC (2026-11-17).
   wristY.setDamping(0.05f, 3.0f, DAMPING_DEADBAND_DEG_PER_SEC);
+  // The end of the arm: its IMU feels the shoulder's and the elbow's accelerations (see
+  // WRIST_STREAM_FUSION_GATE_DEG).
+  wristY.setFusionGate(WRIST_STREAM_FUSION_GATE_DEG);
+  wristZ.setFusionGate(WRIST_STREAM_FUSION_GATE_DEG);
   // Dither while moving, like the elbow's (see Servo::setDither()): with only the elbow dithered the
   // wrist still jumped every ~250 ms at the slow end of a host move (2026-11-07). +-0.5deg at 25 Hz
   // stopped that, but shoulder-z then hunted for minutes at rest in the extended pose (yaw-rate spikes

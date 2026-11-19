@@ -248,6 +248,7 @@ Vector3 ArmShoulder::trackTick() {
   } else {
     shoulderY.setIMUAngle(physicalAngles.y);
     shoulderY.setLinkRate(rate);
+    shoulderY.setFusionError(imu.getFusionDriftDeg());
     if (!isnan(rate) && fabsf(rate) > DAMPING_TRACE_RATE_DEG_PER_SEC && shoulderY.isTraceIdle()) {
       shoulderY.requestTrace();
     }
