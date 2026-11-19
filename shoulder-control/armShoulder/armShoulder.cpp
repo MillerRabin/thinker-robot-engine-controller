@@ -471,6 +471,7 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     shoulderY.setPlanSettle(3000);
     shoulderY.setDamping(SHOULDER_DAMPING_GAIN_SEC, SHOULDER_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
     shoulderY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
+    shoulderY.setBreakawayLead(SHOULDER_LEAD_TOWARD_SMALLER_DEG, SHOULDER_LEAD_TOWARD_LARGER_DEG);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
     shoulderY.enableTrace();
 }

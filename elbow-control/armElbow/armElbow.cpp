@@ -452,6 +452,7 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   // The elbow servo ran at 8-15deg/s on 2026-11-02 (27deg/s that morning) - see Servo::settleTick().
   elbowY.setPlanSettle(3000);
   elbowY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
+  elbowY.setBreakawayLead(ELBOW_LEAD_TOWARD_SMALLER_DEG, ELBOW_LEAD_TOWARD_LARGER_DEG);
   elbowY.setDamping(ELBOW_DAMPING_GAIN_SEC, ELBOW_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
   elbowY.setDither(ELBOW_DITHER_DEG, ELBOW_DITHER_HALF_PERIOD_MS);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,

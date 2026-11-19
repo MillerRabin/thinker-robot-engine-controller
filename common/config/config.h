@@ -316,6 +316,36 @@
 #define DAMPING_RATE_TAU_SEC 0.15f
 #define DAMPING_DEADBAND_DEG_PER_SEC 3.0f
 #define DAMPING_TRACE_RATE_DEG_PER_SEC 20.0f
+// Break-away lead (see Servo::setBreakawayLead()). Measured live (2026-11-19, elbow traces of 5 s
+// park <-> down moves): lifting to the parking pose the elbow's command went 6.4-7.8deg before the
+// link moved at all - 1.5 s of the 5 - while the correction, low-passed, took that up; when the link
+// broke away it raced 4-6deg past the setpoint. Lowering it moved after 1-2deg. So as the setpoint
+// sets out the command leads the plan by what the link needed last time that way: the setpoint this
+// far from its start shows the direction, the lead fades in over STREAM_LEAD_FADE_SEC, and the link
+// this far along has broken away - how far the plan had got ahead by then (plus the correction, less
+// any run past the setpoint just after) is what to add, at STREAM_LEAD_LEARN_RATE. It fades out with
+// the end shift's weight as the setpoint brakes: kept to the end (same day), the link, lifting, trailed
+// its command by a steady ~5deg until the plan slowed, then caught up within a second and ran 4-5deg
+// past - braking takes less motor torque than driving (the gears' reflected motor inertia), and lowering
+// it had trailed by ~0.5 only.
+#define STREAM_LEAD_ARM_DEG 0.3f
+#define STREAM_LEAD_FADE_SEC 0.3f
+#define STREAM_LEAD_BREAK_DEG 1.0f
+#define STREAM_LEAD_AHEAD_SEC 0.5f
+#define STREAM_LEAD_LEARN_RATE 0.3f
+#define STREAM_LEAD_LEARN_MIN_TRAVEL_DEG 4.0f  // the shoulder's 5deg moves to the parking pose too
+#define STREAM_LEAD_MAX_DEG 9.0f
+// The values to start from, below what it took. Lifting is toward smaller angles while the arm leans
+// to the side growing commands tilt it to - where it works; the side of vertical a joint's own link is
+// on doesn't decide it (a shoulder just past vertical still lifts an arm leaning out).
+#define ELBOW_LEAD_TOWARD_SMALLER_DEG 4.0f
+#define ELBOW_LEAD_TOWARD_LARGER_DEG 0.5f
+// The shoulder (same traces, the move back to the parking pose 92 -> 86): its command led 5.6-6.3deg
+// before it moved - 2.4 s of 4 - and the arm then dropped 4deg in 0.4 s, which the elbow, holding the
+// forearm's tilt, could only take as a 4deg run past its own setpoint. Started lower than the elbow:
+// it swings the whole arm when it lets go.
+#define SHOULDER_LEAD_TOWARD_SMALLER_DEG 3.0f
+#define SHOULDER_LEAD_TOWARD_LARGER_DEG 0.5f
 
 #define FLASH_EEPROM_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_EEPROM_SIZE FLASH_SECTOR_SIZE

@@ -173,6 +173,12 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamErrorPeak = 0.0f;
     streamPausedSec = 0.0f;
     streamPausedFusionMax = 0.0f;
+    streamLeadDir = 0;
+    streamLeadFrom = angle;
+    streamLeadTarget = 0.0f;
+    streamLead = 0.0f;
+    streamLeadMissing = NAN;
+    streamLeadAhead = 0.0f;
     streamActive = true;
     // Each stream's start is traced, whatever its first step: its waypoints move the target by far
     // less than traceMinMoveDeg each, so setTargetAngle() never would.
@@ -227,6 +233,17 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
         LogQueue::Log("Servo pin=%u stream correction was paused %lu ms: the IMU up to %.1fdeg off its "
                       "accelerometer\n", pin, (unsigned long)(streamPausedSec * 1000.0f), streamPausedFusionMax);
       }
+      if (streamLeadDir != 0) {
+        const int side = streamLeadDir > 0 ? 1 : 0;
+        const float missing = streamLeadMissing - std::max(streamLeadAhead - STREAM_LEAD_BREAK_DEG, 0.0f);
+        const bool learn = !isnan(streamLeadMissing) &&
+                           fabsf(streamTarget - streamStartIMU) >= STREAM_LEAD_LEARN_MIN_TRAVEL_DEG;
+        if (learn) {
+          leadDeg[side] = std::clamp(leadDeg[side] + STREAM_LEAD_LEARN_RATE * missing, 0.0f, STREAM_LEAD_MAX_DEG);
+        }
+        LogQueue::Log("Servo pin=%u stream lead %.2f: short %.2f at the break-away, ran %.2f past -> %.2f%s\n", pin,
+                      streamLead, streamLeadMissing, streamLeadAhead, leadDeg[side], learn ? "" : " (kept)");
+      }
       streamActive = false;
       gentleHold = true;
       resetCorrection();
@@ -264,6 +281,35 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   // Only once the setpoint is well on its way: the first waypoint's step from where the link is to the
   // plan's start can be fast and short, and the slow start of the curve after it isn't braking.
   const float setpoint = streamSetpoint + streamEntry;
+  // The break-away lead (see STREAM_LEAD_*): the command goes this much further the stream's way.
+  float leadSpeed = 0.0f;
+  if (leadEnabled && dtSec > 0.0f) {
+    if (streamLeadDir == 0 && fabsf(streamSetpoint - streamLeadFrom) >= STREAM_LEAD_ARM_DEG) {
+      streamLeadDir = streamSetpoint > streamLeadFrom ? 1 : -1;
+      streamLeadTarget = leadDeg[streamLeadDir > 0 ? 1 : 0];
+      streamLeadAt = now;
+    }
+    if (streamLeadDir != 0) {
+      const float tau = std::min(absolute_time_diff_us(streamLeadAt, now) / (STREAM_LEAD_FADE_SEC * 1000000.0f), 1.0f);
+      // Out again as the setpoint brakes (the end shift's weight, last tick's): braking, the motor
+      // needs less than it took to drive the link, and the lead left in the command is a run past.
+      const float lead = streamLeadTarget * tau * tau * (3.0f - 2.0f * tau) * (1.0f - streamEndWeightLP);
+      leadSpeed = streamLeadDir * (lead - streamLead) / dtSec;
+      streamLead = lead;
+      const float along = (imuAngle - streamStartIMU) * streamLeadDir;
+      if (isnan(streamLeadMissing) && along >= STREAM_LEAD_BREAK_DEG) {
+        // How far the plan had got ahead of a link that tracked from the start, and what the
+        // correction had added meanwhile: both are lead it went without.
+        streamLeadMissing = (streamSetpoint - streamLeadFrom) * streamLeadDir - STREAM_LEAD_BREAK_DEG +
+                            streamCorrection * streamLeadDir;
+        streamBrokeAt = now;
+      }
+      if (!isnan(streamLeadMissing) &&
+          absolute_time_diff_us(streamBrokeAt, now) <= (int64_t)(STREAM_LEAD_AHEAD_SEC * 1000000.0f)) {
+        streamLeadAhead = std::max(streamLeadAhead, (imuAngle - setpoint) * streamLeadDir);
+      }
+    }
+  }
   if (fabsf(setpoint - streamStartIMU) >= STREAM_END_ARM_DEG) {
     streamPeakSpeed = std::max(streamPeakSpeed, speedNow);
   }
@@ -315,7 +361,7 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   if (fabsf(streamCorrection) > fabsf(streamCorrectionPeak)) {
     streamCorrectionPeak = streamCorrection;
   }
-  float speed = streamLinkSpeed + shiftSpeed - parentPlannedSpeed + correctionSpeed;
+  float speed = streamLinkSpeed + shiftSpeed - parentPlannedSpeed + correctionSpeed + leadSpeed;
   speed = std::clamp(speed, -maxAngularSpeed, maxAngularSpeed);
   appliedSpeedDegPerSec = speed;
   physicalAngle = std::clamp(physicalAngle + speed * dtSec, safeMinDegree, safeMaxDegree);

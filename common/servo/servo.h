@@ -198,6 +198,18 @@ private:
   float streamPausedSec = 0.0f;
   float streamPausedFusionMax = 0.0f;
   bool streamCorrectWhenStill = true; // see setStreamCorrectWhenStill()
+  // Break-away lead (see setBreakawayLead(), STREAM_LEAD_*): learned per direction, [0] toward
+  // smaller angles, [1] toward larger.
+  bool leadEnabled = false;
+  float leadDeg[2] = {0.0f, 0.0f};
+  int8_t streamLeadDir = 0;           // this stream's, once its setpoint is under way; 0 before
+  float streamLeadFrom = NAN;         // the setpoint at the stream's start (its first waypoint)
+  float streamLeadTarget = 0.0f;      // deg, the lead this stream takes
+  float streamLead = 0.0f;            // deg, taken so far
+  absolute_time_t streamLeadAt = 0;
+  float streamLeadMissing = NAN;      // deg, what the lead fell short by when the link broke away
+  absolute_time_t streamBrokeAt = 0;
+  float streamLeadAhead = 0.0f;       // deg, the link's run past the setpoint right after that
   // After a stream the hold corrects at no more than STREAM_SETTLE_SPEED_DEG_PER_SEC until it settles.
   bool gentleHold = false;
   absolute_time_t streamReachAt = 0;
@@ -464,6 +476,13 @@ public:
   // stream. For wrist Z: measured live (2026-11-10), its twist reading wandered ~1deg while the wrist
   // pitched 108deg, and the correction wound its command 8deg off before the bound stopped it.
   void setStreamCorrectWhenStill(bool on) { streamCorrectWhenStill = on; }
+  // Lead the plan at a stream's start by what the link needs to break away from its gear's friction
+  // that way, learned stream by stream from these (deg, toward smaller / larger angles).
+  void setBreakawayLead(float towardSmaller, float towardLarger) {
+    leadEnabled = true;
+    leadDeg[0] = towardSmaller;
+    leadDeg[1] = towardLarger;
+  }
   void tick();
 
   void stop() {
