@@ -182,6 +182,7 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamLeadSpeedLP = 0.0f;
     streamLeadScale = 0.0f;
     streamLeadScaleBroke = 1.0f;
+    streamLeadScalePeak = 0.0f;
     streamActive = true;
     // Each stream's start is traced, whatever its first step: its waypoints move the target by far
     // less than traceMinMoveDeg each, so setTargetAngle() never would.
@@ -247,9 +248,12 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
         if (learn) {
           leadDeg[side] = std::clamp(leadDeg[side] + STREAM_LEAD_LEARN_RATE * missing, 0.0f, STREAM_LEAD_MAX_DEG);
         }
-        LogQueue::Log("Servo pin=%u stream lead %.2f (x%.2f by speed): short %.2f at the break-away, ran %.2f past "
-                      "-> %.2f%s\n", pin, streamLeadTarget, streamLeadScaleBroke, streamLeadMissing, streamLeadAhead,
-                      leadDeg[side], learn ? "" : " (kept)");
+        // The speed scale at the break-away - or, the link never having broken away, the most it got to.
+        LogQueue::Log("Servo pin=%u stream lead %.2f (x%.2f by speed%s): short %.2f at the break-away, ran %.2f "
+                      "past -> %.2f%s\n", pin, streamLeadTarget,
+                      isnan(streamLeadMissing) ? streamLeadScalePeak : streamLeadScaleBroke,
+                      isnan(streamLeadMissing) ? " at most" : "", streamLeadMissing, streamLeadAhead, leadDeg[side],
+                      learn ? "" : " (kept)");
       }
       streamActive = false;
       gentleHold = true;
@@ -301,6 +305,7 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
       streamLeadAt = now;
     }
     if (streamLeadDir != 0) {
+      streamLeadScalePeak = std::max(streamLeadScalePeak, streamLeadScale);
       const float tau = std::min(absolute_time_diff_us(streamLeadAt, now) / (STREAM_LEAD_FADE_SEC * 1000000.0f), 1.0f);
       // Out again as the setpoint brakes (the end shift's weight, last tick's): braking, the motor
       // needs less than it took to drive the link, and the lead left in the command is a run past. And
@@ -787,6 +792,25 @@ void Servo::tickCommand() {
 
   const float error = targetAngle - imuAngle;
   const float absError = fabsf(error);
+  // A stream's settle (see streamSettle()) has run and the link has stopped: what it left within
+  // settleToleranceDeg stays, as at a stream's own end. Measured live (2026-11-21, elbow, two days of
+  // logs): after a settle the gentle hold went on trimming a 0.5-0.6deg residual against a link stuck
+  // in its gear's friction and crept the command 1-4deg on while the link moved under 0.1deg (never
+  // after a stream left within tolerance); the next lift started with that much of its backlash taken
+  // up, took its lead on top and broke away 2.6-5.8deg past its setpoint (6 lifts after a settle; the
+  // 16 after none 0-1.5deg). Only where the link's stop is waited for (setPlanSettle()): right at a
+  // plan's end the link can still be on its way.
+  if (streamSettlePlan) {
+    streamSettlePlan = false;
+    if (planSettleMaxUs > 0 && !isnan(holdWakeDeg) && absError <= settleToleranceDeg) {
+      holdSettled = true;
+      holdWaking = false;
+      gentleHold = false;
+      LogQueue::Log("Servo pin=%u stream end: settled, %.2fdeg off, left\n", pin, error);
+      resetCorrection();
+      return;
+    }
+  }
   // Hold still within the dead zone, otherwise sensor noise keeps producing a nonzero error forever.
   // Only reached once a plan and its settle wait are over, so the joint has stopped - a swing
   // passing through the target can't be learned as its resting offset.

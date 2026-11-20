@@ -215,6 +215,7 @@ private:
   float streamLeadSpeedLP = 0.0f;     // deg/s, the setpoint's own speed, low-passed (the lead's scale)
   float streamLeadScale = 0.0f;       // the share of the lead that speed gives, last tick
   float streamLeadScaleBroke = 1.0f;  // ... when the link broke away
+  float streamLeadScalePeak = 0.0f;   // ... at most, while the lead was armed (for the log)
   // After a stream the hold corrects at no more than STREAM_SETTLE_SPEED_DEG_PER_SEC until it settles.
   bool gentleHold = false;
   absolute_time_t streamReachAt = 0;
