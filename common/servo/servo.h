@@ -201,6 +201,8 @@ private:
   // Break-away lead (see setBreakawayLead(), STREAM_LEAD_*): learned per direction, [0] toward
   // smaller angles, [1] toward larger.
   bool leadEnabled = false;
+  bool leadLearn = true;              // TUNE_LEAD_LEARN
+  float leadFullSpeed = STREAM_LEAD_FULL_SPEED_DEG_PER_SEC;  // TUNE_LEAD_FULL_SPEED
   float leadDeg[2] = {0.0f, 0.0f};
   int8_t streamLeadDir = 0;           // this stream's, once its setpoint is under way; 0 before
   float streamLeadFrom = NAN;         // the setpoint at the stream's start (its first waypoint)
@@ -210,6 +212,9 @@ private:
   float streamLeadMissing = NAN;      // deg, what the lead fell short by when the link broke away
   absolute_time_t streamBrokeAt = 0;
   float streamLeadAhead = 0.0f;       // deg, the link's run past the setpoint right after that
+  float streamLeadSpeedLP = 0.0f;     // deg/s, the setpoint's own speed, low-passed (the lead's scale)
+  float streamLeadScale = 0.0f;       // the share of the lead that speed gives, last tick
+  float streamLeadScaleBroke = 1.0f;  // ... when the link broke away
   // After a stream the hold corrects at no more than STREAM_SETTLE_SPEED_DEG_PER_SEC until it settles.
   bool gentleHold = false;
   absolute_time_t streamReachAt = 0;

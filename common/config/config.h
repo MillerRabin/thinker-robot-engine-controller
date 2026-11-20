@@ -335,6 +335,17 @@
 #define STREAM_LEAD_LEARN_RATE 0.3f
 #define STREAM_LEAD_LEARN_MIN_TRAVEL_DEG 4.0f  // the shoulder's 5deg moves to the parking pose too
 #define STREAM_LEAD_MAX_DEG 9.0f
+// The lead scales with the setpoint's own speed, low-passed over STREAM_LEAD_SPEED_TAU_SEC: all of it
+// at STREAM_LEAD_FULL_SPEED_DEG_PER_SEC and up. Measured live (2026-11-21, a 4 s move to the parking
+// pose after elbow-only moves): the host's last correction moved the shoulder 0.3deg and the elbow
+// 1.4deg, slowly, and each took its whole learned lead (3 / 4.4deg) - more than the move itself: the
+// elbow jumped 6deg in 0.5 s, the shoulder, upright, fell 5.3deg through its backlash and the wrist
+// swung at 20deg/s. On the elbow's servo model (identified 2026-11-20) this scale takes such a 1.4deg
+// correction's run past from 5.4 to 1.4deg and a small way back from 2.7 to none, and leaves the 5 s
+// lifts and 6deg shoulder-like moves as they were. Low-passed: the host's waypoints come in 0.1deg
+// steps, so a slow setpoint's speed comes in pulses.
+#define STREAM_LEAD_FULL_SPEED_DEG_PER_SEC 2.0f
+#define STREAM_LEAD_SPEED_TAU_SEC 0.3f
 // The values to start from, below what it took. Lifting is toward smaller angles while the arm leans
 // to the side growing commands tilt it to - where it works; the side of vertical a joint's own link is
 // on doesn't decide it (a shoulder just past vertical still lifts an arm leaning out).

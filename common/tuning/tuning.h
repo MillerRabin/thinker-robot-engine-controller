@@ -43,7 +43,12 @@
 #define TUNE_RESET_IMU 21           // set 1: reset the joint's BNO now (a test of the in-place recovery);
                                     // an action, never kept in the host's profile
 #define TUNE_FUSION_GATE 22         // deg, see STREAM_FUSION_GATE_DEG (30 = off)
-#define TUNE_PARAM_COUNT 22
+#define TUNE_LEAD_SMALLER 23        // deg, the break-away lead toward smaller angles as learned so far
+#define TUNE_LEAD_LARGER 24         // (Servo::setBreakawayLead()); set replaces it - state, not a setting:
+                                    // never kept in the host's profile (a reboot starts from the config)
+#define TUNE_LEAD_LEARN 25          // 0/1, the lead learned from each stream (0: kept as it is)
+#define TUNE_LEAD_FULL_SPEED 26     // deg/s, see STREAM_LEAD_FULL_SPEED_DEG_PER_SEC
+#define TUNE_PARAM_COUNT 26
 
 struct TuneRequest {
   uint8_t joint;

@@ -179,6 +179,9 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamLead = 0.0f;
     streamLeadMissing = NAN;
     streamLeadAhead = 0.0f;
+    streamLeadSpeedLP = 0.0f;
+    streamLeadScale = 0.0f;
+    streamLeadScaleBroke = 1.0f;
     streamActive = true;
     // Each stream's start is traced, whatever its first step: its waypoints move the target by far
     // less than traceMinMoveDeg each, so setTargetAngle() never would.
@@ -235,14 +238,18 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
       }
       if (streamLeadDir != 0) {
         const int side = streamLeadDir > 0 ? 1 : 0;
-        const float missing = streamLeadMissing - std::max(streamLeadAhead - STREAM_LEAD_BREAK_DEG, 0.0f);
-        const bool learn = !isnan(streamLeadMissing) &&
+        // The part of the lead a slow setpoint held back at the break-away (its speed scale) was needed
+        // all the same: what's learned is the whole lead, not what a slow move takes of it.
+        const float missing = streamLeadMissing - std::max(streamLeadAhead - STREAM_LEAD_BREAK_DEG, 0.0f) -
+                              streamLeadTarget * (1.0f - streamLeadScaleBroke);
+        const bool learn = leadLearn && !isnan(streamLeadMissing) &&
                            fabsf(streamTarget - streamStartIMU) >= STREAM_LEAD_LEARN_MIN_TRAVEL_DEG;
         if (learn) {
           leadDeg[side] = std::clamp(leadDeg[side] + STREAM_LEAD_LEARN_RATE * missing, 0.0f, STREAM_LEAD_MAX_DEG);
         }
-        LogQueue::Log("Servo pin=%u stream lead %.2f: short %.2f at the break-away, ran %.2f past -> %.2f%s\n", pin,
-                      streamLead, streamLeadMissing, streamLeadAhead, leadDeg[side], learn ? "" : " (kept)");
+        LogQueue::Log("Servo pin=%u stream lead %.2f (x%.2f by speed): short %.2f at the break-away, ran %.2f past "
+                      "-> %.2f%s\n", pin, streamLeadTarget, streamLeadScaleBroke, streamLeadMissing, streamLeadAhead,
+                      leadDeg[side], learn ? "" : " (kept)");
       }
       streamActive = false;
       gentleHold = true;
@@ -284,6 +291,10 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   // The break-away lead (see STREAM_LEAD_*): the command goes this much further the stream's way.
   float leadSpeed = 0.0f;
   if (leadEnabled && dtSec > 0.0f) {
+    // The plan's own speed, not the entry's (see STREAM_LEAD_FULL_SPEED_DEG_PER_SEC).
+    streamLeadSpeedLP += (fabsf(streamLinkSpeed - entrySpeed) - streamLeadSpeedLP) *
+                         std::min(dtSec / STREAM_LEAD_SPEED_TAU_SEC, 1.0f);
+    streamLeadScale = std::min(streamLeadSpeedLP / leadFullSpeed, 1.0f);
     if (streamLeadDir == 0 && fabsf(streamSetpoint - streamLeadFrom) >= STREAM_LEAD_ARM_DEG) {
       streamLeadDir = streamSetpoint > streamLeadFrom ? 1 : -1;
       streamLeadTarget = leadDeg[streamLeadDir > 0 ? 1 : 0];
@@ -292,8 +303,10 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     if (streamLeadDir != 0) {
       const float tau = std::min(absolute_time_diff_us(streamLeadAt, now) / (STREAM_LEAD_FADE_SEC * 1000000.0f), 1.0f);
       // Out again as the setpoint brakes (the end shift's weight, last tick's): braking, the motor
-      // needs less than it took to drive the link, and the lead left in the command is a run past.
-      const float lead = streamLeadTarget * tau * tau * (3.0f - 2.0f * tau) * (1.0f - streamEndWeightLP);
+      // needs less than it took to drive the link, and the lead left in the command is a run past. And
+      // only as much as the setpoint's speed asks for: a slow, short correction isn't a move to lead.
+      const float lead = streamLeadTarget * tau * tau * (3.0f - 2.0f * tau) * (1.0f - streamEndWeightLP) *
+                         streamLeadScale;
       leadSpeed = streamLeadDir * (lead - streamLead) / dtSec;
       streamLead = lead;
       const float along = (imuAngle - streamStartIMU) * streamLeadDir;
@@ -303,6 +316,7 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
         streamLeadMissing = (streamSetpoint - streamLeadFrom) * streamLeadDir - STREAM_LEAD_BREAK_DEG +
                             streamCorrection * streamLeadDir;
         streamBrokeAt = now;
+        streamLeadScaleBroke = streamLeadScale;
       }
       if (!isnan(streamLeadMissing) &&
           absolute_time_diff_us(streamBrokeAt, now) <= (int64_t)(STREAM_LEAD_AHEAD_SEC * 1000000.0f)) {
@@ -538,6 +552,22 @@ float Servo::tune(uint8_t param, bool set, float value) {
   case TUNE_FUSION_GATE:
     if (apply) fusionGateDeg = clampTo(2.0f, 30.0f);
     return fusionGateDeg;
+  case TUNE_LEAD_SMALLER:
+  case TUNE_LEAD_LARGER: {
+    if (!leadEnabled) return NAN;
+    float &lead = leadDeg[param == TUNE_LEAD_LARGER ? 1 : 0];
+    // A stream under way keeps the lead it took (streamLeadTarget); this one is for the next.
+    if (apply) lead = clampTo(0.0f, STREAM_LEAD_MAX_DEG);
+    return lead;
+  }
+  case TUNE_LEAD_LEARN:
+    if (!leadEnabled) return NAN;
+    if (apply) leadLearn = value >= 0.5f;
+    return leadLearn ? 1.0f : 0.0f;
+  case TUNE_LEAD_FULL_SPEED:
+    if (!leadEnabled) return NAN;
+    if (apply) leadFullSpeed = clampTo(0.1f, 50.0f);
+    return leadFullSpeed;
   default:
     return NAN;
   }
