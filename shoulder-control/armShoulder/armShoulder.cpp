@@ -237,6 +237,15 @@ bool ArmShoulder::calibrateZLoop() {
 // rms through every move. (A push at rest is the elbow's and the wrist's to answer now.)
 constexpr float SHOULDER_DAMPING_GAIN_SEC = 0.0f;
 constexpr float SHOULDER_DAMPING_MAX_DEG = 5.0f;
+// Dither while moving (see Servo::setDither()), like the elbow's and the wrist's. Measured 2026-11-21:
+// open loop the shoulder stood still while its command went 2.2-3.8deg into a reversal, then broke
+// away with a ~1.5deg jump in 0.2 s that the elbow, holding the forearm's absolute tilt, took as 2.9.
+// Park <-> down x3 each way, +-0.3deg at 25 Hz: the elbow's run ahead 4.3 -> 3.0deg on average (its
+// own share 3.1 -> 1.9), the shoulder's lag 0.97 -> 0.61 and its jump 1.55 -> 1.29deg, no more shake
+// (peaks within the moves' own 30deg/s) and none felt holding the arm. Only while the joint moves: the
+// wrist's dither once kept on at rest made shoulder Z hunt (2026-11-07).
+constexpr float SHOULDER_DITHER_DEG = 0.3f;
+constexpr uint16_t SHOULDER_DITHER_HALF_PERIOD_MS = 20;
 
 Vector3 ArmShoulder::trackTick() {
   Vector3 imuAngles = getIMUAngles();
@@ -249,6 +258,7 @@ Vector3 ArmShoulder::trackTick() {
     shoulderY.setIMUAngle(physicalAngles.y);
     shoulderY.setLinkRate(rate);
     shoulderY.setFusionError(imu.getFusionDriftDeg());
+    shoulderY.allowDither();  // see SHOULDER_DITHER_DEG
     if (!isnan(rate) && fabsf(rate) > DAMPING_TRACE_RATE_DEG_PER_SEC && shoulderY.isTraceIdle()) {
       shoulderY.requestTrace();
     }
@@ -470,6 +480,7 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     // Learn the resting offset only once the joint has stopped - see Servo::setPlanSettle().
     shoulderY.setPlanSettle(3000);
     shoulderY.setDamping(SHOULDER_DAMPING_GAIN_SEC, SHOULDER_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
+    shoulderY.setDither(SHOULDER_DITHER_DEG, SHOULDER_DITHER_HALF_PERIOD_MS);
     shoulderY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
     shoulderY.setBreakawayLead(SHOULDER_LEAD_TOWARD_SMALLER_DEG, SHOULDER_LEAD_TOWARD_LARGER_DEG);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
