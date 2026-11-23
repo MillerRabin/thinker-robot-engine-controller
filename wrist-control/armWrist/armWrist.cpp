@@ -546,6 +546,11 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   // joint. Moved slowly by a feed-forward, Z stuck and slipped under that load and shook the whole arm
   // 3-4x more; dithered like Y's while its command moves.
   wristZ.setDither(0.3f, 10);
+  // Half STREAM_GAIN, like the elbow's (ELBOW_STREAM_GAIN): measured live (2026-11-23, transit moves
+  // park -> straight arm -> park -> down -> park, 8 s each) the claw's twist peaked at 2.4-3.4deg at
+  // 1/s against 3.5-4.7 at 2 (3.2-5.0 that morning), the correction at 1.4-3.1deg against 2.4-6.0;
+  // every move ended as close (0.0-0.4deg). Part of the twist was the correction's own.
+  wristZ.setStreamGain(1.0f);
   wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   // Active damping of Y, like the shoulder's (see ArmShoulder's) - with it and the elbow's the whole
   // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.
