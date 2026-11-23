@@ -547,4 +547,6 @@ public:
   bool isPositioned() const;
   // Actively outputting physicalAngle - the servo is physically there (within backlash/sag).
   bool isHolding() const { return outputActive && !isnan(physicalAngle); }
+  // A stream or a planned move running (a settle plan too).
+  bool isMoving() const { return streamActive || planActive; }
 };

@@ -236,6 +236,31 @@ bool ArmShoulder::calibrateZLoop() {
 // the wrist, its damping late like theirs (see DAMPING_RATE_TAU_SEC); undamped it stayed at 0.1-0.2deg
 // rms through every move. (A push at rest is the elbow's and the wrist's to answer now.)
 constexpr float SHOULDER_DAMPING_GAIN_SEC = 0.0f;
+// Shoulder-z's servo buzzes at rest now and then (2026-11-23): its command still, the shoulder's IMU sees
+// peaks of 12-28deg/s about the vertical every 250 ms (~1 when calm) - a fast, small hunt (the
+// quaternion broadcast shows nothing past +-0.03deg) of the servo's own loop in its gear backlash
+// under the arm's yaw inertia. It is the servo's own: with its pulses taken away it held its position
+// and went on buzzing (it keeps the last one), and the user's hand turning the base and letting go
+// started it. What stopped it: a move - the shoulder's Y hold correcting once, and a 1deg turn of the
+// base and back (12:53, the buzz gone in ~1.5 s and not back). So after SHOULDER_Z_IDLE_STILL_MS with
+// Z's command still and nothing moving, SHOULDER_Z_JITTER_WINDOWS windows in a row between
+// SHOULDER_Z_JITTER_DEG_PER_SEC and SHOULDER_Z_JITTER_MAX_DEG_PER_SEC kick it: Z planned
+// SHOULDER_Z_KICK_DEG out and back to its command (zJitterTick()), the side alternating if one didn't
+// do (at most SHOULDER_Z_KICK_MAX in a row). Any host command for Z cancels a kick.
+// The band and the 2 s: the buzz holds at 12-20deg/s for seconds (rarely past 26); the elbow's and the
+// wrist's calibration moves shook the shoulder at 4-8deg/s with short jolts (one 55) and the first
+// version (past 5deg/s, 4 windows) kicked there; a hand turning the base gave 20-113 and got three
+// kicks (19:50). Today's logs: every buzz caught, no calibration or hand kicked.
+constexpr float SHOULDER_Z_JITTER_DEG_PER_SEC = 8.0f;
+constexpr float SHOULDER_Z_JITTER_MAX_DEG_PER_SEC = 35.0f;  // faster: a hand or a jolt, not the buzz
+constexpr int SHOULDER_Z_JITTER_WINDOWS = 8;
+constexpr uint32_t SHOULDER_Z_IDLE_STILL_MS = 2000;
+constexpr float SHOULDER_Z_KICK_DEG = 1.0f;
+constexpr uint16_t SHOULDER_Z_KICK_OUT_MS = 400;
+constexpr uint16_t SHOULDER_Z_KICK_BACK_MS = 800;
+constexpr uint32_t SHOULDER_Z_KICK_PAUSE_MS = 150;  // after each plan's end, before the next step
+constexpr int SHOULDER_Z_KICK_MAX = 3;
+constexpr uint32_t SHOULDER_Z_KICK_CALM_MS = 10000;  // calm this long after a kick: it did its job
 constexpr float SHOULDER_DAMPING_MAX_DEG = 5.0f;
 // Dither while moving (see Servo::setDither()), like the elbow's and the wrist's. Measured 2026-11-21:
 // open loop the shoulder stood still while its command went 2.2-3.8deg into a reversal, then broke
@@ -350,6 +375,11 @@ int ArmShoulder::updateStatuses() {
 
 void ArmShoulder::engineLoop() {
   LogQueue::Log("[DIAG] engineLoop: enter\n");
+  xSemaphoreTake(zCommandMutex, portMAX_DELAY);
+  zKick = ZKick::None;  // a kick cut short by the last exit isn't resumed
+  zKicksInRow = 0;
+  zLastCommand = NAN;
+  xSemaphoreGive(zCommandMutex);
   shoulderY.setTargetAngle(shoulderYHomeAngle, SHOULDER_Y_RECOVERY_TIME_MS, SHOULDER_DEAD_ZONE);
   TickType_t lastWakeTime = xTaskGetTickCount();
   Periodic printer(pdMS_TO_TICKS(500));
@@ -366,6 +396,7 @@ void ArmShoulder::engineLoop() {
     }
 
     Vector3 physicalAngles = trackTick();
+    zJitterTick();  // only once calibrated - never against calibration's own Z moves
     printer.interval([&]() {
       LogQueue::Log("Y: %.2f, Z: %.2f\n", physicalAngles.y, physicalAngles.z);
     });
@@ -463,6 +494,7 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
                 0.00055),
       imu(this, memsSCKPin, memsMISOPin, memsMOSIPin, memsCSPin, memsRstPin,
           memsIntPin) {
+    zCommandMutex = xSemaphoreCreateMutex();
     Quaternion q_corr = {0.7071068f, 0.0f, 0.0f, 0.7071068f};
     imu.setRotate(q_corr);
     // No setMaxLead() here any more (was 8deg): PWM-space and gravity-space only coincide while the
@@ -500,15 +532,84 @@ void ArmShoulder::monitorShake(const Quaternion &q) {
       shakePeak.x = fmaxf(shakePeak.x, fabsf(dq.i * scale));
       shakePeak.y = fmaxf(shakePeak.y, fabsf(dq.j * scale));
       shakePeak.z = fmaxf(shakePeak.z, fabsf(dq.k * scale));
+      // The turn rate about the vertical: the body rate taken to the game rotation vector's frame,
+      // whose z is up (the shoulder's own axes turn with its pitch - pitched 80, its x is near vertical).
+      const Vector3 world = q.rotate({dq.i * scale, dq.j * scale, dq.k * scale});
+      zRatePeak = fmaxf(zRatePeak, fabsf(world.z));
     }
   }
   shakeLastQ = q;
   shakeLastTime = now;
   if (absolute_time_diff_us(shakeWindowStart, now) >= 250000) {
-    LogQueue::Log("[SHAKE] peak deg/s x %.1f y %.1f z %.1f\n", shakePeak.x, shakePeak.y, shakePeak.z);
+    LogQueue::Log("[SHAKE] peak deg/s x %.1f y %.1f z %.1f, about the vertical %.1f\n", shakePeak.x, shakePeak.y,
+                  shakePeak.z, zRatePeak);
+    const bool buzz = zRatePeak > SHOULDER_Z_JITTER_DEG_PER_SEC && zRatePeak < SHOULDER_Z_JITTER_MAX_DEG_PER_SEC;
+    zJitterWindows = buzz ? zJitterWindows + 1 : 0;
     shakePeak = {0.0f, 0.0f, 0.0f};
+    zRatePeak = 0.0f;
     shakeWindowStart = now;
   }
+}
+
+// Shoulder-z buzzing at rest gets a kick, see SHOULDER_Z_JITTER_DEG_PER_SEC. Engine task, calibrated.
+void ArmShoulder::zJitterTick() {
+  const absolute_time_t now = get_absolute_time();
+  if (xSemaphoreTake(zCommandMutex, 0) != pdTRUE) {
+    return;  // a host command going in - next tick
+  }
+  const float command = shoulderZ.getPhysicalAngle();
+  const auto since = [&](absolute_time_t t) { return absolute_time_diff_us(t, now) / 1000; };
+  if (zKick != ZKick::None) {
+    // Each step once the last plan is over (and a short pause - the servo still catching up).
+    if (!shoulderZ.isMoving() && since(zKickPhaseAt) >= SHOULDER_Z_KICK_PAUSE_MS) {
+      if (zKick == ZKick::Out) {
+        shoulderZ.planMove(zKickTarget, SHOULDER_Z_KICK_BACK_MS, SHOULDER_DEAD_ZONE);
+        zKick = ZKick::Back;
+      } else {
+        zKick = ZKick::None;
+        zJitterWindows = 0;  // the windows counted while kicking don't count
+        LogQueue::Log("[DIAG] shoulder-z kick %d done, back at %.2f\n", zKicksInRow, command);
+      }
+      zKickPhaseAt = now;
+    } else if (shoulderZ.isMoving()) {
+      zKickPhaseAt = now;
+    }
+    zLastCommand = shoulderZ.getPhysicalAngle();
+    zMovedAt = now;
+    xSemaphoreGive(zCommandMutex);
+    return;
+  }
+  if (isnan(command) || !shoulderZ.isHolding()) {
+    xSemaphoreGive(zCommandMutex);
+    return;
+  }
+  if (zJitterWindows > 0) {
+    zBuzzAt = now;
+  } else if (zKicksInRow > 0 && since(zBuzzAt) >= SHOULDER_Z_KICK_CALM_MS) {
+    zKicksInRow = 0;
+  }
+  if (isnan(zLastCommand) || fabsf(command - zLastCommand) > 0.01f || shoulderZ.isMoving() ||
+      shoulderY.isMoving()) {
+    zLastCommand = command;
+    zMovedAt = now;
+  }
+  if (since(zMovedAt) >= SHOULDER_Z_IDLE_STILL_MS && zJitterWindows >= SHOULDER_Z_JITTER_WINDOWS) {
+    if (zKicksInRow < SHOULDER_Z_KICK_MAX) {
+      const float side = (zKicksInRow % 2 == 0) ? 1.0f : -1.0f;
+      zKicksInRow++;
+      LogQueue::Log("[DIAG] shoulder-z buzzing at rest (%d windows at %.0f-%.0fdeg/s about the vertical) - kick %d, %+.1fdeg from %.2f\n",
+                    (int)zJitterWindows, SHOULDER_Z_JITTER_DEG_PER_SEC, SHOULDER_Z_JITTER_MAX_DEG_PER_SEC, zKicksInRow,
+                    side * SHOULDER_Z_KICK_DEG, command);
+      zKickTarget = command;
+      shoulderZ.planMove(command + side * SHOULDER_Z_KICK_DEG, SHOULDER_Z_KICK_OUT_MS, SHOULDER_DEAD_ZONE);
+      zKick = ZKick::Out;
+      zKickPhaseAt = now;
+    } else if (zKicksInRow == SHOULDER_Z_KICK_MAX) {
+      zKicksInRow++;  // logged once
+      LogQueue::Log("[DIAG] shoulder-z still buzzing after %d kicks - left until its next command\n", SHOULDER_Z_KICK_MAX);
+    }
+  }
+  xSemaphoreGive(zCommandMutex);
 }
 
 int ArmShoulder::updateQuaternion(IMUBase *position) {
@@ -581,8 +682,16 @@ void ArmShoulder::busReceiveCallback(can2040_msg frame) {
     // 3 s later for a 40deg turn in 3000 ms), and each step set the arm swaying sideways at ~1 Hz,
     // +-2deg at the wrist. Open-loop, so the plan's IMU offset is ~0 and it just shapes the command.
     if (!isnan(angleZ)) {
+      // The host's command wins over a kick (see zJitterTick()) and allows the kicks again.
+      xSemaphoreTake(zCommandMutex, portMAX_DELAY);
+      if (zKick != ZKick::None) {
+        zKick = ZKick::None;
+        LogQueue::Log("[DIAG] shoulder-z kick cancelled - host command %.2f\n", angleZ);
+      }
+      zKicksInRow = 0;
       stream ? shoulderZ.streamTo(angleZ, timeMS, SHOULDER_DEAD_ZONE)
              : shoulderZ.planMove(angleZ, timeMS, SHOULDER_DEAD_ZONE);
+      xSemaphoreGive(zCommandMutex);
     }
   }
 

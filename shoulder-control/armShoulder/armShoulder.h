@@ -14,6 +14,7 @@
 
 #include "pico/stdlib.h"
 #include <FreeRTOS.h>
+#include <semphr.h>
 
 class ArmShoulder : public ArmPart {
 private:
@@ -53,6 +54,25 @@ private:
   absolute_time_t shakeLastTime = 0;
   absolute_time_t shakeWindowStart = 0;
   Vector3 shakePeak{0.0f, 0.0f, 0.0f};
+  // Shoulder-z's jitter at rest and the kick that stops it, see SHOULDER_Z_JITTER_DEG_PER_SEC: the
+  // peak turn rate about the vertical this 250 ms window and how many windows in a row went past the
+  // threshold (monitorShake(), the IMU's task); when Z's command last changed; the kick's phase, the
+  // command it returns to, when the phase began, how many kicks in a row (a host command or
+  // SHOULDER_Z_KICK_CALM_MS calm restart the count).
+  // zCommandMutex: the kick's planMove() (engine task) and the host's Z commands (CAN task) one at a
+  // time - and a host command cancels the kick (busReceiveCallback()).
+  enum class ZKick { None, Out, Back };
+  float zRatePeak = 0.0f;
+  volatile int zJitterWindows = 0;
+  absolute_time_t zMovedAt = 0;
+  float zLastCommand = NAN;
+  ZKick zKick = ZKick::None;
+  float zKickTarget = NAN;
+  absolute_time_t zKickPhaseAt = 0;
+  int zKicksInRow = 0;
+  absolute_time_t zBuzzAt = 0;  // the last window past the threshold
+  SemaphoreHandle_t zCommandMutex = NULL;
+  void zJitterTick();
   void monitorShake(const Quaternion &q);
   // Shoulder Y's pitch rate for the active damping, and its [DAMP] log line.
   RateEstimator pitchRate{DAMPING_RATE_TAU_SEC};
