@@ -362,6 +362,13 @@ constexpr float ELBOW_DAMPING_MAX_DEG = 3.0f;
 // end of a host move - at 25 Hz, two of the servo's 100 Hz pulses each way. EXPERIMENT 2026-11-07,
 // the elbow only.
 constexpr float ELBOW_DITHER_DEG = 0.5f;
+// Half STREAM_GAIN: the forearm holds its absolute tilt, so it takes the shoulder's tracking error for
+// its own, and its correction, late, added to it. Measured live (2026-11-23, the shoulder swinging a
+// straight arm -15 <-> +15deg in 5 s, x4 per setting): at 1/s the forearm's error spanned 5.1deg on
+// average against 6.9 at 2 (its own share 2.6 against 4.2; the shoulder's gain made no difference);
+// the elbow's own 45 <-> 15deg moves were about even, ending up to 1.25deg off where 2 left 0.55 -
+// what the settle takes up.
+constexpr float ELBOW_STREAM_GAIN = 1.0f;
 constexpr uint16_t ELBOW_DITHER_HALF_PERIOD_MS = 20;
 
 Vector3 ArmElbow::trackTick() {
@@ -455,6 +462,7 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   elbowY.setBreakawayLead(ELBOW_LEAD_LIFT_DEG, ELBOW_LEAD_LOWER_DEG);
   elbowY.setDamping(ELBOW_DAMPING_GAIN_SEC, ELBOW_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
   elbowY.setDither(ELBOW_DITHER_DEG, ELBOW_DITHER_HALF_PERIOD_MS);
+  elbowY.setStreamGain(ELBOW_STREAM_GAIN);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
   // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
   // elbow's planned-move peak of ~28deg/s.

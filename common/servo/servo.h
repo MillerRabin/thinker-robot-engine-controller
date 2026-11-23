@@ -486,6 +486,8 @@ public:
   // stream. For wrist Z: measured live (2026-11-10), its twist reading wandered ~1deg while the wrist
   // pitched 108deg, and the correction wound its command 8deg off before the bound stopped it.
   void setStreamCorrectWhenStill(bool on) { streamCorrectWhenStill = on; }
+  // 1/s, see STREAM_GAIN (TUNE_STREAM_GAIN at runtime).
+  void setStreamGain(float perSec) { streamGain = perSec; }
   // Lead the plan at a stream's start by what the link needs to break away from its gear's friction
   // that way, learned stream by stream from these (deg, lifting / lowering, at the reference load).
   void setBreakawayLead(float lift, float lower) {
