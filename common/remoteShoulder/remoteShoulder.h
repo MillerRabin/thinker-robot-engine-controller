@@ -11,7 +11,10 @@ private:
   const TickType_t maxInterval = pdMS_TO_TICKS(500);
   void updateTime() { lastUpdated = xTaskGetTickCount(); }
 public:
-  std::atomic_ulong status;
+  std::atomic_ulong status;  // 32 bits on the RP2040: the flags only - the homes ride above them
+  // Its shoulder-z command (deg), the statuses' second home slot (see ArmShoulder::updateStatuses());
+  // NAN until heard.
+  std::atomic<float> zCommandDeg{NAN};
   bool isCalibrated();
   bool isPositionOK();
   bool isOnline();

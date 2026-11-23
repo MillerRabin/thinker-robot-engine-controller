@@ -31,6 +31,8 @@ void RemoteShoulder::dispatchMessage(can2040_msg frame) {
     uint64_t value;
     memcpy(&value, frame.data, sizeof(value));
     status.store(value);
+    const uint16_t z = (value >> STATUS_HOME_SHIFT_SECOND) & 0xFFFF;
+    zCommandDeg.store(z == STATUS_HOME_NONE ? NAN : z / 100.0f);
     updateTime();
   }
 }

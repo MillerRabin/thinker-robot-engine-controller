@@ -45,6 +45,11 @@ private:
   RemoteShoulder shoulder;
   float lastArmYaw = 0.0f;
   float armYaw();
+  float shoulderZCommandDeg();
+  // The (turn as read - shoulder-z command) and yawOffset when the wrist last got where gravity can't
+  // anchor the turn (see WRIST_YAW_CMD_MAX_OFF_DEG); NAN while it can.
+  float yawHoldGap = NAN;
+  float yawHoldOffset = 0.0f;
   // What armYaw() is off by for this wrist, and how far the wrist's frame has turned about its own up
   // axis since calibration - both kept by gravity (see getIMUAngles()).
   float yawOffset = 0.0f;              // rad

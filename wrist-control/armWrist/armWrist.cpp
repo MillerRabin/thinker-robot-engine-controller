@@ -274,14 +274,29 @@ bool ArmWrist::calibrateZLoop() {
   return true;
 }
 
+// Z by its IMU only where the IMU sees the bend. With the wrist near level its side bend is a turn
+// about the vertical, like the arm's own, so the bend it reads carries any error in the arm's turn
+// one for one. Measured live (2026-11-23, to and from that parking pose): Z's stream correction wound
+// its command 7-12deg (twice into the 12deg bound) against a bend read 2-4deg off and turned the claw
+// visibly sideways; settling there right after a calibration it still read 3.9deg off. So Z's IMU
+// angle is blended toward its own command as |cos pitch| falls from WRIST_Z_IMU_COS_HI (~53deg off
+// vertical) to WRIST_Z_IMU_COS_LO (~70deg): level, Z holds its command - open-loop, like shoulder-z.
+constexpr float WRIST_Z_IMU_COS_HI = 0.6f;
+constexpr float WRIST_Z_IMU_COS_LO = 0.35f;
+
 Vector3 ArmWrist::trackTick() {
   Vector3 imuAngles = getIMUAngles();
   Vector3 physicalAngles = getPhysicalAngles(imuAngles);
+  // Z's angle: the IMU's where it sees the bend, its own command where it doesn't (see
+  // WRIST_Z_IMU_COS_HI).
+  const float zSeen = std::clamp((fabsf(cosf(imuAngles.y)) - WRIST_Z_IMU_COS_LO) /
+                                     (WRIST_Z_IMU_COS_HI - WRIST_Z_IMU_COS_LO), 0.0f, 1.0f);
+  const float zAngle = zSeen * physicalAngles.z + (1.0f - zSeen) * wristZ.getPhysicalAngle();
   // The host's starting point for a move (CAN_WRIST_ANGLES): it read them off the quaternion with its
   // own copy of the axes and the shoulder's raw turn, and with the axes and the yaw offset of
   // 2026-11-19 that copy saw the claw bent 25deg where gravity saw 2.
   if (pitchIntegrationValid && twistZIntegrationValid) {
-    publishPair(CAN_WRIST_ANGLES, imuAngles.y * RAD_TO_DEG, imuAngles.z * RAD_TO_DEG);
+    publishPair(CAN_WRIST_ANGLES, imuAngles.y * RAD_TO_DEG, zAngle - wristZHomeAngle);
   }
   // Z holds its own angle by the IMU too since 2026-11-06 - it keeps the claw upright when the
   // platform rolls sideways, which the Y joints can't. It ran on the servo's own position before,
@@ -293,7 +308,7 @@ Vector3 ArmWrist::trackTick() {
     wristY.setParentPlannedSpeed(0.0f); // not-use commands are relative - nothing to cancel
   } else {
     wristY.setIMUAngle(physicalAngles.y);
-    wristZ.setIMUAngle(physicalAngles.z);
+    wristZ.setIMUAngle(zAngle);
     wristY.setLinkRate(rate);
     wristY.setFusionError(imu.getFusionDriftDeg());
     wristZ.setFusionError(imu.getFusionDriftDeg());
@@ -675,11 +690,35 @@ constexpr float WRIST_ROLL_MAX = 5.0f * DEG_TO_RAD;
 // Neither is learned near pitch 90: gravity barely sees the bend, and what little model error is
 // left reads there tan(pitch) times over.
 constexpr float WRIST_ANCHOR_MIN_COS = 0.2f;
+// Where gravity can't anchor the arm's turn (WRIST_ANCHOR_MIN_COS) the turn as read is held to the
+// shoulder-z command by how it changes, not by its value: from the moment the wrist gets there, only
+// the change in (turn as read - command) is taken off - the game rotation vector's drift (~12deg/h; the
+// parking pose of 2026-11-21 keeps the wrist level for long), while a real turn of shoulder-z goes
+// through its command. Not by the value: the turn as read isn't the command even still - the shoulder
+// pitched to 80 it read 7deg of turn that wasn't (2026-11-23), part of what the gravity anchor takes
+// up pose by pose - and pulled to the command the level wrist's bend read 6.4deg off. The shoulder
+// publishes the command with its statuses; it lags the real turn by shoulder-z's backlash (+5deg
+// commanded read +3.6..4.1, 2026-11-21).
+// A change further than this isn't taken (logged): the backlash is a few degrees, the drift ~12deg/h.
+constexpr float WRIST_YAW_CMD_MAX_OFF_DEG = 20.0f;
+constexpr float SHOULDER_Z_HOME_DEG = 135.0f;  // shoulder-z's home never changes (the host's SHOULDER_Z_HOME)
+
+// The shoulder-z command (deg) off the shoulder's statuses (their second home slot, see
+// ArmShoulder::updateStatuses()); NAN while the shoulder isn't heard.
+float ArmWrist::shoulderZCommandDeg() {
+  if (!shoulder.isOnline()) {
+    return NAN;
+  }
+  // Not off shoulder.status: that's 32 bits here, the homes are above them (2026-11-23: read as 0, the
+  // turn was pulled toward -135deg and the wrist, leaving the parking pose, twisted the claw 56deg).
+  return shoulder.zCommandDeg.load();
+}
 
 Vector3 ArmWrist::getIMUAngles() {
   if (yawResetPending.exchange(false)) {
     yawOffset = -armYaw();
     wristRoll = 0.0f;
+    yawHoldGap = NAN;
     yawOffsetAt = 0;
   }
   // The roll taken off on the wrist's side (about its own up axis, as it was at calibration).
@@ -726,6 +765,27 @@ Vector3 ArmWrist::getIMUAngles() {
         yawOffset -= WRIST_YAW_ANCHOR_RATE * dtSec * mismatch * sp * cp * cp;
         wristRoll -= WRIST_ROLL_RATE_SHARE * WRIST_YAW_ANCHOR_RATE * dtSec * mismatch * sp * cp;
         wristRoll = std::clamp(wristRoll, -WRIST_ROLL_MAX, WRIST_ROLL_MAX);
+        yawHoldGap = NAN;
+      } else {
+        const float zCommand = shoulderZCommandDeg();
+        if (!isnan(zCommand)) {
+          // The turn as read less the commanded one - held as it was when the wrist got here.
+          const float gap = armYaw() - (zCommand - SHOULDER_Z_HOME_DEG) * DEG_TO_RAD;
+          if (isnan(yawHoldGap)) {
+            yawHoldGap = gap;
+            yawHoldOffset = yawOffset;
+          }
+          const float drift = wrapRad(gap - yawHoldGap);
+          if (fabsf(drift) <= WRIST_YAW_CMD_MAX_OFF_DEG * DEG_TO_RAD) {
+            yawOffset = yawHoldOffset - drift;
+          } else {
+            static Periodic offPrinter(pdMS_TO_TICKS(2000));
+            offPrinter.interval([&]() {
+              LogQueue::Log("[DIAG] wrist: the turn as read moved %.1fdeg off shoulder-z's command %.2f - not taken\n",
+                            drift * RAD_TO_DEG, zCommand);
+            });
+          }
+        }
       }
     }
     yawOffsetAt = now;
