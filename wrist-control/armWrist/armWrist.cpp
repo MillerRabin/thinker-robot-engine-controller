@@ -279,10 +279,13 @@ bool ArmWrist::calibrateZLoop() {
 // one for one. Measured live (2026-11-23, to and from that parking pose): Z's stream correction wound
 // its command 7-12deg (twice into the 12deg bound) against a bend read 2-4deg off and turned the claw
 // visibly sideways; settling there right after a calibration it still read 3.9deg off. So Z's IMU
-// angle is blended toward its own command as |cos pitch| falls from WRIST_Z_IMU_COS_HI (~53deg off
-// vertical) to WRIST_Z_IMU_COS_LO (~70deg): level, Z holds its command - open-loop, like shoulder-z.
-constexpr float WRIST_Z_IMU_COS_HI = 0.6f;
-constexpr float WRIST_Z_IMU_COS_LO = 0.35f;
+// angle is blended toward its own command as |cos pitch| falls from WRIST_Z_IMU_COS_HI (~32deg off
+// vertical) to WRIST_Z_IMU_COS_LO (~53deg): level, Z holds its command - open-loop, like shoulder-z.
+// Not 53 -> 70 (first try, same day): a ~1.5deg roll of the wrist's frame reads as a side bend of
+// 1.5 tan(pitch) - 1.3deg at 63, 5.7 at 74, 9.3 at 81 - and in that band Z still corrected 4.7-8.2deg
+// for a while on the way to and from the parking pose, the arm's turn already right.
+constexpr float WRIST_Z_IMU_COS_HI = 0.85f;
+constexpr float WRIST_Z_IMU_COS_LO = 0.6f;
 
 Vector3 ArmWrist::trackTick() {
   Vector3 imuAngles = getIMUAngles();
@@ -654,13 +657,23 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
   }
 }
 
-// The arm's turn about the vertical since calibration, off the shoulder's broadcast: the shoulder's
-// link turns only about the vertical and its own y, so its twist about z is that turn exactly. Held
-// at the last value while the shoulder isn't heard.
+// The shoulder's pitch axis in its IMU's frame: 1.96deg toward x and 3.13deg toward z off its y.
+// Measured live (2026-11-23): the mean axis of 46 increments (3-16deg in 0.6 s) of the shoulder
+// sweeping a straight arm -10 <-> +40 and to and from the parking pose, shoulder-z still.
+static const Vector3 SHOULDER_PITCH_AXIS = {0.034132f, 0.997931f, 0.054489f};
+
+// The arm's turn about the vertical since calibration, off the shoulder's broadcast: how far the
+// shoulder's pitch axis has turned about the vertical - a pitch about that axis leaves it where it is.
+// Was the shoulder's twist about z (until 2026-11-23), which the pitch leaks into with the axis 3deg
+// off the frame's y: the shoulder pitched to 80 it read 7.3deg of turn that wasn't (0.087deg per
+// degree of pitch), which the gravity anchor took up only slowly - to and from the parking pose Z
+// corrected 4-9deg for a while and turned the claw. Replayed on those moves: 0.002deg per degree,
+// within +-1.2 at rest. Held at the last value while the shoulder isn't heard.
 float ArmWrist::armYaw() {
   Quaternion sq = shoulder.imu.quaternion.load();
   if (shoulder.imu.quaternion.isFresh() && sq.isValid()) {
-    lastArmYaw = sq.twistAngle({0.0f, 0.0f, 1.0f});
+    const Vector3 a = sq.rotate(SHOULDER_PITCH_AXIS);
+    lastArmYaw = wrapRad(atan2f(a.y, a.x) - atan2f(SHOULDER_PITCH_AXIS.y, SHOULDER_PITCH_AXIS.x));
   }
   return lastArmYaw;
 }
