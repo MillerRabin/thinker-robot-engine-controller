@@ -552,8 +552,11 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   // every move ended as close (0.0-0.4deg). Part of the twist was the correction's own.
   wristZ.setStreamGain(1.0f);
   // The sag feed-forward, see STREAM_SAG_TAU_SEC: the wrist's sag at rest grew 5.9deg per unit of load
-  // (+-1-2deg by the side it came from) - a little under it, like the elbow's.
-  wristY.setSagPerLoad(5.0f);
+  // (+-1-2deg by the side it came from), but moving it took less: measured live (2026-11-23, 7 whole-arm
+  // 8 s moves, interleaved), at 3 its correction peaked at 4.5deg on average (7.9 at most) against 5.0
+  // (9.6) at 5 and 7.8 (12, capped) without, its error at 4.9 (9.9) against 5.1 (11.5), and it ended
+  // 1.4deg off against 1.6. Its error on these moves is mostly its swing through the vertical.
+  wristY.setSagPerLoad(3.0f);
   wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   // Active damping of Y, like the shoulder's (see ArmShoulder's) - with it and the elbow's the whole
   // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.
