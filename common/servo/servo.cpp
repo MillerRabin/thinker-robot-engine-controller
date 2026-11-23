@@ -183,6 +183,8 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamLeadScale = 0.0f;
     streamLeadScaleBroke = 1.0f;
     streamLeadScalePeak = 0.0f;
+    streamLeadLoad = 1.0f;
+    streamLeadLift = true;
     streamActive = true;
     // Each stream's start is traced, whatever its first step: its waypoints move the target by far
     // less than traceMinMoveDeg each, so setTargetAngle() never would.
@@ -238,7 +240,7 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
                       "accelerometer\n", pin, (unsigned long)(streamPausedSec * 1000.0f), streamPausedFusionMax);
       }
       if (streamLeadDir != 0) {
-        const int side = streamLeadDir > 0 ? 1 : 0;
+        const int side = streamLeadLift ? 0 : 1;
         // The part of the lead a slow setpoint held back at the break-away (its speed scale) was needed
         // all the same: what's learned is the whole lead, not what a slow move takes of it.
         const float missing = streamLeadMissing - std::max(streamLeadAhead - STREAM_LEAD_BREAK_DEG, 0.0f) -
@@ -246,14 +248,19 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
         const bool learn = leadLearn && !isnan(streamLeadMissing) &&
                            fabsf(streamTarget - streamStartIMU) >= STREAM_LEAD_LEARN_MIN_TRAVEL_DEG;
         if (learn) {
-          leadDeg[side] = std::clamp(leadDeg[side] + STREAM_LEAD_LEARN_RATE * missing, 0.0f, STREAM_LEAD_MAX_DEG);
+          // missing is in this stream's lead (the learned one times its load factor): taken back to the
+          // learned one and weighted by the same factor, so a move near balance - its lead next to
+          // nothing - teaches next to nothing (at the reference load as before).
+          leadDeg[side] = std::clamp(leadDeg[side] + STREAM_LEAD_LEARN_RATE * missing * streamLeadLoad, 0.0f,
+                                     STREAM_LEAD_MAX_DEG);
         }
         // The speed scale at the break-away - or, the link never having broken away, the most it got to.
-        LogQueue::Log("Servo pin=%u stream lead %.2f (x%.2f by speed%s): short %.2f at the break-away, ran %.2f "
-                      "past -> %.2f%s\n", pin, streamLeadTarget,
+        LogQueue::Log("Servo pin=%u stream lead %.2f (%s, x%.2f by load, x%.2f by speed%s): short %.2f at the "
+                      "break-away, ran %.2f past -> %.2f%s\n", pin, streamLeadTarget,
+                      streamLeadLift ? "lift" : "lower", streamLeadLoad,
                       isnan(streamLeadMissing) ? streamLeadScalePeak : streamLeadScaleBroke,
-                      isnan(streamLeadMissing) ? " at most" : "", streamLeadMissing, streamLeadAhead, leadDeg[side],
-                      learn ? "" : " (kept)");
+                      isnan(streamLeadMissing) ? " at most" : "", streamLeadMissing, streamLeadAhead,
+                      leadDeg[side], learn ? "" : " (kept)");
       }
       streamActive = false;
       gentleHold = true;
@@ -301,7 +308,14 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     streamLeadScale = std::min(streamLeadSpeedLP / leadFullSpeed, 1.0f);
     if (streamLeadDir == 0 && fabsf(streamSetpoint - streamLeadFrom) >= STREAM_LEAD_ARM_DEG) {
       streamLeadDir = streamSetpoint > streamLeadFrom ? 1 : -1;
-      streamLeadTarget = leadDeg[streamLeadDir > 0 ? 1 : 0];
+      // Against the gravity torque or with it (see ELBOW_LEAD_LIFT_DEG) - without a fresh one from the
+      // host, the old rule: lifting toward smaller angles, at the reference load.
+      const bool fresh = !isnan(gravityLoad) &&
+                         absolute_time_diff_us(gravityLoadAt, now) < (int64_t)GRAVITY_LOAD_FRESH_MS * 1000;
+      const float load = fresh ? gravityLoad : 1.0f;
+      streamLeadLift = streamLeadDir * load < 0.0f;
+      streamLeadLoad = std::min(fabsf(load), STREAM_LEAD_LOAD_MAX);
+      streamLeadTarget = leadDeg[streamLeadLift ? 0 : 1] * streamLeadLoad;
       streamLeadAt = now;
     }
     if (streamLeadDir != 0) {
@@ -557,10 +571,10 @@ float Servo::tune(uint8_t param, bool set, float value) {
   case TUNE_FUSION_GATE:
     if (apply) fusionGateDeg = clampTo(2.0f, 30.0f);
     return fusionGateDeg;
-  case TUNE_LEAD_SMALLER:
-  case TUNE_LEAD_LARGER: {
+  case TUNE_LEAD_LIFT:
+  case TUNE_LEAD_LOWER: {
     if (!leadEnabled) return NAN;
-    float &lead = leadDeg[param == TUNE_LEAD_LARGER ? 1 : 0];
+    float &lead = leadDeg[param == TUNE_LEAD_LOWER ? 1 : 0];
     // A stream under way keeps the lead it took (streamLeadTarget); this one is for the next.
     if (apply) lead = clampTo(0.0f, STREAM_LEAD_MAX_DEG);
     return lead;

@@ -482,7 +482,7 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     shoulderY.setDamping(SHOULDER_DAMPING_GAIN_SEC, SHOULDER_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
     shoulderY.setDither(SHOULDER_DITHER_DEG, SHOULDER_DITHER_HALF_PERIOD_MS);
     shoulderY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
-    shoulderY.setBreakawayLead(SHOULDER_LEAD_TOWARD_SMALLER_DEG, SHOULDER_LEAD_TOWARD_LARGER_DEG);
+    shoulderY.setBreakawayLead(SHOULDER_LEAD_LIFT_DEG, SHOULDER_LEAD_LOWER_DEG);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
     shoulderY.enableTrace();
 }
@@ -535,6 +535,13 @@ int ArmShoulder::updateAccuracy(IMUBase *position) {
 }
 
 void ArmShoulder::busReceiveCallback(can2040_msg frame) {
+  if (frame.id == CAN_GRAVITY_LOADS) {
+    const int16_t load = (int16_t)(frame.data32[0] & 0xFFFF);
+    if ((uint16_t)load != PARAMETER_IS_NAN) {
+      shoulderY.setGravityLoad(load / 1000.0f);
+    }
+    return;
+  }
   if (frame.id == CAN_TUNE) {
     const TuneRequest r = decodeTune(frame.data);
     if (r.joint == TUNE_JOINT_SHOULDER_Y || r.joint == TUNE_JOINT_SHOULDER_Z) {

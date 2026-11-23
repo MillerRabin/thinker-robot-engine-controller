@@ -198,11 +198,15 @@ private:
   float streamPausedSec = 0.0f;
   float streamPausedFusionMax = 0.0f;
   bool streamCorrectWhenStill = true; // see setStreamCorrectWhenStill()
-  // Break-away lead (see setBreakawayLead(), STREAM_LEAD_*): learned per direction, [0] toward
-  // smaller angles, [1] toward larger.
+  // Break-away lead (see setBreakawayLead(), STREAM_LEAD_*): learned [0] lifting, [1] lowering, at the
+  // reference load.
   bool leadEnabled = false;
   bool leadLearn = true;              // TUNE_LEAD_LEARN
   float leadFullSpeed = STREAM_LEAD_FULL_SPEED_DEG_PER_SEC;  // TUNE_LEAD_FULL_SPEED
+  float gravityLoad = NAN;            // see setGravityLoad()
+  absolute_time_t gravityLoadAt = 0;
+  bool streamLeadLift = true;         // this stream lifts (against gravity), see setGravityLoad()
+  float streamLeadLoad = 1.0f;        // this stream's load factor, 1 without the host's
   float leadDeg[2] = {0.0f, 0.0f};
   int8_t streamLeadDir = 0;           // this stream's, once its setpoint is under way; 0 before
   float streamLeadFrom = NAN;         // the setpoint at the stream's start (its first waypoint)
@@ -483,11 +487,18 @@ public:
   // pitched 108deg, and the correction wound its command 8deg off before the bound stopped it.
   void setStreamCorrectWhenStill(bool on) { streamCorrectWhenStill = on; }
   // Lead the plan at a stream's start by what the link needs to break away from its gear's friction
-  // that way, learned stream by stream from these (deg, toward smaller / larger angles).
-  void setBreakawayLead(float towardSmaller, float towardLarger) {
+  // that way, learned stream by stream from these (deg, lifting / lowering, at the reference load).
+  void setBreakawayLead(float lift, float lower) {
     leadEnabled = true;
-    leadDeg[0] = towardSmaller;
-    leadDeg[1] = towardLarger;
+    leadDeg[0] = lift;
+    leadDeg[1] = lower;
+  }
+  // The gravity torque on this joint now, from the host (CAN_GRAVITY_LOADS): a share of its reference
+  // load, positive pulling it toward growing commands. A stream against it lifts, with it lowers, and
+  // takes that lead times |load| (see ELBOW_LEAD_LIFT_DEG).
+  void setGravityLoad(float load) {
+    gravityLoad = load;
+    gravityLoadAt = get_absolute_time();
   }
   void tick();
 

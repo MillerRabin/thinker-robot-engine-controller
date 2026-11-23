@@ -26,6 +26,10 @@
 // joint; the joint's module answers on its *_TUNED id with the value now in effect. Kept in RAM - a
 // reboot goes back to the compiled defaults.
 #define CAN_TUNE 0x0B
+// The gravity torque on each pitch joint as the host's model has it for the waypoint it sends next:
+// int16 x1000 shoulder-y, elbow-y, wrist-y, then unused - a share of the joint's reference load,
+// positive pulling the joint toward growing commands (see Servo::setGravityLoad()).
+#define CAN_GRAVITY_LOADS 0x0C
 
 #define USE_IMU_NOT_USE 0
 #define USE_IMU_USE 1
@@ -346,17 +350,29 @@
 // steps, so a slow setpoint's speed comes in pulses.
 #define STREAM_LEAD_FULL_SPEED_DEG_PER_SEC 2.0f
 #define STREAM_LEAD_SPEED_TAU_SEC 0.3f
-// The values to start from, below what it took. Lifting is toward smaller angles while the arm leans
-// to the side growing commands tilt it to - where it works; the side of vertical a joint's own link is
-// on doesn't decide it (a shoulder just past vertical still lifts an arm leaning out).
-#define ELBOW_LEAD_TOWARD_SMALLER_DEG 4.0f
-#define ELBOW_LEAD_TOWARD_LARGER_DEG 0.5f
+// The leads are learned for lifting and for lowering (against the gravity torque on the joint or with
+// it), at a reference load, and a stream takes the one its way times the load it starts under - both
+// from the host, which knows the whole arm (CAN_GRAVITY_LOADS, Servo::setGravityLoad()): the arm works
+// on either side of vertical, up and down (the user, 2026-11-21), and one lead per command direction
+// was the lift's on one side and the lowering's on the other. Measured live (2026-11-19..21, the elbow,
+// what each stream needed: its lead at the break-away plus what it fell short, less any run past):
+// lifting from 45deg 5.0 (10 moves), from 36deg 5.3 (13), from 15deg 1.1 (5) and 0.1 (5, to vertical);
+// a lowering from 0-5deg about none (11). Learned whatever the load, the moves near vertical taught the
+// lift lead down from 4 to 2.5deg, and the next loaded lift stood still till its command was 4.1deg
+// ahead, then ran 4.2deg past - so the learning is weighted by the load too. A load older than
+// GRAVITY_LOAD_FRESH_MS (no host move) leaves the old rule: lifting toward smaller angles, at the
+// reference load. The load factor is bounded by STREAM_LEAD_LOAD_MAX.
+#define GRAVITY_LOAD_FRESH_MS 500
+#define STREAM_LEAD_LOAD_MAX 2.5f
+// The values to start from, below what it took (at the host's reference loads).
+#define ELBOW_LEAD_LIFT_DEG 4.0f
+#define ELBOW_LEAD_LOWER_DEG 0.5f
 // The shoulder (same traces, the move back to the parking pose 92 -> 86): its command led 5.6-6.3deg
 // before it moved - 2.4 s of 4 - and the arm then dropped 4deg in 0.4 s, which the elbow, holding the
 // forearm's tilt, could only take as a 4deg run past its own setpoint. Started lower than the elbow:
 // it swings the whole arm when it lets go.
-#define SHOULDER_LEAD_TOWARD_SMALLER_DEG 3.0f
-#define SHOULDER_LEAD_TOWARD_LARGER_DEG 0.5f
+#define SHOULDER_LEAD_LIFT_DEG 3.0f
+#define SHOULDER_LEAD_LOWER_DEG 0.5f
 
 #define FLASH_EEPROM_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_EEPROM_SIZE FLASH_SECTOR_SIZE
