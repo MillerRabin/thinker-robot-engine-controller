@@ -369,6 +369,10 @@ constexpr float ELBOW_DITHER_DEG = 0.5f;
 // the elbow's own 45 <-> 15deg moves were about even, ending up to 1.25deg off where 2 left 0.55 -
 // what the settle takes up.
 constexpr float ELBOW_STREAM_GAIN = 1.0f;
+// The sag feed-forward, see STREAM_SAG_TAU_SEC: the elbow's sag at rest grew 6.9deg per unit of load
+// (6.1 under positive loads, 8.5 under negative, +-2-3deg by the side it came from) - a little under it,
+// the correction taking the rest the same way.
+constexpr float ELBOW_SAG_PER_LOAD_DEG = 6.0f;
 constexpr uint16_t ELBOW_DITHER_HALF_PERIOD_MS = 20;
 
 Vector3 ArmElbow::trackTick() {
@@ -463,6 +467,7 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   elbowY.setDamping(ELBOW_DAMPING_GAIN_SEC, ELBOW_DAMPING_MAX_DEG, DAMPING_DEADBAND_DEG_PER_SEC);
   elbowY.setDither(ELBOW_DITHER_DEG, ELBOW_DITHER_HALF_PERIOD_MS);
   elbowY.setStreamGain(ELBOW_STREAM_GAIN);
+  elbowY.setSagPerLoad(ELBOW_SAG_PER_LOAD_DEG);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
   // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
   // elbow's planned-move peak of ~28deg/s.

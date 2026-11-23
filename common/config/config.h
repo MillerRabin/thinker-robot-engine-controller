@@ -364,6 +364,21 @@
 // reference load. The load factor is bounded by STREAM_LEAD_LOAD_MAX.
 #define GRAVITY_LOAD_FRESH_MS 500
 #define STREAM_LEAD_LOAD_MAX 2.5f
+// The sag feed-forward (Servo::setSagPerLoad()): a servo holds its link short of its command by more
+// the harder gravity pulls - measured live (2026-11-23, 6 poses each way, the command against the joint
+// angle from the IMUs at rest) the elbow ~6.9deg and the wrist ~5.9deg further per unit of the host's
+// load, each +-2-3deg by the side it came from (backlash). From the parking pose (elbow load -0.61) to
+// the "down" pose (+1.06) the elbow's sag changed 10.8deg and the stream correction had to find it all
+// from the IMU - late (5deg behind mid-move) and into its bound (12): capped there, and the wrist
+// capped from the other side (-0.87) to "down". So each stream moves the command by the sag's change as
+// the load changes along its waypoints, and the correction is left the backlash. The load low-passed
+// over STREAM_SAG_TAU_SEC (it comes per waypoint, a step ahead of the setpoint), bounded by
+// STREAM_SAG_MAX_DEG over a stream.
+#define STREAM_SAG_TAU_SEC 0.2f
+#define STREAM_SAG_MAX_DEG 15.0f
+// A load this recent at a stream's first waypoint is the one it starts under; else the first to come
+// after it (the host sends a waypoint's load right after it - its CAN send loop goes by id).
+#define STREAM_SAG_LOAD_START_MS 50
 // The values to start from, below what it took (at the host's reference loads).
 #define ELBOW_LEAD_LIFT_DEG 4.0f
 #define ELBOW_LEAD_LOWER_DEG 0.5f

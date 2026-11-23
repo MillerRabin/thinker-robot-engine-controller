@@ -551,6 +551,9 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   // 1/s against 3.5-4.7 at 2 (3.2-5.0 that morning), the correction at 1.4-3.1deg against 2.4-6.0;
   // every move ended as close (0.0-0.4deg). Part of the twist was the correction's own.
   wristZ.setStreamGain(1.0f);
+  // The sag feed-forward, see STREAM_SAG_TAU_SEC: the wrist's sag at rest grew 5.9deg per unit of load
+  // (+-1-2deg by the side it came from) - a little under it, like the elbow's.
+  wristY.setSagPerLoad(5.0f);
   wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   // Active damping of Y, like the shoulder's (see ArmShoulder's) - with it and the elbow's the whole
   // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.
@@ -602,6 +605,15 @@ void ArmWrist::busReceiveCallback(can2040_msg frame) {
   claw.dispatchMessage(frame);
   elbow.dispatchMessage(frame);
   shoulder.dispatchMessage(frame);
+
+  // The gravity load on wrist Y for the host's next waypoint (see Servo::setSagPerLoad()).
+  if (frame.id == CAN_GRAVITY_LOADS) {
+    const int16_t load = (int16_t)(frame.data32[1] & 0xFFFF);
+    if ((uint16_t)load != PARAMETER_IS_NAN) {
+      wristY.setGravityLoad(load / 1000.0f);
+    }
+    return;
+  }
 
   if (frame.id == CAN_TUNE) {
     const TuneRequest r = decodeTune(frame.data);

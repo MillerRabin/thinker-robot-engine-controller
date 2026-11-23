@@ -205,6 +205,16 @@ private:
   float leadFullSpeed = STREAM_LEAD_FULL_SPEED_DEG_PER_SEC;  // TUNE_LEAD_FULL_SPEED
   float gravityLoad = NAN;            // see setGravityLoad()
   absolute_time_t gravityLoadAt = 0;
+  bool gravityLoadFresh(absolute_time_t now) const {
+    return !isnan(gravityLoad) && absolute_time_diff_us(gravityLoadAt, now) < (int64_t)GRAVITY_LOAD_FRESH_MS * 1000;
+  }
+  // The sag feed-forward (see setSagPerLoad(), STREAM_SAG_*): deg of command per unit of load, the load
+  // this stream started under (NaN: none fresh - no feed-forward this stream), the load low-passed, and
+  // what the feed-forward has added to the command this stream.
+  float sagPerLoad = 0.0f;            // TUNE_SAG_PER_LOAD
+  float streamSagLoad0 = NAN;
+  float streamSagLoadLP = NAN;
+  float streamSag = 0.0f;
   bool streamLeadLift = true;         // this stream lifts (against gravity), see setGravityLoad()
   float streamLeadLoad = 1.0f;        // this stream's load factor, 1 without the host's
   float leadDeg[2] = {0.0f, 0.0f};
@@ -495,6 +505,9 @@ public:
     leadDeg[0] = lift;
     leadDeg[1] = lower;
   }
+  // Move a stream's command by the sag's change as the gravity load changes along it: degPerLoad deg
+  // lower (toward smaller commands) per unit of load more - see STREAM_SAG_TAU_SEC. 0: off.
+  void setSagPerLoad(float degPerLoad) { sagPerLoad = degPerLoad; }
   // The gravity torque on this joint now, from the host (CAN_GRAVITY_LOADS): a share of its reference
   // load, positive pulling it toward growing commands. A stream against it lifts, with it lowers, and
   // takes that lead times |load| (see ELBOW_LEAD_LIFT_DEG).

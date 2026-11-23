@@ -185,6 +185,15 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamLeadScalePeak = 0.0f;
     streamLeadLoad = 1.0f;
     streamLeadLift = true;
+    // The load the stream starts under: the host's CAN send loop goes by id, so a waypoint's load
+    // (CAN_GRAVITY_LOADS) comes right after it - the first one after this (see streamTick()). One just
+    // before it counts too (a moment ago: the pose the arm is in).
+    streamSagLoad0 = NAN;
+    if (!isnan(gravityLoad) && absolute_time_diff_us(gravityLoadAt, streamStartedAt) < (int64_t)STREAM_SAG_LOAD_START_MS * 1000) {
+      streamSagLoad0 = std::clamp(gravityLoad, -STREAM_LEAD_LOAD_MAX, STREAM_LEAD_LOAD_MAX);
+    }
+    streamSagLoadLP = streamSagLoad0;
+    streamSag = 0.0f;
     streamActive = true;
     // Each stream's start is traced, whatever its first step: its waypoints move the target by far
     // less than traceMinMoveDeg each, so setTargetAngle() never would.
@@ -235,6 +244,10 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
                     "correction %.2f (peak %.2f), error peak %.2f\n", pin, streamTarget - streamStartIMU,
                     imuAngle - streamTarget, streamEndShift, streamCorrection, streamCorrectionPeak,
                     streamErrorPeak);
+      if (sagPerLoad != 0.0f) {
+        LogQueue::Log("Servo pin=%u stream sag %.2f, load %.2f -> %.2f\n", pin, streamSag, streamSagLoad0,
+                      streamSagLoadLP);
+      }
       if (streamPausedSec > 0.0f) {
         LogQueue::Log("Servo pin=%u stream correction was paused %lu ms: the IMU up to %.1fdeg off its "
                       "accelerometer\n", pin, (unsigned long)(streamPausedSec * 1000.0f), streamPausedFusionMax);
@@ -333,7 +346,7 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
         // How far the plan had got ahead of a link that tracked from the start, and what the
         // correction had added meanwhile: both are lead it went without.
         streamLeadMissing = (streamSetpoint - streamLeadFrom) * streamLeadDir - STREAM_LEAD_BREAK_DEG +
-                            streamCorrection * streamLeadDir;
+                            (streamCorrection + streamSag) * streamLeadDir;
         streamBrokeAt = now;
         streamLeadScaleBroke = streamLeadScale;
       }
@@ -394,7 +407,22 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
   if (fabsf(streamCorrection) > fabsf(streamCorrectionPeak)) {
     streamCorrectionPeak = streamCorrection;
   }
-  float speed = streamLinkSpeed + shiftSpeed - parentPlannedSpeed + correctionSpeed + leadSpeed;
+  // The sag feed-forward (see STREAM_SAG_TAU_SEC): held where it got to while no fresh load comes.
+  float sagSpeed = 0.0f;
+  if (isnan(streamSagLoad0) && !isnan(gravityLoad) &&
+      absolute_time_diff_us(streamStartedAt, gravityLoadAt) > -(int64_t)STREAM_SAG_LOAD_START_MS * 1000) {
+    streamSagLoad0 = std::clamp(gravityLoad, -STREAM_LEAD_LOAD_MAX, STREAM_LEAD_LOAD_MAX);
+    streamSagLoadLP = streamSagLoad0;
+  }
+  if (sagPerLoad != 0.0f && !isnan(streamSagLoad0) && dtSec > 0.0f && gravityLoadFresh(now)) {
+    const float load = std::clamp(gravityLoad, -STREAM_LEAD_LOAD_MAX, STREAM_LEAD_LOAD_MAX);
+    streamSagLoadLP += (load - streamSagLoadLP) * std::min(dtSec / STREAM_SAG_TAU_SEC, 1.0f);
+    const float sag = std::clamp(-sagPerLoad * (streamSagLoadLP - streamSagLoad0), -STREAM_SAG_MAX_DEG,
+                                 STREAM_SAG_MAX_DEG);
+    sagSpeed = (sag - streamSag) / dtSec;
+    streamSag = sag;
+  }
+  float speed = streamLinkSpeed + shiftSpeed - parentPlannedSpeed + correctionSpeed + leadSpeed + sagSpeed;
   speed = std::clamp(speed, -maxAngularSpeed, maxAngularSpeed);
   appliedSpeedDegPerSec = speed;
   physicalAngle = std::clamp(physicalAngle + speed * dtSec, safeMinDegree, safeMaxDegree);
@@ -587,6 +615,9 @@ float Servo::tune(uint8_t param, bool set, float value) {
     if (!leadEnabled) return NAN;
     if (apply) leadFullSpeed = clampTo(0.1f, 50.0f);
     return leadFullSpeed;
+  case TUNE_SAG_PER_LOAD:
+    if (apply) sagPerLoad = clampTo(0.0f, 12.0f);
+    return sagPerLoad;
   default:
     return NAN;
   }
