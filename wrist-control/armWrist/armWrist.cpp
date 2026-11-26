@@ -557,8 +557,11 @@ ArmWrist::ArmWrist(const uint memsSdaPin, const uint memsSclPin,
   // (9.6) at 5 and 7.8 (12, capped) without, its error at 4.9 (9.9) against 5.1 (11.5), and it ended
   // 1.4deg off against 1.6. Its error on these moves is mostly its swing through the vertical.
   wristY.setSagPerLoad(3.0f);
-  // Its servo's lag, a little under the 0.089 s fitted - see STREAM_VELOCITY_LEAD_TAU_SEC.
-  wristY.setVelocityLead(0.08f);
+  // Its servo's lag (0.089 s fitted, see STREAM_VELOCITY_LEAD_TAU_SEC) - a little over it does best:
+  // measured live (2026-11-26, fast host moves vertical -> park -> down -> park -> vertical, twice each,
+  // interleaved) at 0.11 s it ran past its target by 1.5deg at most on average against 3.6 at 0.08 and
+  // 1.6 at 0.14, its error peaked at 4.6 against 5.3 and 5.1, and it settled 3.7 against 4.3 and 3.9.
+  wristY.setVelocityLead(0.11f);
   wristY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
   // Active damping of Y, like the shoulder's (see ArmShoulder's) - with it and the elbow's the whole
   // arm answers a push (2026-11-06). Its IMU is on I2C at 10 ms, so the rate is coarser.
