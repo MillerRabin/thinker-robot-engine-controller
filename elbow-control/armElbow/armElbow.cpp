@@ -371,7 +371,9 @@ constexpr float ELBOW_DITHER_DEG = 0.5f;
 constexpr float ELBOW_STREAM_GAIN = 1.0f;
 // The sag feed-forward, see STREAM_SAG_TAU_SEC: the elbow's sag at rest grew 6.9deg per unit of load
 // (6.1 under positive loads, 8.5 under negative, +-2-3deg by the side it came from) - a little under it,
-// the correction taking the rest the same way.
+// the correction taking the rest the same way. Not what leaves it short coming back from down to park:
+// at 6, 3.5 and 2.5 (2026-11-26, x2 interleaved) it ended 2.6-3.5deg short all the same, the
+// correction making up the difference mid-move.
 constexpr float ELBOW_SAG_PER_LOAD_DEG = 6.0f;
 constexpr uint16_t ELBOW_DITHER_HALF_PERIOD_MS = 20;
 
@@ -468,12 +470,16 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   elbowY.setDither(ELBOW_DITHER_DEG, ELBOW_DITHER_HALF_PERIOD_MS);
   elbowY.setStreamGain(ELBOW_STREAM_GAIN);
   elbowY.setSagPerLoad(ELBOW_SAG_PER_LOAD_DEG);
-  // Its servo's lag (~0.07 s fitted, see STREAM_VELOCITY_LEAD_TAU_SEC) - a little over it does best:
-  // measured live (2026-11-26, fast host moves vertical -> park -> down -> park -> vertical, twice each,
-  // interleaved) at 0.09 s its correction peaked at 2.4deg on average against 3.1 at 0.06 and 2.7 at
-  // 0.12, its error about the same (3.9-4.1), and the wrist - riding on the forearm - settled 2.3deg
-  // against 3.9 at 0.06 (2.2 at 0.12, where the elbow itself ended short more: settled 3.0 against 2.0).
-  elbowY.setVelocityLead(0.09f);
+  // Its servo's lag (~0.07 s fitted, see STREAM_VELOCITY_LEAD_TAU_SEC), a little under it. Measured
+  // live (2026-11-26, fast host moves vertical -> park -> down -> park -> vertical, twice each,
+  // interleaved): with the shoulder's sag uncompensated 0.09 did best - the wrist settled 2.3deg against
+  // 3.9 at 0.06 - but only by leading the forearm over the shoulder's 3deg lag: the elbow's correction
+  // took it up mid-move and still held it at the end, leaving the elbow short the more the higher the
+  // lead (down -> park: 1.7-2.3deg at 0.06, 2.6-4.3 at 0.09, 4.7 at 0.12). With the shoulder's sag
+  // fed forward (SHOULDER_SAG_PER_LOAD_DEG) 0.06 does better: the elbow's and the wrist's settles over a
+  // cycle 15.6deg against 17.7 at 0.09 - all but vertical -> park, where the elbow ran 2.6deg past
+  // against 0.9 (the arm leaves vertical only after calibration).
+  elbowY.setVelocityLead(0.06f);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
   // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
   // elbow's planned-move peak of ~28deg/s.

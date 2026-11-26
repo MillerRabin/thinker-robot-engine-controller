@@ -271,6 +271,17 @@ constexpr float SHOULDER_DAMPING_MAX_DEG = 5.0f;
 // wrist's dither once kept on at rest made shoulder Z hunt (2026-11-07).
 constexpr float SHOULDER_DITHER_DEG = 0.3f;
 constexpr uint16_t SHOULDER_DITHER_HALF_PERIOD_MS = 20;
+// The sag feed-forward, see STREAM_SAG_TAU_SEC. Measured live (2026-11-26, park <-> down, 6 s host
+// moves): without it the shoulder's correction ended at -8.1..-8.6 going down (load 0.02 -> 1.0) and
+// +8.3..+9.5 coming back - 8.6deg per unit of load, the same both ways - and while it built up the
+// shoulder lagged its plan 3.2deg, which the elbow, holding the forearm's absolute tilt, took for its
+// own. Interleaved x2 at 0, 9 and 6 on vertical -> park -> down -> park -> vertical: at 9 the
+// correction was left with 0.4-1.1deg, the lag going down 3.2 -> 1.5, but the shoulder ended
+// vertical -> park 1.8deg short and settled; at 6 the lag 2.0, the elbow's and the wrist's settles over
+// a cycle 19.8deg against 23.9 without (9: 20.1), no shoulder settle. Under it, the correction keeps
+// headroom for what the load doesn't explain - and a swing from one side to the other (load +1 -> -1,
+// ~17deg of sag) no longer runs the correction into STREAM_CORRECTION_MAX_DEG.
+constexpr float SHOULDER_SAG_PER_LOAD_DEG = 6.0f;
 
 Vector3 ArmShoulder::trackTick() {
   Vector3 imuAngles = getIMUAngles();
@@ -517,6 +528,7 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     shoulderY.setBreakawayLead(SHOULDER_LEAD_LIFT_DEG, SHOULDER_LEAD_LOWER_DEG);
     // Its servo's lag, a little under the 0.137 s fitted - see STREAM_VELOCITY_LEAD_TAU_SEC.
     shoulderY.setVelocityLead(0.12f);
+    shoulderY.setSagPerLoad(SHOULDER_SAG_PER_LOAD_DEG);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
     shoulderY.enableTrace();
 }
