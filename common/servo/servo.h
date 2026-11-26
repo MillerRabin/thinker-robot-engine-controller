@@ -215,6 +215,11 @@ private:
   float streamSagLoad0 = NAN;
   float streamSagLoadLP = NAN;
   float streamSag = 0.0f;
+  // The velocity lead (see setVelocityLead(), STREAM_VELOCITY_LEAD_TAU_SEC): s, the joint's own planned
+  // speed low-passed, and the lead in the command now.
+  float velocityLeadSec = 0.0f;       // TUNE_VELOCITY_LEAD
+  float streamOwnSpeedLP = 0.0f;
+  float streamVelLead = 0.0f;
   bool streamLeadLift = true;         // this stream lifts (against gravity), see setGravityLoad()
   float streamLeadLoad = 1.0f;        // this stream's load factor, 1 without the host's
   float leadDeg[2] = {0.0f, 0.0f};
@@ -508,6 +513,9 @@ public:
   // Move a stream's command by the sag's change as the gravity load changes along it: degPerLoad deg
   // lower (toward smaller commands) per unit of load more - see STREAM_SAG_TAU_SEC. 0: off.
   void setSagPerLoad(float degPerLoad) { sagPerLoad = degPerLoad; }
+  // Lead a stream's plan by the joint's own planned speed times sec - the servo's lag behind its
+  // command (see STREAM_VELOCITY_LEAD_TAU_SEC). 0: off.
+  void setVelocityLead(float sec) { velocityLeadSec = sec; }
   // The gravity torque on this joint now, from the host (CAN_GRAVITY_LOADS): a share of its reference
   // load, positive pulling it toward growing commands. A stream against it lifts, with it lowers, and
   // takes that lead times |load| (see ELBOW_LEAD_LIFT_DEG).

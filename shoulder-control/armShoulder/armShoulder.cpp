@@ -515,6 +515,8 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     shoulderY.setDither(SHOULDER_DITHER_DEG, SHOULDER_DITHER_HALF_PERIOD_MS);
     shoulderY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
     shoulderY.setBreakawayLead(SHOULDER_LEAD_LIFT_DEG, SHOULDER_LEAD_LOWER_DEG);
+    // Its servo's lag, a little under the 0.137 s fitted - see STREAM_VELOCITY_LEAD_TAU_SEC.
+    shoulderY.setVelocityLead(0.12f);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
     shoulderY.enableTrace();
 }

@@ -379,6 +379,16 @@
 // A load this recent at a stream's first waypoint is the one it starts under; else the first to come
 // after it (the host sends a waypoint's load right after it - its CAN send loop goes by id).
 #define STREAM_SAG_LOAD_START_MS 50
+// The velocity lead (Servo::setVelocityLead()): a servo's link runs behind its command by its speed
+// times its own time constant - fitted live (2026-11-23, the stream traces of four 2.9 s moves from
+// vertical to the parking pose, the link past 15deg/s, up to 50-75deg/s): the shoulder 0.137 s (0.134-
+// 0.142), the elbow ~0.07 (0.05-0.09, its own angle from two modules' traces), the wrist 0.089 (0.082-
+// 0.097). Without a lead the stream correction learned that lag as it accelerated - +6deg at the
+// shoulder, -7 at the wrist - and still held it when the setpoint braked: the shoulder arrived 3.1-
+// 3.5deg past its target, the wrist 5-6 (8.5-12 after the shoulder's settle). The lead goes with the
+// speed: in as the plan speeds up, out as it brakes. The joint's own planned speed (its parent's taken
+// out), low-passed over STREAM_VELOCITY_LEAD_TAU_SEC - the waypoints' speeds come in 100 ms steps.
+#define STREAM_VELOCITY_LEAD_TAU_SEC 0.05f
 // The values to start from, below what it took (at the host's reference loads).
 #define ELBOW_LEAD_LIFT_DEG 4.0f
 #define ELBOW_LEAD_LOWER_DEG 0.5f

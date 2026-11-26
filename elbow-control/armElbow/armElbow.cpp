@@ -468,6 +468,8 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   elbowY.setDither(ELBOW_DITHER_DEG, ELBOW_DITHER_HALF_PERIOD_MS);
   elbowY.setStreamGain(ELBOW_STREAM_GAIN);
   elbowY.setSagPerLoad(ELBOW_SAG_PER_LOAD_DEG);
+  // Its servo's lag, a little under the ~0.07 s fitted - see STREAM_VELOCITY_LEAD_TAU_SEC.
+  elbowY.setVelocityLead(0.06f);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
   // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
   // elbow's planned-move peak of ~28deg/s.

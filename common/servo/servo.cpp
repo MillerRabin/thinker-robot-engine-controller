@@ -194,6 +194,8 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     }
     streamSagLoadLP = streamSagLoad0;
     streamSag = 0.0f;
+    streamOwnSpeedLP = 0.0f;
+    streamVelLead = 0.0f;
     streamActive = true;
     // Each stream's start is traced, whatever its first step: its waypoints move the target by far
     // less than traceMinMoveDeg each, so setTargetAngle() never would.
@@ -346,7 +348,7 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
         // How far the plan had got ahead of a link that tracked from the start, and what the
         // correction had added meanwhile: both are lead it went without.
         streamLeadMissing = (streamSetpoint - streamLeadFrom) * streamLeadDir - STREAM_LEAD_BREAK_DEG +
-                            (streamCorrection + streamSag) * streamLeadDir;
+                            (streamCorrection + streamSag + streamVelLead) * streamLeadDir;
         streamBrokeAt = now;
         streamLeadScaleBroke = streamLeadScale;
       }
@@ -422,7 +424,17 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     sagSpeed = (sag - streamSag) / dtSec;
     streamSag = sag;
   }
-  float speed = streamLinkSpeed + shiftSpeed - parentPlannedSpeed + correctionSpeed + leadSpeed + sagSpeed;
+  // The velocity lead (see STREAM_VELOCITY_LEAD_TAU_SEC).
+  float velSpeed = 0.0f;
+  if (velocityLeadSec > 0.0f && dtSec > 0.0f) {
+    streamOwnSpeedLP += (streamLinkSpeed - parentPlannedSpeed - streamOwnSpeedLP) *
+                        std::min(dtSec / STREAM_VELOCITY_LEAD_TAU_SEC, 1.0f);
+    const float lead = velocityLeadSec * streamOwnSpeedLP;
+    velSpeed = (lead - streamVelLead) / dtSec;
+    streamVelLead = lead;
+  }
+  float speed = streamLinkSpeed + shiftSpeed - parentPlannedSpeed + correctionSpeed + leadSpeed + sagSpeed +
+                velSpeed;
   speed = std::clamp(speed, -maxAngularSpeed, maxAngularSpeed);
   appliedSpeedDegPerSec = speed;
   physicalAngle = std::clamp(physicalAngle + speed * dtSec, safeMinDegree, safeMaxDegree);
@@ -618,6 +630,9 @@ float Servo::tune(uint8_t param, bool set, float value) {
   case TUNE_SAG_PER_LOAD:
     if (apply) sagPerLoad = clampTo(0.0f, 12.0f);
     return sagPerLoad;
+  case TUNE_VELOCITY_LEAD:
+    if (apply) velocityLeadSec = clampTo(0.0f, 0.3f);
+    return velocityLeadSec;
   default:
     return NAN;
   }
