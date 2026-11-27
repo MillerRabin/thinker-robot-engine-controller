@@ -383,6 +383,12 @@
 // 1.1-1.4 short; from "down" (load 1) the full 4.6 broke it away on time but kept it ~2deg ahead till
 // the braking took the lead out, and it lagged ~2 at the end. So a floor under the load factor, and the
 // lead out over a set time once the link has broken away (it only has to unstick it).
+// STREAM_LEAD_KINETIC (Servo::setLeadKinetic(), setLeadArrive()): the floor and the fade alone didn't
+// help (2026-11-27: on time off, but stick-slip jumped it 2.3-3.5deg past, ends unchanged). Its end
+// is short because the lead and the velocity lead go out as the plan brakes, while the link, held by
+// friction, still trails: at the end of vertical -> park its command sat 0.2deg past the target with
+// the link 2deg short, and the servo didn't close that. So a share of the lead stays on once it's
+// moving (kinetic friction), and goes out as the link arrives rather than as the plan brakes.
 // The sag feed-forward (Servo::setSagPerLoad()): a servo holds its link short of its command by more
 // the harder gravity pulls - measured live (2026-11-23, 6 poses each way, the command against the joint
 // angle from the IMUs at rest) the elbow ~6.9deg and the wrist ~5.9deg further per unit of the host's
@@ -415,8 +421,10 @@
 // before it moved - 2.4 s of 4 - and the arm then dropped 4deg in 0.4 s, which the elbow, holding the
 // forearm's tilt, could only take as a 4deg run past its own setpoint. Started lower than the elbow:
 // it swings the whole arm when it lets go.
-#define SHOULDER_LEAD_LIFT_DEG 3.0f
-#define SHOULDER_LEAD_LOWER_DEG 0.5f
+// Then (2026-11-27) both learned to ~4.5 - its start sticks by friction either way - and with the
+// friction model (STREAM_LEAD_KINETIC, armShoulder.cpp) they're held there, learning off.
+#define SHOULDER_LEAD_LIFT_DEG 4.5f
+#define SHOULDER_LEAD_LOWER_DEG 4.5f
 
 #define FLASH_EEPROM_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_EEPROM_SIZE FLASH_SECTOR_SIZE

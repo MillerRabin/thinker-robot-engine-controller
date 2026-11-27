@@ -54,7 +54,9 @@
 #define TUNE_LEAD_CROSS_LOAD 29     // load, Servo::setLeadCrossLoad() (0 = off)
 #define TUNE_LEAD_MIN_LOAD 30       // load, Servo::setLeadMinLoad() (0 = off)
 #define TUNE_LEAD_BREAK_FADE 31     // s, Servo::setLeadBreakFade() (0 = off)
-#define TUNE_PARAM_COUNT 31
+#define TUNE_LEAD_KINETIC 32        // share, Servo::setLeadKinetic() (0 = off)
+#define TUNE_LEAD_ARRIVE 33         // deg, Servo::setLeadArrive() (0 = off)
+#define TUNE_PARAM_COUNT 33
 
 struct TuneRequest {
   uint8_t joint;

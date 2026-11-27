@@ -186,6 +186,7 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamLeadCross = 1.0f;
     streamLeadCrossBroke = 1.0f;
     streamLeadCrossMin = 1.0f;
+    streamLeadEnding = 1.0f;
     streamLeadLoad = 1.0f;
     streamLeadLift = true;
     // The load the stream starts under: the host's CAN send loop goes by id, so a waypoint's load
@@ -361,10 +362,23 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
       float broke = 1.0f;
       if (leadBreakFadeSec > 0.0f && !isnan(streamLeadMissing)) {
         const float x = std::min(absolute_time_diff_us(streamBrokeAt, now) / (leadBreakFadeSec * 1000000.0f), 1.0f);
-        broke = 1.0f - x * x * (3.0f - 2.0f * x);
+        broke = 1.0f - (1.0f - leadKineticShare) * x * x * (3.0f - 2.0f * x);
       }
-      const float lead = streamLeadTarget * tau * tau * (3.0f - 2.0f * tau) * (1.0f - streamEndWeightLP) *
-                         streamLeadScale * streamLeadCross * broke;
+      // Out as the plan brakes - or, kept for friction (see STREAM_LEAD_KINETIC), as the link closes the
+      // last leadArriveDeg to the target: the braking took it out while the link still had ~2deg to go,
+      // and the servo wouldn't close that.
+      // Only once the setpoint has arrived (streamTarget is then the move's last waypoint, before it the
+      // next one - a link trailing it by a step would read as short), and only ever down.
+      float ending = 1.0f - streamEndWeightLP;
+      if (leadArriveDeg > 0.0f) {
+        if (absolute_time_diff_us(now, streamReachAt) <= 0) {
+          const float y = std::clamp((streamTarget - imuAngle) * streamLeadDir / leadArriveDeg, 0.0f, 1.0f);
+          streamLeadEnding = std::min(streamLeadEnding, y * y * (3.0f - 2.0f * y));
+        }
+        ending = streamLeadEnding;
+      }
+      const float lead = streamLeadTarget * tau * tau * (3.0f - 2.0f * tau) * ending * streamLeadScale *
+                         streamLeadCross * broke;
       leadSpeed = streamLeadDir * (lead - streamLead) / dtSec;
       streamLead = lead;
       const float along = (imuAngle - streamStartIMU) * streamLeadDir;
@@ -670,6 +684,14 @@ float Servo::tune(uint8_t param, bool set, float value) {
     if (!leadEnabled) return NAN;
     if (apply) leadBreakFadeSec = clampTo(0.0f, 2.0f);
     return leadBreakFadeSec;
+  case TUNE_LEAD_KINETIC:
+    if (!leadEnabled) return NAN;
+    if (apply) leadKineticShare = clampTo(0.0f, 1.0f);
+    return leadKineticShare;
+  case TUNE_LEAD_ARRIVE:
+    if (!leadEnabled) return NAN;
+    if (apply) leadArriveDeg = clampTo(0.0f, 10.0f);
+    return leadArriveDeg;
   default:
     return NAN;
   }

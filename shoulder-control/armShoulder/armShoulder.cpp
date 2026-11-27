@@ -526,8 +526,22 @@ ArmShoulder::ArmShoulder(uint memsSCKPin, uint memsMISOPin, uint memsMOSIPin,
     shoulderY.setDither(SHOULDER_DITHER_DEG, SHOULDER_DITHER_HALF_PERIOD_MS);
     shoulderY.setHoldHysteresis(HOLD_WAKE_DEG, HOLD_WAKE_MS, HOLD_WAKE_NOW_DEG);
     shoulderY.setBreakawayLead(SHOULDER_LEAD_LIFT_DEG, SHOULDER_LEAD_LOWER_DEG);
-    // Its servo's lag, a little under the 0.137 s fitted - see STREAM_VELOCITY_LEAD_TAU_SEC.
-    shoulderY.setVelocityLead(0.12f);
+    // Its friction, static then kinetic (see STREAM_LEAD_KINETIC): the full lead at any load to break
+    // away, 0.45 of it (~2deg) kept moving from 0.3 s after, the rest out as the link closes the last
+    // 1.5deg once the setpoint has arrived; the velocity lead down to 0.08 s with the kinetic part
+    // carrying what it had (0.12 ran it 1.9deg ahead at 50deg/s). Measured live (2026-11-27, host
+    // moves vertical -> park -> down (6 s) -> park (6 s) -> vertical, leads 4.5, twice each, against
+    // the old lead and 0.12): vertical -> park ended 0.2-0.4deg short against 1.1-1.6, the others within
+    // 0.6; its correction did 0.1-0.5deg in the 6 s moves against 2.4-3.0; the elbow's settles over a
+    // cycle 2.9deg against 5.0, the wrist's about the same (7.9 against 8.0: down -> park worse, 4.0-5.2
+    // against 2.5-2.7, park -> vertical better, 0.9-1.4 against 3.7-3.8). The learning is off: it was
+    // never tried with this model, and the leads it found (~4.5) are these.
+    shoulderY.setLeadLearn(false);
+    shoulderY.setLeadMinLoad(1.0f);
+    shoulderY.setLeadBreakFade(0.3f);
+    shoulderY.setLeadKinetic(0.45f);
+    shoulderY.setLeadArrive(1.5f);
+    shoulderY.setVelocityLead(0.08f);
     shoulderY.setSagPerLoad(SHOULDER_SAG_PER_LOAD_DEG);
     // Sway diagnosis: does the command swing with the IMU, and which one lags (2026-11-02).
     shoulderY.enableTrace();

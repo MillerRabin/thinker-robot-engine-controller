@@ -241,6 +241,9 @@ private:
   float streamLeadCrossMin = 1.0f;    // ... at least, while the lead was armed (for the log)
   float leadMinLoad = 0.0f;           // TUNE_LEAD_MIN_LOAD, see setLeadMinLoad()
   float leadBreakFadeSec = 0.0f;      // TUNE_LEAD_BREAK_FADE, see setLeadBreakFade()
+  float leadKineticShare = 0.0f;      // TUNE_LEAD_KINETIC, see setLeadKinetic()
+  float leadArriveDeg = 0.0f;         // TUNE_LEAD_ARRIVE, see setLeadArrive()
+  float streamLeadEnding = 1.0f;      // the share of the lead the link's arrival leaves (only ever down)
   // After a stream the hold corrects at no more than STREAM_SETTLE_SPEED_DEG_PER_SEC until it settles.
   bool gentleHold = false;
   absolute_time_t streamReachAt = 0;
@@ -526,12 +529,20 @@ public:
   // (see STREAM_LEAD_CROSS_LOAD): all of it while the load it was taken for is still this far that way
   // (in units of the reference load), none once it's gone. 0: off - the lead stays till the braking.
   void setLeadCrossLoad(float load) { leadCrossLoad = load; }
+  // Learn the break-away leads from each stream (TUNE_LEAD_LEARN) - on unless a module turns it off.
+  void setLeadLearn(bool on) { leadLearn = on; }
   // A break-away lead of at least this share of the reference one whatever the load (see
   // STREAM_LEAD_MIN_LOAD): a joint whose start sticks by friction more than by gravity. 0: off.
   void setLeadMinLoad(float load) { leadMinLoad = load; }
   // Take the break-away lead out over sec once the link has broken away (see STREAM_LEAD_MIN_LOAD):
   // moving, friction drops and a lead left in is a run ahead. 0: off - it stays till the braking.
   void setLeadBreakFade(float sec) { leadBreakFadeSec = sec; }
+  // What that fade leaves of the lead while the link moves: kinetic friction, less than the static
+  // that held it at the start (see STREAM_LEAD_KINETIC). 0: all of it goes.
+  void setLeadKinetic(float share) { leadKineticShare = share; }
+  // Keep the lead till the link is within deg of the stream's target, and out on a smoothstep over
+  // that last stretch - instead of out as the plan brakes (see STREAM_LEAD_KINETIC). 0: off.
+  void setLeadArrive(float deg) { leadArriveDeg = deg; }
   // The gravity torque on this joint now, from the host (CAN_GRAVITY_LOADS): a share of its reference
   // load, positive pulling it toward growing commands. A stream against it lifts, with it lowers, and
   // takes that lead times |load| (see ELBOW_LEAD_LIFT_DEG).
