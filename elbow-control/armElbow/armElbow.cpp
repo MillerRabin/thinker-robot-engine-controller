@@ -479,7 +479,16 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   // fed forward (SHOULDER_SAG_PER_LOAD_DEG) 0.06 does better: the elbow's and the wrist's settles over a
   // cycle 15.6deg against 17.7 at 0.09 - all but vertical -> park, where the elbow ran 2.6deg past
   // against 0.9 (the arm leaves vertical only after calibration).
-  elbowY.setVelocityLead(0.06f);
+  // Then with the lift lead fading at the load crossing (2026-11-27, the same cycle, 0.06/0.09/0.12 x2,
+  // then 0.12 against the sag gain): at 0.06 the joint lagged its plan by a further ~0.04 s x its
+  // planned speed in every move (2.3deg at 55deg/s), so the servo's lag is ~0.1 s, not the 0.07 the
+  // first fit gave; at 0.12 it tracked within ~0.5deg moving. The correction had been integrating that
+  // lag and, frozen at the end, ran the elbow past: vertical -> park 2.2deg past and a 2.1 settle at
+  // 0.06, 0.9 past and none at 0.12 (the wrist's settle 3.0 -> 1.3-2.1). Down -> park gets worse, 1.2
+  // short and a 1.0 settle against none: there the windup had been cancelling the shoulder catching
+  // up at the end (it lags ~2deg braking, the elbow's correction holds the forearm against that, then
+  // the shoulder comes up). The elbow's and the wrist's settles over a cycle 8.6-9.6deg against 11.
+  elbowY.setVelocityLead(0.12f);
   // The lift lead out as the load turns over (STREAM_LEAD_CROSS_LOAD): measured live (2026-11-27, host
   // moves vertical -> park -> down (6 s) -> park (6 s) -> vertical, the lift lead held at 4, 0 six
   // times, 0.2 and 0.4 twice each): down -> park the elbow ended 0.5-0.6deg short against 2.2-2.9 and
