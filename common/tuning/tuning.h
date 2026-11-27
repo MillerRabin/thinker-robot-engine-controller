@@ -51,7 +51,8 @@
 #define TUNE_LEAD_FULL_SPEED 26     // deg/s, see STREAM_LEAD_FULL_SPEED_DEG_PER_SEC
 #define TUNE_SAG_PER_LOAD 27        // deg per unit of load, Servo::setSagPerLoad() (0 = off)
 #define TUNE_VELOCITY_LEAD 28       // s, Servo::setVelocityLead() (0 = off)
-#define TUNE_PARAM_COUNT 28
+#define TUNE_LEAD_CROSS_LOAD 29     // load, Servo::setLeadCrossLoad() (0 = off)
+#define TUNE_PARAM_COUNT 29
 
 struct TuneRequest {
   uint8_t joint;

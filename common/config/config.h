@@ -364,6 +364,17 @@
 // reference load. The load factor is bounded by STREAM_LEAD_LOAD_MAX.
 #define GRAVITY_LOAD_FRESH_MS 500
 #define STREAM_LEAD_LOAD_MAX 2.5f
+// STREAM_LEAD_CROSS_LOAD (Servo::setLeadCrossLoad(), TUNE_LEAD_CROSS_LOAD): a lift's lead is the gear
+// pressed to its lifting side - once the load turns over to the other side of the joint, gravity takes
+// the link across the backlash by itself and the lead is a run ahead. Measured live (2026-11-26, the
+// elbow from down to park: its load 1.05 -> -0.6, through zero 2.9 s into the 6 s move): with the lift
+// lead (4 at the reference load) the forearm ran ~1.2deg ahead past the crossing, its correction took
+// that up, and the lead going out as the plan braked left the elbow 2.3-2.9deg short (settles 2-3, the
+// wrist's 3.1-3.6 after them); without the lead it ended 0.5 short (no settle, the wrist's 0.9-1.2) -
+// but one start stood still till its command was 7.2deg ahead. So it goes out as the load the lead was
+// taken for falls from this far that way (in units of the reference load) to none, on a smoothstep - a
+// lift toward vertical keeps it till about the end, as the braking would. Off unless a module sets it
+// (the elbow 0.4: down -> park 0.5deg short with no settle, see armElbow.cpp).
 // The sag feed-forward (Servo::setSagPerLoad()): a servo holds its link short of its command by more
 // the harder gravity pulls - measured live (2026-11-23, 6 poses each way, the command against the joint
 // angle from the IMUs at rest) the elbow ~6.9deg and the wrist ~5.9deg further per unit of the host's

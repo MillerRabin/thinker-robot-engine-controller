@@ -480,6 +480,14 @@ ArmElbow::ArmElbow(const uint memsSCKPin, const uint memsMISOPin,
   // cycle 15.6deg against 17.7 at 0.09 - all but vertical -> park, where the elbow ran 2.6deg past
   // against 0.9 (the arm leaves vertical only after calibration).
   elbowY.setVelocityLead(0.06f);
+  // The lift lead out as the load turns over (STREAM_LEAD_CROSS_LOAD): measured live (2026-11-27, host
+  // moves vertical -> park -> down (6 s) -> park (6 s) -> vertical, the lift lead held at 4, 0 six
+  // times, 0.2 and 0.4 twice each): down -> park the elbow ended 0.5-0.6deg short against 2.2-2.9 and
+  // neither it nor the wrist settled (2.0-2.8 and 2.8-3.8 at 0); park -> down 0.4 ended 0.0-0.1 short
+  // with no settle (0.2: 0.3-0.8). Park -> vertical the elbow ran 1.6-3.2deg past against 0.9-1.3 - the
+  // lead goes as the load does there and its correction, frozen at the end, is the bigger for it - but
+  // the arm goes vertical only for calibration and power-off. Breaking away was no worse.
+  elbowY.setLeadCrossLoad(0.4f);
   // Same as the shoulder's (2026-11-05): with the defaults the elbow trailed vertical by a median 7deg,
   // p90 22deg, on a platform tilting at 10-30deg/s. 40deg/s matches the wrist and stays above the
   // elbow's planned-move peak of ~28deg/s.

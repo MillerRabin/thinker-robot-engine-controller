@@ -183,6 +183,9 @@ bool Servo::streamTo(const float angle, uint16_t newTimeMS, float newDeadZone) {
     streamLeadScale = 0.0f;
     streamLeadScaleBroke = 1.0f;
     streamLeadScalePeak = 0.0f;
+    streamLeadCross = 1.0f;
+    streamLeadCrossBroke = 1.0f;
+    streamLeadCrossMin = 1.0f;
     streamLeadLoad = 1.0f;
     streamLeadLift = true;
     // The load the stream starts under: the host's CAN send loop goes by id, so a waypoint's load
@@ -257,9 +260,10 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
       if (streamLeadDir != 0) {
         const int side = streamLeadLift ? 0 : 1;
         // The part of the lead a slow setpoint held back at the break-away (its speed scale) was needed
-        // all the same: what's learned is the whole lead, not what a slow move takes of it.
+        // all the same: what's learned is the whole lead, not what a slow move takes of it. Likewise
+        // what the load's side held back (a start near balance, see STREAM_LEAD_CROSS_LOAD).
         const float missing = streamLeadMissing - std::max(streamLeadAhead - STREAM_LEAD_BREAK_DEG, 0.0f) -
-                              streamLeadTarget * (1.0f - streamLeadScaleBroke);
+                              streamLeadTarget * (1.0f - streamLeadScaleBroke * streamLeadCrossBroke);
         const bool learn = leadLearn && !isnan(streamLeadMissing) &&
                            fabsf(streamTarget - streamStartIMU) >= STREAM_LEAD_LEARN_MIN_TRAVEL_DEG;
         if (learn) {
@@ -276,6 +280,10 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
                       isnan(streamLeadMissing) ? streamLeadScalePeak : streamLeadScaleBroke,
                       isnan(streamLeadMissing) ? " at most" : "", streamLeadMissing, streamLeadAhead,
                       leadDeg[side], learn ? "" : " (kept)");
+        if (streamLeadCrossMin < 0.99f) {
+          LogQueue::Log("Servo pin=%u stream lead down to x%.2f as the load turned over (x%.2f at the "
+                        "break-away)\n", pin, streamLeadCrossMin, streamLeadCrossBroke);
+        }
       }
       streamActive = false;
       gentleHold = true;
@@ -335,12 +343,22 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
     }
     if (streamLeadDir != 0) {
       streamLeadScalePeak = std::max(streamLeadScalePeak, streamLeadScale);
+      // Out as the load turns over (see STREAM_LEAD_CROSS_LOAD): the share of leadCrossLoad the load
+      // the lead was taken for is still that way, on a smoothstep. Held while no fresh load comes.
+      if (leadCrossLoad > 0.0f && gravityLoadFresh(now)) {
+        const float against = -(float)streamLeadDir * gravityLoad;  // > 0: lifting, < 0: lowering
+        const float x = std::clamp((streamLeadLift ? against : -against) / leadCrossLoad, 0.0f, 1.0f);
+        streamLeadCross = x * x * (3.0f - 2.0f * x);
+      } else if (leadCrossLoad <= 0.0f) {
+        streamLeadCross = 1.0f;
+      }
+      streamLeadCrossMin = std::min(streamLeadCrossMin, streamLeadCross);
       const float tau = std::min(absolute_time_diff_us(streamLeadAt, now) / (STREAM_LEAD_FADE_SEC * 1000000.0f), 1.0f);
       // Out again as the setpoint brakes (the end shift's weight, last tick's): braking, the motor
       // needs less than it took to drive the link, and the lead left in the command is a run past. And
       // only as much as the setpoint's speed asks for: a slow, short correction isn't a move to lead.
       const float lead = streamLeadTarget * tau * tau * (3.0f - 2.0f * tau) * (1.0f - streamEndWeightLP) *
-                         streamLeadScale;
+                         streamLeadScale * streamLeadCross;
       leadSpeed = streamLeadDir * (lead - streamLead) / dtSec;
       streamLead = lead;
       const float along = (imuAngle - streamStartIMU) * streamLeadDir;
@@ -351,6 +369,7 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
                             (streamCorrection + streamSag + streamVelLead) * streamLeadDir;
         streamBrokeAt = now;
         streamLeadScaleBroke = streamLeadScale;
+        streamLeadCrossBroke = streamLeadCross;
       }
       if (!isnan(streamLeadMissing) &&
           absolute_time_diff_us(streamBrokeAt, now) <= (int64_t)(STREAM_LEAD_AHEAD_SEC * 1000000.0f)) {
@@ -633,6 +652,10 @@ float Servo::tune(uint8_t param, bool set, float value) {
   case TUNE_VELOCITY_LEAD:
     if (apply) velocityLeadSec = clampTo(0.0f, 0.3f);
     return velocityLeadSec;
+  case TUNE_LEAD_CROSS_LOAD:
+    if (!leadEnabled) return NAN;
+    if (apply) leadCrossLoad = clampTo(0.0f, 2.0f);
+    return leadCrossLoad;
   default:
     return NAN;
   }
