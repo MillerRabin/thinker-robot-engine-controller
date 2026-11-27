@@ -239,6 +239,8 @@ private:
   float streamLeadCross = 1.0f;       // the share of the lead the load's side leaves it, last tick
   float streamLeadCrossBroke = 1.0f;  // ... when the link broke away
   float streamLeadCrossMin = 1.0f;    // ... at least, while the lead was armed (for the log)
+  float leadMinLoad = 0.0f;           // TUNE_LEAD_MIN_LOAD, see setLeadMinLoad()
+  float leadBreakFadeSec = 0.0f;      // TUNE_LEAD_BREAK_FADE, see setLeadBreakFade()
   // After a stream the hold corrects at no more than STREAM_SETTLE_SPEED_DEG_PER_SEC until it settles.
   bool gentleHold = false;
   absolute_time_t streamReachAt = 0;
@@ -524,6 +526,12 @@ public:
   // (see STREAM_LEAD_CROSS_LOAD): all of it while the load it was taken for is still this far that way
   // (in units of the reference load), none once it's gone. 0: off - the lead stays till the braking.
   void setLeadCrossLoad(float load) { leadCrossLoad = load; }
+  // A break-away lead of at least this share of the reference one whatever the load (see
+  // STREAM_LEAD_MIN_LOAD): a joint whose start sticks by friction more than by gravity. 0: off.
+  void setLeadMinLoad(float load) { leadMinLoad = load; }
+  // Take the break-away lead out over sec once the link has broken away (see STREAM_LEAD_MIN_LOAD):
+  // moving, friction drops and a lead left in is a run ahead. 0: off - it stays till the braking.
+  void setLeadBreakFade(float sec) { leadBreakFadeSec = sec; }
   // The gravity torque on this joint now, from the host (CAN_GRAVITY_LOADS): a share of its reference
   // load, positive pulling it toward growing commands. A stream against it lifts, with it lowers, and
   // takes that lead times |load| (see ELBOW_LEAD_LIFT_DEG).

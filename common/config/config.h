@@ -375,6 +375,14 @@
 // taken for falls from this far that way (in units of the reference load) to none, on a smoothstep - a
 // lift toward vertical keeps it till about the end, as the braking would. Off unless a module sets it
 // (the elbow 0.4: down -> park 0.5deg short with no settle, see armElbow.cpp).
+// STREAM_LEAD_MIN_LOAD (Servo::setLeadMinLoad(), setLeadBreakFade()): the shoulder's start sticks by
+// friction, gravity or not. Measured live (2026-11-27, host moves vertical -> park -> down -> park ->
+// vertical, its lead learning on): both its leads learned to ~4.5deg, but a lead goes times the load at
+// the start, and at park and vertical the shoulder's is 0.02-0.05 - it stood still till its plan was
+// 1-2.8deg ahead, its correction took that up and ran it ahead after (to -1.5 at 50deg/s), and it ended
+// 1.1-1.4 short; from "down" (load 1) the full 4.6 broke it away on time but kept it ~2deg ahead till
+// the braking took the lead out, and it lagged ~2 at the end. So a floor under the load factor, and the
+// lead out over a set time once the link has broken away (it only has to unstick it).
 // The sag feed-forward (Servo::setSagPerLoad()): a servo holds its link short of its command by more
 // the harder gravity pulls - measured live (2026-11-23, 6 poses each way, the command against the joint
 // angle from the IMUs at rest) the elbow ~6.9deg and the wrist ~5.9deg further per unit of the host's

@@ -337,7 +337,7 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
                          absolute_time_diff_us(gravityLoadAt, now) < (int64_t)GRAVITY_LOAD_FRESH_MS * 1000;
       const float load = fresh ? gravityLoad : 1.0f;
       streamLeadLift = streamLeadDir * load < 0.0f;
-      streamLeadLoad = std::min(fabsf(load), STREAM_LEAD_LOAD_MAX);
+      streamLeadLoad = std::min(std::max(fabsf(load), leadMinLoad), STREAM_LEAD_LOAD_MAX);
       streamLeadTarget = leadDeg[streamLeadLift ? 0 : 1] * streamLeadLoad;
       streamLeadAt = now;
     }
@@ -357,8 +357,14 @@ bool Servo::streamTick(absolute_time_t now, int64_t dtUs) {
       // Out again as the setpoint brakes (the end shift's weight, last tick's): braking, the motor
       // needs less than it took to drive the link, and the lead left in the command is a run past. And
       // only as much as the setpoint's speed asks for: a slow, short correction isn't a move to lead.
+      // And out once the link has broken away, where friction alone held it (see STREAM_LEAD_MIN_LOAD).
+      float broke = 1.0f;
+      if (leadBreakFadeSec > 0.0f && !isnan(streamLeadMissing)) {
+        const float x = std::min(absolute_time_diff_us(streamBrokeAt, now) / (leadBreakFadeSec * 1000000.0f), 1.0f);
+        broke = 1.0f - x * x * (3.0f - 2.0f * x);
+      }
       const float lead = streamLeadTarget * tau * tau * (3.0f - 2.0f * tau) * (1.0f - streamEndWeightLP) *
-                         streamLeadScale * streamLeadCross;
+                         streamLeadScale * streamLeadCross * broke;
       leadSpeed = streamLeadDir * (lead - streamLead) / dtSec;
       streamLead = lead;
       const float along = (imuAngle - streamStartIMU) * streamLeadDir;
@@ -656,6 +662,14 @@ float Servo::tune(uint8_t param, bool set, float value) {
     if (!leadEnabled) return NAN;
     if (apply) leadCrossLoad = clampTo(0.0f, 2.0f);
     return leadCrossLoad;
+  case TUNE_LEAD_MIN_LOAD:
+    if (!leadEnabled) return NAN;
+    if (apply) leadMinLoad = clampTo(0.0f, STREAM_LEAD_LOAD_MAX);
+    return leadMinLoad;
+  case TUNE_LEAD_BREAK_FADE:
+    if (!leadEnabled) return NAN;
+    if (apply) leadBreakFadeSec = clampTo(0.0f, 2.0f);
+    return leadBreakFadeSec;
   default:
     return NAN;
   }
